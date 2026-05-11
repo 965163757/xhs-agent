@@ -32,6 +32,7 @@ export interface Conversation {
   title: string
   article_id: number | null
   messages: ChatMessage[]
+  active_task_id: string | null
   created_at: string
   updated_at: string
 }
@@ -217,6 +218,10 @@ export async function listConversations(): Promise<Conversation[]> {
   const r = await api.get('/conversations')
   return r.data.items
 }
+export async function getConversation(id: number): Promise<Conversation> {
+  const r = await api.get(`/conversations/${id}`)
+  return r.data
+}
 export async function createConversation(payload: Partial<Conversation>): Promise<Conversation> {
   const r = await api.post('/conversations', payload)
   return r.data
@@ -249,6 +254,7 @@ export async function getMcpTools() {
 
 export type StreamEvent =
   | { type: 'token'; text: string }
+  | { type: 'task_id'; task_id: string }
   | { type: 'tool_call'; name: string; arguments: any; id: string }
   | { type: 'tool_result'; name: string; result: any; id: string }
   | { type: 'done'; text?: string }
@@ -257,14 +263,59 @@ export type StreamEvent =
 export async function chatStream(
   messages: ChatMessage[],
   onEvent: (ev: StreamEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  conversationId?: number | null
 ) {
   const res = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, conversation_id: conversationId || undefined }),
     signal,
   })
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+  if (!res.body) throw new Error('no stream body')
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() || ''
+    for (const part of parts) {
+      const line = part.trim()
+      if (!line.startsWith('data:')) continue
+      const payload = line.slice(5).trim()
+      if (payload === '[DONE]') return
+      try {
+        onEvent(JSON.parse(payload))
+      } catch (e) {
+        console.warn('bad sse payload', payload)
+      }
+    }
+  }
+}
+
+export interface TaskInfo {
+  id: string
+  conversation_id: number | null
+  status: 'running' | 'completed' | 'failed'
+  events: StreamEvent[]
+  result_text: string
+}
+
+export async function getTask(taskId: string): Promise<TaskInfo> {
+  const r = await api.get(`/tasks/${taskId}`)
+  return r.data
+}
+
+export async function streamTask(
+  taskId: string,
+  onEvent: (ev: StreamEvent) => void,
+  signal?: AbortSignal
+) {
+  const res = await fetch(`/api/tasks/${taskId}/stream`, { signal })
   if (!res.body) throw new Error('no stream body')
   const reader = res.body.getReader()
   const decoder = new TextDecoder('utf-8')

@@ -14,6 +14,7 @@ import {
   Typography,
   LinearProgress,
 } from '@mui/material'
+import { toast } from 'sonner'
 import CloseIcon from '@mui/icons-material/Close'
 import CropIcon from '@mui/icons-material/Crop'
 import BrushIcon from '@mui/icons-material/Brush'
@@ -257,7 +258,7 @@ export default function ImageEditor({
       const r = await cropImage({ image_url: src, ...cropBox, ...(binding || {}) })
       setResultUrl(r.image)
     } catch (e: any) {
-      alert(e?.message || '裁剪失败')
+      toast.error(e?.message || '裁剪失败')
     } finally {
       setBusy('')
     }
@@ -278,7 +279,7 @@ export default function ImageEditor({
       })
       setResultUrl(r.image)
     } catch (e: any) {
-      alert(e?.message || '重绘失败')
+      toast.error(e?.message || '重绘失败')
     } finally {
       setBusy('')
     }
@@ -298,7 +299,7 @@ export default function ImageEditor({
       })
       setResultUrl(r.image)
     } catch (e: any) {
-      alert(e?.message || '消除失败')
+      toast.error(e?.message || '消除失败')
     } finally {
       setBusy('')
     }
@@ -316,7 +317,7 @@ export default function ImageEditor({
       })
       setResultUrl(r.image)
     } catch (e: any) {
-      alert(e?.message || '编辑失败')
+      toast.error(e?.message || '编辑失败')
     } finally {
       setBusy('')
     }

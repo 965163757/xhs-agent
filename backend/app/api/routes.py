@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any, Dict, List
@@ -8,10 +9,11 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
+from ..agents.background import get_stream, is_running, spawn_agent_task
 from ..agents.runner import run_agent_stream
 from ..agents.tools import TOOLS, call_tool, openai_tool_schemas
 from ..config import get_settings, update_settings
-from ..database import Article, Conversation, SessionLocal, Template
+from ..database import Article, Conversation, SessionLocal, Task, Template
 from ..schemas import (
     ApplyTemplateRequest,
     ArticleIn,
@@ -46,17 +48,29 @@ router = APIRouter()
 
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
+    messages: List[Dict[str, Any]] = []
+    for m in req.messages:
+        messages.append(
+            {"role": m.role, "content": m.content, "images": m.images}
+        )
+
+    task_id = await spawn_agent_task(messages, conversation_id=req.conversation_id)
+
     async def event_gen():
-        messages: List[Dict[str, Any]] = []
-        for m in req.messages:
-            messages.append(
-                {"role": m.role, "content": m.content, "images": m.images}
-            )
+        stream = get_stream(task_id)
+        if not stream:
+            yield f"data: {json.dumps({'type':'error','message':'task not found'}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # First event: tell client the task_id
+        yield f"data: {json.dumps({'type':'task_id','task_id': task_id}, ensure_ascii=False)}\n\n"
+
         try:
-            async for ev in run_agent_stream(messages):
+            async for ev in stream.subscribe(from_index=0):
                 yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type':'error','message':str(e)}, ensure_ascii=False)}\n\n"
+        except asyncio.TimeoutError:
+            yield f"data: {json.dumps({'type':'error','message':'timeout'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
@@ -271,6 +285,15 @@ async def list_conversations():
         return {"items": [c.to_dict() for c in res.scalars().all()]}
 
 
+@router.get("/conversations/{cid}")
+async def get_conversation(cid: int):
+    async with SessionLocal() as s:
+        c = await s.get(Conversation, cid)
+        if not c:
+            raise HTTPException(404, "not found")
+        return c.to_dict()
+
+
 @router.post("/conversations")
 async def create_conversation(payload: Dict[str, Any]):
     async with SessionLocal() as s:
@@ -308,6 +331,48 @@ async def delete_conversation(cid: int):
         await s.delete(c)
         await s.commit()
         return {"ok": True}
+
+
+# ---------- tasks ----------
+
+@router.get("/tasks/{task_id}")
+async def get_task(task_id: str):
+    async with SessionLocal() as s:
+        t = await s.get(Task, task_id)
+        if not t:
+            raise HTTPException(404, "task not found")
+        return t.to_dict()
+
+
+@router.get("/tasks/{task_id}/stream")
+async def stream_task(task_id: str):
+    """Reconnect to a running task's event stream."""
+    async def event_gen():
+        if not is_running(task_id):
+            async with SessionLocal() as s:
+                t = await s.get(Task, task_id)
+            if t and t.status != "running":
+                yield f"data: {json.dumps({'type':'done','text': t.result_text or ''}, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {json.dumps({'type':'error','message':'task not found or already finished'}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        stream = get_stream(task_id)
+        if not stream:
+            yield f"data: {json.dumps({'type':'error','message':'task stream not available'}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        # Subscribe from current position (skip already-consumed events)
+        try:
+            async for ev in stream.subscribe(from_index=0):
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except asyncio.TimeoutError:
+            yield f"data: {json.dumps({'type':'error','message':'timeout'}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 
 # ---------- settings ----------

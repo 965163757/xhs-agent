@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import {
   Box,
+  Button,
   IconButton,
   Stack,
   TextField,
@@ -12,170 +13,72 @@ import {
 import SendRoundedIcon from '@mui/icons-material/SendRounded'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
 import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
+import ReplayIcon from '@mui/icons-material/Replay'
+import { uploadImage, type Article } from '../api/client'
+import MessageBubble from './MessageBubble'
 import {
-  chatStream,
-  uploadImage,
-  type ChatMessage,
-  type StreamEvent,
-  type Article,
-} from '../api/client'
-import MessageBubble, { type ToolEvent } from './MessageBubble'
+  abortSession,
+  getSession,
+  sendMessage,
+  sessionKeyFor,
+  setInput as storeSetInput,
+  setPendingImages as storeSetPendingImages,
+  subscribe,
+} from '../chatStore'
 
-export type UiMessage = ChatMessage & { tool_events?: ToolEvent[] }
-
-const toolLabel: Record<string, string> = {
-  generate_article: '生成笔记',
-  rewrite_article: '改写',
-  optimize_article: '优化',
-  polish_paragraph: '润色',
-  score_article: '打分',
-  diagnose_article: '诊断',
-  create_article: '创建',
-  update_article: '更新',
-  read_article: '读取',
-  list_articles: '列出',
-  delete_article: '删除',
-  generate_image: '配图',
-  remove_image: '删图',
-  suggest_tags: '标签',
-  suggest_titles: '标题',
-  outline_article: '大纲',
-  cover_prompt: '封面 Prompt',
-  content_image_prompt: '配图 Prompt',
-  list_templates: '模板',
-  apply_template: '应用模板',
-}
+export type HeroAction = { icon: string; title: string; prompt: string }
 
 export default function ChatPanel({
   article,
   onArticleMayChange,
+  onConversationCreated,
   quickActions,
+  heroActions,
+  heroTitle,
+  heroSubtitle,
   placeholder,
   height,
   showHeader = true,
+  sessionKey: sessionKeyProp,
 }: {
   article?: Article | null
   onArticleMayChange?: () => void
+  onConversationCreated?: (id: number) => void
   quickActions?: Array<{ label: string; prompt: string }>
+  heroActions?: HeroAction[]
+  heroTitle?: string
+  heroSubtitle?: string
   placeholder?: string
   height?: string | number
   showHeader?: boolean
+  sessionKey?: string
 }) {
-  const [messages, setMessages] = useState<UiMessage[]>([])
-  const [input, setInput] = useState('')
-  const [pendingImages, setPendingImages] = useState<string[]>([])
-  const [streaming, setStreaming] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [status, setStatus] = useState<string>('')
+  const sessionKey = sessionKeyProp || sessionKeyFor(article?.id)
 
+  // subscribe to the module-level store so messages/status survive unmount
+  const session = useSyncExternalStore(
+    cb => subscribe(sessionKey, cb),
+    () => getSession(sessionKey),
+    () => getSession(sessionKey),
+  )
+  const { messages, input, pendingImages, streaming, status } = session
+
+  const scrollRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' })
   }, [messages, streaming, status])
 
-  const buildContextPreface = (): UiMessage[] => {
-    if (!article) return []
-    const body = article.body || ''
-    const preview = body.length > 1200 ? body.slice(0, 1200) + '…' : body
-    return [
-      {
-        role: 'user',
-        content:
-          `【当前笔记上下文 · id=${article.id}】\n` +
-          `标题：${article.title}\n` +
-          `状态：${article.status}\n` +
-          `标签：${(article.tags || []).join(' ')}\n\n` +
-          `正文：\n${preview}\n\n` +
-          `---\n请把对「笔记 ${article.id}」的任何操作通过工具完成（read/update/rewrite/optimize/score/diagnose/generate_image/remove_image）。` +
-          `每次改写/优化前先 read_article 拿最新版。`,
-      },
-    ]
-  }
-
   async function handleSend(text?: string) {
-    const content = (text ?? input).trim()
-    if (!content && pendingImages.length === 0) return
-    const userMsg: UiMessage = { role: 'user', content, images: pendingImages.slice() }
-    const historyForUi = [...messages, userMsg]
-    setMessages(historyForUi)
-    setInput('')
-    setPendingImages([])
-    setStreaming(true)
-    setStatus('连接中…')
-
-    // messages sent to backend include an optional article-context preface
-    const outgoing: UiMessage[] = [...buildContextPreface(), ...historyForUi]
-
-    const assistant: UiMessage = { role: 'assistant', content: '', tool_events: [] }
-    setMessages(m => [...m, assistant])
-
-    const controller = new AbortController()
-    abortRef.current = controller
-    let gotFirstToken = false
-
-    try {
-      await chatStream(
-        outgoing,
-        (ev: StreamEvent) => {
-          if (ev.type === 'token') {
-            if (!gotFirstToken) {
-              gotFirstToken = true
-              setStatus('')
-            }
-          } else if (ev.type === 'tool_call') {
-            setStatus(`${toolLabel[ev.name] || ev.name}…`)
-          } else if (ev.type === 'tool_result') {
-            setStatus('整合结果…')
-            onArticleMayChange?.()
-          } else if (ev.type === 'done') {
-            setStatus('')
-          }
-          setMessages(m => {
-            const copy = m.slice()
-            const last = { ...copy[copy.length - 1] } as UiMessage
-            last.tool_events = last.tool_events ? [...last.tool_events] : []
-            if (ev.type === 'token') {
-              last.content += ev.text
-            } else if (ev.type === 'tool_call') {
-              last.tool_events.push({
-                type: 'tool_call',
-                name: ev.name,
-                arguments: ev.arguments,
-              })
-            } else if (ev.type === 'tool_result') {
-              last.tool_events.push({
-                type: 'tool_result',
-                name: ev.name,
-                result: ev.result,
-              })
-            } else if (ev.type === 'error') {
-              last.content += `\n\n⚠️ ${ev.message}`
-            }
-            copy[copy.length - 1] = last
-            return copy
-          })
-        },
-        controller.signal
-      )
-    } catch (e: any) {
-      setMessages(m => {
-        const copy = m.slice()
-        const last = { ...copy[copy.length - 1] }
-        last.content = (last.content || '') + `\n\n连接中断: ${e?.message || e}`
-        copy[copy.length - 1] = last
-        return copy
-      })
-    } finally {
-      setStreaming(false)
-      setStatus('')
-      abortRef.current = null
-      onArticleMayChange?.()
-    }
+    await sendMessage(sessionKey, text ?? input, {
+      article,
+      onArticleMayChange,
+      onConversationCreated,
+    })
   }
 
   async function handleUpload(file: File) {
     const url = await uploadImage(file)
-    setPendingImages(p => [...p, url])
+    storeSetPendingImages(sessionKey, [...pendingImages, url])
   }
 
   return (
@@ -220,6 +123,19 @@ export default function ChatPanel({
               sx={{ bgcolor: '#F4EFE5', fontSize: 11, height: 20, maxWidth: 160 }}
             />
           )}
+          {streaming && (
+            <Chip
+              size="small"
+              label="AI 工作中"
+              sx={{
+                bgcolor: '#FFF1B8',
+                color: '#92400e',
+                fontSize: 11,
+                height: 20,
+                fontWeight: 600,
+              }}
+            />
+          )}
         </Stack>
       )}
 
@@ -228,31 +144,130 @@ export default function ChatPanel({
         sx={{
           flex: 1,
           overflow: 'auto',
-          px: 2,
-          py: 1.5,
+          px: { xs: 2, md: 3 },
+          py: messages.length === 0 ? 0 : 3,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: messages.length === 0 ? 'center' : 'flex-start',
         }}
       >
         {messages.length === 0 && (
-          <Box sx={{ color: '#B8B4AB', fontSize: 13, mt: 1 }}>
+          <Box sx={{ maxWidth: 720, width: '100%', mx: 'auto', py: 4 }}>
             {article ? (
-              <Typography sx={{ fontSize: 13, color: '#8A8A8F', mb: 1.5 }}>
-                这里的对话会锁定「笔记 #{article.id}」上下文。你可以说：
-                <br />
-                · 把开头的钩子换得更戳痛点一些
-                <br />
-                · 加一段产品对比
-                <br />
-                · 把第 3 段润色一下
-                <br />
-                · 重新生成封面，要更干净
-              </Typography>
+              <>
+                <Typography
+                  sx={{
+                    fontSize: { xs: 26, md: 30 },
+                    fontWeight: 600,
+                    letterSpacing: -0.5,
+                    color: '#1F1F1F',
+                    textAlign: 'center',
+                  }}
+                >
+                  {heroTitle || `为笔记 #${article.id} 继续打磨`}
+                </Typography>
+                <Typography
+                  sx={{
+                    fontSize: 14,
+                    color: '#8A8A8F',
+                    mt: 1,
+                    textAlign: 'center',
+                  }}
+                >
+                  {heroSubtitle || '试试说：换个钩子、润色第 3 段、重新生成封面'}
+                </Typography>
+              </>
             ) : (
-              <Typography sx={{ fontSize: 13, color: '#8A8A8F' }}>
-                说出你的灵感，我会帮你创作、改写、打分、诊断和配图。
-              </Typography>
+              <>
+                <Typography
+                  sx={{
+                    fontSize: { xs: 28, md: 32 },
+                    fontWeight: 600,
+                    letterSpacing: -0.5,
+                    color: '#1F1F1F',
+                    textAlign: 'center',
+                  }}
+                >
+                  {heroTitle || '今天想写什么笔记？'}
+                </Typography>
+                <Typography
+                  sx={{
+                    fontSize: 14,
+                    color: '#8A8A8F',
+                    mt: 1,
+                    textAlign: 'center',
+                  }}
+                >
+                  {heroSubtitle || '说出你的灵感,我会帮你创作、改写、打分、诊断和配图。'}
+                </Typography>
+              </>
             )}
+
+            {heroActions && heroActions.length > 0 && (
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                  gap: 1.2,
+                  mt: 3,
+                }}
+              >
+                {heroActions.map(a => (
+                  <Box
+                    key={a.title}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => handleSend(a.prompt)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        handleSend(a.prompt)
+                      }
+                    }}
+                    sx={{
+                      textAlign: 'left',
+                      p: 1.6,
+                      border: '1px solid #EEE9E1',
+                      borderRadius: 2.5,
+                      bgcolor: '#fff',
+                      cursor: 'pointer',
+                      transition: 'all .15s',
+                      '&:hover': {
+                        borderColor: '#1F1F1F',
+                        bgcolor: '#FAF7F2',
+                        transform: 'translateY(-1px)',
+                      },
+                      '&:focus-visible': {
+                        outline: 'none',
+                        borderColor: '#1F1F1F',
+                        boxShadow: '0 0 0 3px rgba(31,31,31,0.08)',
+                      },
+                    }}
+                  >
+                    <Typography sx={{ fontSize: 18, lineHeight: 1 }}>{a.icon}</Typography>
+                    <Typography
+                      sx={{ fontSize: 13.5, fontWeight: 600, mt: 0.6, color: '#1F1F1F' }}
+                    >
+                      {a.title}
+                    </Typography>
+                    <Typography sx={{ fontSize: 12.5, color: '#8A8A8F', mt: 0.3 }}>
+                      {a.prompt}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            )}
+
             {quickActions && quickActions.length > 0 && (
-              <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.6, mt: 1 }}>
+              <Stack
+                direction="row"
+                sx={{
+                  flexWrap: 'wrap',
+                  gap: 0.8,
+                  mt: heroActions && heroActions.length > 0 ? 2 : 3,
+                  justifyContent: 'center',
+                }}
+              >
                 {quickActions.map(q => (
                   <Chip
                     key={q.label}
@@ -264,7 +279,7 @@ export default function ChatPanel({
                       bgcolor: '#fff',
                       border: '1px solid #EEE9E1',
                       fontSize: 12,
-                      height: 26,
+                      height: 28,
                       '&:hover': { bgcolor: '#FAF7F2', borderColor: '#B8B4AB' },
                     }}
                   />
@@ -274,106 +289,162 @@ export default function ChatPanel({
           </Box>
         )}
 
-        {messages.map((m, i) => (
-          <MessageBubble key={i} msg={m} />
-        ))}
+        {messages.length > 0 && (
+          <Box sx={{ maxWidth: 760, width: '100%', mx: 'auto' }}>
+            {messages.map((m, i) => (
+              <MessageBubble key={i} msg={m} />
+            ))}
 
-        {streaming && status && (
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ color: '#8A8A8F', mt: 0.5 }}>
-            <CircularProgress size={12} sx={{ color: '#1F1F1F' }} />
-            <Typography sx={{ fontSize: 12 }}>{status}</Typography>
-          </Stack>
+            {streaming && status && (
+              <Stack
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                sx={{ color: '#8A8A8F', mt: 0.5 }}
+              >
+                <CircularProgress size={12} sx={{ color: '#1F1F1F' }} />
+                <Typography sx={{ fontSize: 12 }}>{status}</Typography>
+              </Stack>
+            )}
+
+            {!streaming && messages.length >= 2 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].content?.includes('⚠️') && (
+              <Button
+                size="small"
+                startIcon={<ReplayIcon sx={{ fontSize: 14 }} />}
+                onClick={() => {
+                  const lastUser = [...messages].reverse().find(m => m.role === 'user')
+                  if (lastUser) handleSend(lastUser.content || '')
+                }}
+                sx={{ mt: 1, fontSize: 12, color: '#8A8A8F', textTransform: 'none' }}
+              >
+                重试
+              </Button>
+            )}
+          </Box>
         )}
       </Box>
 
-      <Box sx={{ px: 2, pb: 1.8, pt: 1, borderTop: '1px solid #f1f3f5' }}>
-        {pendingImages.length > 0 && (
-          <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', gap: 1 }}>
-            {pendingImages.map((u, i) => (
-              <Box
-                key={i}
-                component="img"
-                src={u}
-                sx={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 1,
-                  objectFit: 'cover',
-                  border: '1px solid #EEE9E1',
-                }}
-              />
-            ))}
-          </Stack>
-        )}
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'flex-end',
-            gap: 0.6,
-            border: '1px solid #d1d5db',
-            borderRadius: 2.5,
-            px: 1,
-            py: 0.5,
-            bgcolor: '#fff',
-            '&:focus-within': { borderColor: '#8A8A8F' },
-          }}
-        >
-          <Tooltip title="上传参考图">
-            <IconButton component="label" size="small" sx={{ color: '#8A8A8F' }}>
-              <ImageOutlinedIcon sx={{ fontSize: 18 }} />
-              <input
-                type="file"
-                hidden
-                accept="image/*"
-                onChange={e => {
-                  const f = e.target.files?.[0]
-                  if (f) handleUpload(f)
-                  e.target.value = ''
-                }}
-              />
-            </IconButton>
-          </Tooltip>
-          <TextField
-            multiline
-            minRows={1}
-            maxRows={6}
-            fullWidth
-            placeholder={placeholder || (article ? '继续对这篇笔记说…' : '说说你的想法')}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault()
-                handleSend()
-              }
-            }}
-            variant="standard"
-            InputProps={{
-              disableUnderline: true,
-              sx: { fontSize: 14, py: 0.3 },
-            }}
-          />
-          {streaming ? (
-            <IconButton size="small" onClick={() => abortRef.current?.abort()}>
-              <StopCircleIcon sx={{ fontSize: 22, color: '#1F1F1F' }} />
-            </IconButton>
-          ) : (
-            <IconButton
-              size="small"
-              onClick={() => handleSend()}
-              disabled={!input.trim() && pendingImages.length === 0}
-              sx={{
-                bgcolor: '#FF2741',
-                color: '#fff',
-                '&:hover': { bgcolor: '#D61030' },
-                '&.Mui-disabled': { bgcolor: '#EEE9E1', color: '#B8B4AB' },
-                width: 30,
-                height: 30,
-              }}
-            >
-              <SendRoundedIcon sx={{ fontSize: 16 }} />
-            </IconButton>
+      <Box sx={{ px: { xs: 2, md: 3 }, pb: 2.5, pt: 1.2 }}>
+        <Box sx={{ maxWidth: 760, mx: 'auto' }}>
+          {pendingImages.length > 0 && (
+            <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', gap: 1 }}>
+              {pendingImages.map((u, i) => (
+                <Box
+                  key={i}
+                  component="img"
+                  src={u}
+                  sx={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: 1.2,
+                    objectFit: 'cover',
+                    border: '1px solid #EEE9E1',
+                  }}
+                />
+              ))}
+            </Stack>
           )}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'flex-end',
+              gap: 0.4,
+              border: '1px solid #E6E0D4',
+              borderRadius: 28,
+              px: 1.2,
+              py: 0.8,
+              bgcolor: '#fff',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+              transition: 'border-color .15s, box-shadow .15s',
+              '&:focus-within': {
+                borderColor: '#1F1F1F',
+                boxShadow: '0 2px 8px rgba(31,31,31,0.06)',
+              },
+            }}
+          >
+            <Tooltip title="上传参考图">
+              <IconButton
+                component="label"
+                size="small"
+                sx={{ color: '#8A8A8F', alignSelf: 'center' }}
+              >
+                <ImageOutlinedIcon sx={{ fontSize: 20 }} />
+                <input
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  onChange={e => {
+                    const f = e.target.files?.[0]
+                    if (f) handleUpload(f)
+                    e.target.value = ''
+                  }}
+                />
+              </IconButton>
+            </Tooltip>
+            <TextField
+              multiline
+              minRows={1}
+              maxRows={8}
+              fullWidth
+              placeholder={placeholder || (article ? '继续对这篇笔记说…' : '发消息给小红书助手…')}
+              value={input}
+              onChange={e => storeSetInput(sessionKey, e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  handleSend()
+                }
+              }}
+              variant="standard"
+              InputProps={{
+                disableUnderline: true,
+                sx: { fontSize: 15, py: 0.6, lineHeight: 1.5 },
+              }}
+            />
+            {streaming ? (
+              <IconButton
+                size="small"
+                onClick={() => abortSession(sessionKey)}
+                sx={{
+                  bgcolor: '#1F1F1F',
+                  color: '#fff',
+                  width: 34,
+                  height: 34,
+                  alignSelf: 'center',
+                  '&:hover': { bgcolor: '#000' },
+                }}
+              >
+                <StopCircleIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            ) : (
+              <IconButton
+                size="small"
+                onClick={() => handleSend()}
+                disabled={!input.trim() && pendingImages.length === 0}
+                sx={{
+                  bgcolor: '#1F1F1F',
+                  color: '#fff',
+                  width: 34,
+                  height: 34,
+                  alignSelf: 'center',
+                  '&:hover': { bgcolor: '#000' },
+                  '&.Mui-disabled': { bgcolor: '#EEE9E1', color: '#B8B4AB' },
+                }}
+              >
+                <SendRoundedIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            )}
+          </Box>
+          <Typography
+            sx={{
+              mt: 1,
+              fontSize: 11,
+              color: '#B8B4AB',
+              textAlign: 'center',
+            }}
+          >
+            AI 可能会出错,重要内容请自行核实。Enter 发送 · Shift+Enter 换行
+          </Typography>
         </Box>
       </Box>
     </Box>

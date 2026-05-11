@@ -66,12 +66,31 @@ def to_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             parts: List[Dict[str, Any]] = []
             if content:
                 parts.append({"type": "text", "text": content})
+            # Tell the LLM the local paths so it can pass them to image editing tools
+            path_hints = "\n".join(f"[图片路径: {url}]" for url in images)
+            parts.append({"type": "text", "text": path_hints})
             for url in images:
-                parts.append({"type": "image_url", "image_url": {"url": url}})
+                parts.append({"type": "image_url", "image_url": {"url": _to_data_url(url)}})
             out.append({"role": role, "content": parts})
         else:
             out.append({"role": role, "content": content})
     return out
+
+
+def _to_data_url(url: str) -> str:
+    """Convert a local /static/images/... path to a base64 data URL for the LLM API.
+    If already a full http(s) or data: URL, return as-is."""
+    if url.startswith("http://") or url.startswith("https://") or url.startswith("data:"):
+        return url
+    # Local path like /static/images/xxx.png
+    path = _resolve_local_path(url)
+    if not path.exists():
+        return url
+    data = path.read_bytes()
+    suffix = path.suffix.lower()
+    mime = "image/png" if suffix == ".png" else "image/jpeg" if suffix in (".jpg", ".jpeg") else "image/webp" if suffix == ".webp" else "image/png"
+    b64 = base64.b64encode(data).decode()
+    return f"data:{mime};base64,{b64}"
 
 
 async def chat_completion(

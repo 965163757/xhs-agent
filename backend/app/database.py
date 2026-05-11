@@ -29,6 +29,7 @@ class Article(Base):
     images: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(32), default="draft")
     score: Mapped[dict] = mapped_column(JSON, default=dict)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
@@ -44,6 +45,7 @@ class Article(Base):
             "images": self.images or [],
             "status": self.status,
             "score": self.score or {},
+            "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -56,6 +58,7 @@ class Conversation(Base):
     title: Mapped[str] = mapped_column(String(255), default="新对话")
     article_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     messages: Mapped[list] = mapped_column(JSON, default=list)
+    active_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
@@ -67,6 +70,32 @@ class Conversation(Base):
             "title": self.title,
             "article_id": self.article_id,
             "messages": self.messages or [],
+            "active_task_id": self.active_task_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="running")
+    events: Mapped[list] = mapped_column(JSON, default=list)
+    result_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "conversation_id": self.conversation_id,
+            "status": self.status,
+            "events": self.events or [],
+            "result_text": self.result_text or "",
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

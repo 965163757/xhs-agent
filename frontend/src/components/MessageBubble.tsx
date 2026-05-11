@@ -1,8 +1,11 @@
-import { Box, Chip, Collapse, IconButton, Stack, Typography } from '@mui/material'
+import { Box, Chip, Collapse, Dialog, IconButton, Stack, Tooltip, Typography } from '@mui/material'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+import CloseIcon from '@mui/icons-material/Close'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import Markdown from './Markdown'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import type { ChatMessage } from '../api/client'
 
 const toolNameZh: Record<string, string> = {
@@ -22,8 +25,20 @@ const toolNameZh: Record<string, string> = {
   suggest_titles: '候选标题',
   outline_article: '生成大纲',
   cover_prompt: '封面 Prompt',
+  content_image_prompt: '配图 Prompt',
   list_templates: '列出模板',
   apply_template: '按模板生成',
+  search_articles: '搜索笔记',
+  batch_score: '批量打分',
+  batch_optimize: '批量优化',
+  export_articles: '导出笔记',
+  article_stats: '笔记统计',
+  schedule_publish: '定时发布',
+  crop_image: '裁剪图片',
+  inpaint_image: '局部重绘',
+  remove_object: '消除物体',
+  edit_image: '编辑图片',
+  remove_image: '删除图片',
 }
 
 export type ToolEvent = {
@@ -42,11 +57,14 @@ function toAbs(url: string) {
 function ToolCard({
   call,
   result,
+  onImageClick,
 }: {
   call?: ToolEvent
   result?: ToolEvent
+  onImageClick?: (url: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [searchParams] = useSearchParams()
   const name = (call || result)?.name || ''
   const zh = toolNameZh[name] || name
   const running = !!call && !result
@@ -156,11 +174,14 @@ function ToolCard({
               <Box
                 component="img"
                 src={toAbs(cover)}
+                onClick={() => onImageClick?.(toAbs(cover))}
                 sx={{
                   width: 180,
                   borderRadius: 2,
                   border: '1px solid #EEE9E1',
                   objectFit: 'cover',
+                  cursor: 'pointer',
+                  '&:hover': { opacity: 0.85 },
                 }}
               />
             )}
@@ -169,11 +190,14 @@ function ToolCard({
                 key={i}
                 component="img"
                 src={toAbs(u)}
+                onClick={() => onImageClick?.(toAbs(u))}
                 sx={{
                   width: 180,
                   borderRadius: 2,
                   border: '1px solid #EEE9E1',
                   objectFit: 'cover',
+                  cursor: 'pointer',
+                  '&:hover': { opacity: 0.85 },
                 }}
               />
             ))}
@@ -229,7 +253,7 @@ function ToolCard({
                 label="打开编辑"
                 component="a"
                 clickable
-                href={`/articles/${article.id}`}
+                href={`/articles/${article.id}${searchParams.get('c') ? `?c=${searchParams.get('c')}` : ''}`}
                 sx={{ bgcolor: '#1F1F1F', color: '#fff', '&:hover': { bgcolor: '#1F1F1F' } }}
               />
               <IconButton
@@ -402,6 +426,7 @@ export default function MessageBubble({
 }) {
   const isUser = msg.role === 'user'
   const pairs = pairToolEvents((msg.tool_events as ToolEvent[]) || [])
+  const [previewImg, setPreviewImg] = useState<string | null>(null)
 
   return (
     <Box sx={{ py: 1.5 }}>
@@ -435,12 +460,15 @@ export default function MessageBubble({
                   key={i}
                   component="img"
                   src={toAbs(u)}
+                  onClick={() => setPreviewImg(toAbs(u))}
                   sx={{
                     maxWidth: 220,
                     maxHeight: 180,
                     borderRadius: 2,
                     border: '1px solid #EEE9E1',
                     objectFit: 'cover',
+                    cursor: 'pointer',
+                    '&:hover': { opacity: 0.85 },
                   }}
                 />
               ))}
@@ -448,7 +476,7 @@ export default function MessageBubble({
           )}
 
           {pairs.map((p, i) => (
-            <ToolCard key={i} call={p.call} result={p.result} />
+            <ToolCard key={i} call={p.call} result={p.result} onImageClick={setPreviewImg} />
           ))}
 
           {msg.content ? (
@@ -464,11 +492,49 @@ export default function MessageBubble({
                 {msg.content}
               </Typography>
             ) : (
-              <Markdown text={msg.content} />
+              <Markdown text={msg.content} onImageClick={setPreviewImg} />
             )
           ) : null}
+
+          {!isUser && msg.content && (
+            <Tooltip title="复制内容">
+              <IconButton
+                size="small"
+                onClick={() => {
+                  navigator.clipboard.writeText(msg.content || '')
+                  toast.success('已复制', { duration: 1200 })
+                }}
+                sx={{ mt: 0.5, color: '#B8B4AB', '&:hover': { color: '#1F1F1F' } }}
+              >
+                <ContentCopyIcon sx={{ fontSize: 15 }} />
+              </IconButton>
+            </Tooltip>
+          )}
         </Box>
       </Box>
+
+      <Dialog
+        open={!!previewImg}
+        onClose={() => setPreviewImg(null)}
+        maxWidth={false}
+        PaperProps={{
+          sx: { bgcolor: 'rgba(0,0,0,0.92)', boxShadow: 'none', m: 0, maxWidth: '100vw', maxHeight: '100vh' },
+        }}
+      >
+        <IconButton
+          onClick={() => setPreviewImg(null)}
+          sx={{ position: 'absolute', top: 8, right: 8, color: '#fff', zIndex: 1 }}
+        >
+          <CloseIcon />
+        </IconButton>
+        {previewImg && (
+          <Box
+            component="img"
+            src={previewImg}
+            sx={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', display: 'block', m: 'auto' }}
+          />
+        )}
+      </Dialog>
     </Box>
   )
 }

@@ -54,10 +54,24 @@ def _safe_json(text: str) -> Dict[str, Any]:
 
 
 XHS_WRITER_SYSTEM = (
-    "你是小红书内容创作专家，熟悉平台话术、emoji 使用、分段、标签与钩子写法。"
-    "输出必须满足：1) 吸引人的标题（≤20字，带关键词/数字/情绪词，1-2 个 emoji）；"
-    "2) 首句强钩子；3) 内容分段清晰，善用短句、表情、符号分隔；"
-    "4) 结尾引导互动；5) 附 5-10 个精准标签（带 # 前缀）。"
+    "你是小红书爆款内容创作专家，精通平台话术、用户心理和流量机制。"
+    "你的文风像跟闺蜜聊天——真诚、有温度、口语化，但信息密度高。\n\n"
+    "【标题规范】≤20字，必须含 1-2 个搜索关键词。公式参考：\n"
+    "- 数字冲击：「5 个动作瘦腰 8cm」\n"
+    "- 痛点共鸣：「熬夜党必看！急救暗沉只要 3 步」\n"
+    "- 悬念好奇：「后悔没早知道的 XX」\n"
+    "- 反差对比：「月薪 3k 住出 3w 的感觉」\n"
+    "emoji ≤2 个，放在标题末尾或关键词旁。\n\n"
+    "【正文规范】\n"
+    "- 首句强钩子：制造共鸣/好奇/痛点，让人想继续读\n"
+    "- 段落节奏：短句为主（≤15字），长短交替，每 2-3 句换行留白\n"
+    "- 善用 emoji 做视觉锚点和段落分隔，但不堆砌（每段 1-3 个）\n"
+    "- 信息点清晰：一段一个核心观点，用「」或加粗强调关键词\n"
+    "- 结尾引导互动：提问/求分享/投票，制造评论欲\n\n"
+    "【标签策略】附 5-10 个标签（带 # 前缀）：\n"
+    "- 前 2 个放大流量词（搜索量大的品类词）\n"
+    "- 中间放精准长尾词（细分场景/人群）\n"
+    "- 最后放热点词或情绪词\n\n"
     '严格按 JSON 返回：{"title":"...","body":"...","tags":["#tag1","#tag2"]}'
 )
 
@@ -392,12 +406,26 @@ async def tool_cover_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "role": "system",
                 "content": (
-                    "你是小红书封面美学顾问。输出一条适合 gpt-image-2 的英文 prompt，"
-                    "描述主体/构图/光影/色彩/文字效果（若需要），以及竖图 2:3。"
-                    '严格 JSON：{"prompt":"...","size":"1024x1536"}'
+                    "你是小红书封面视觉总监，精通平台爆款封面的设计规律。\n\n"
+                    "根据用户提供的主题和标题，输出一条中文图片生成 prompt。\n\n"
+                    "【封面设计原则】\n"
+                    "- 构图：三分法或居中构图，主体占画面 60-70%，适当留白放文字\n"
+                    "- 色彩：根据内容选择色调——暖色系（亲和/美食/生活）、冷色系（高级/科技/职场）、莫兰迪色（文艺/穿搭）\n"
+                    "- 光影：柔和自然光为主，避免硬光和过度 HDR\n"
+                    "- 文字区域：预留上方或中央 1/3 空间给标题文字叠加\n"
+                    "- 风格参考：干净通透、有呼吸感、细节精致\n\n"
+                    "【不同类型封面指导】\n"
+                    "- 教程类：步骤分格/before-after 对比/关键步骤特写\n"
+                    "- 种草类：产品平铺/使用场景/氛围感静物\n"
+                    "- 情绪类：人物侧脸/光影氛围/意境空镜\n"
+                    "- 清单类：多图拼贴/网格排列/数字标注\n"
+                    "- 对比类：左右分屏/前后对比/色彩反差\n\n"
+                    "prompt 用中文描述，要具体到：主体内容、构图方式、光线氛围、色彩基调、画面风格。\n"
+                    "竖图比例 2:3。\n"
+                    '严格 JSON：{"prompt":"中文描述...","size":"1024x1536"}'
                 ),
             },
-            {"role": "user", "content": f"标题：{title}\n主题：{topic}\n风格：{style}"},
+            {"role": "user", "content": f"标题：{title}\n主题：{topic}\n风格偏好：{style}"},
         ],
         temperature=0.8,
     )
@@ -478,11 +506,23 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "role": "system",
                 "content": (
-                    f"你是小红书配图导演。根据笔记内容产出 {n} 条不同场景的正文配图 prompt，"
-                    "每条对应正文的一个段落/要点，适合 gpt-image-2 使用。"
-                    "英文 prompt 效果最佳，但如果主题是中文环境可中英混合。"
+                    f"你是小红书内容配图导演，擅长将文字转化为有氛围感的视觉画面。\n\n"
+                    f"根据笔记内容，产出 {n} 条配图 prompt（中文），每条对应正文的一个段落或核心信息点。\n\n"
+                    "【配图原则】\n"
+                    "- 视觉一致性：所有配图保持统一的色调、风格和滤镜感\n"
+                    "- 场景化：每张图要有生活感和氛围感，避免纯产品白底图\n"
+                    "- 信息承载：图片要能独立传达该段落的核心信息\n"
+                    "- 细节丰富：注重质感、光影、环境细节的描述\n\n"
+                    "【prompt 描述要素】\n"
+                    "- 主体内容：画面中心是什么\n"
+                    "- 场景环境：在哪里、什么背景\n"
+                    "- 光线氛围：自然光/暖光/侧光/逆光\n"
+                    "- 色彩基调：与整组图保持一致\n"
+                    "- 拍摄视角：俯拍/平视/特写/远景\n"
+                    "- 画面风格：清新/复古/极简/日系等\n\n"
+                    "正方形比例 1:1。prompt 用中文。\n"
                     '严格按 JSON 返回：'
-                    '{"shots":[{"scene":"中文场景标题","prompt":"英文描述","size":"1024x1024"}]}'
+                    '{"shots":[{"scene":"场景标题","prompt":"中文描述","size":"1024x1024"}]}'
                 ),
             },
             {
@@ -641,6 +681,138 @@ async def tool_apply_template(args: Dict[str, Any]) -> Dict[str, Any]:
     async with SessionLocal() as s:
         art = Article(title=title, body=body, tags=",".join(tags), status="draft")
         s.add(art)
+        await s.commit()
+        await s.refresh(art)
+        return {"ok": True, "article": art.to_dict()}
+
+
+# ---------- search / batch / export / stats / schedule ----------
+
+async def tool_search_articles(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Full-text search articles by keyword, with optional status/tag filters."""
+    keyword = args.get("keyword", "")
+    status_filter = args.get("status")
+    tag_filter = args.get("tag")
+    limit = int(args.get("limit", 20))
+
+    async with SessionLocal() as s:
+        q = select(Article).order_by(Article.updated_at.desc())
+        if status_filter:
+            q = q.where(Article.status == status_filter)
+        if tag_filter:
+            q = q.where(Article.tags.contains(tag_filter))
+        res = await s.execute(q.limit(100))
+        articles = res.scalars().all()
+
+    results = []
+    kw = keyword.lower()
+    for a in articles:
+        if kw and kw not in (a.title or "").lower() and kw not in (a.body or "").lower():
+            continue
+        results.append(a.to_dict())
+        if len(results) >= limit:
+            break
+
+    return {"ok": True, "count": len(results), "items": results}
+
+
+async def tool_batch_score(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Score multiple articles and return a summary."""
+    article_ids = args.get("article_ids") or []
+    if not article_ids:
+        return {"ok": False, "error": "article_ids is required"}
+
+    results = []
+    for aid in article_ids[:10]:
+        r = await tool_score_article({"article_id": int(aid)})
+        results.append({"article_id": int(aid), "score": r.get("score", {})})
+
+    return {"ok": True, "results": results}
+
+
+async def tool_batch_optimize(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Optimize multiple articles in sequence."""
+    article_ids = args.get("article_ids") or []
+    focus = args.get("focus", "标题吸引力、开头钩子、情绪价值、标签")
+    if not article_ids:
+        return {"ok": False, "error": "article_ids is required"}
+
+    results = []
+    for aid in article_ids[:5]:
+        r = await tool_optimize_article({"article_id": int(aid), "focus": focus})
+        results.append({"article_id": int(aid), "ok": r.get("ok", False)})
+
+    return {"ok": True, "results": results}
+
+
+async def tool_export_articles(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Export articles as JSON array with optional filters."""
+    status_filter = args.get("status")
+    tag_filter = args.get("tag")
+    limit = int(args.get("limit", 50))
+
+    async with SessionLocal() as s:
+        q = select(Article).order_by(Article.updated_at.desc())
+        if status_filter:
+            q = q.where(Article.status == status_filter)
+        if tag_filter:
+            q = q.where(Article.tags.contains(tag_filter))
+        res = await s.execute(q.limit(limit))
+        items = [a.to_dict() for a in res.scalars().all()]
+
+    return {"ok": True, "count": len(items), "articles": items}
+
+
+async def tool_article_stats(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Return aggregate stats: counts by status, average scores, tag distribution."""
+    async with SessionLocal() as s:
+        res = await s.execute(select(Article))
+        articles = res.scalars().all()
+
+    total = len(articles)
+    by_status: Dict[str, int] = {}
+    tag_counts: Dict[str, int] = {}
+    scores = []
+
+    for a in articles:
+        by_status[a.status] = by_status.get(a.status, 0) + 1
+        if a.score and isinstance(a.score, dict) and "overall" in a.score:
+            scores.append(a.score["overall"])
+        for t in (a.tags or "").split(","):
+            t = t.strip()
+            if t:
+                tag_counts[t] = tag_counts.get(t, 0) + 1
+
+    avg_score = round(sum(scores) / len(scores), 1) if scores else None
+    top_tags = sorted(tag_counts.items(), key=lambda x: -x[1])[:15]
+
+    return {
+        "ok": True,
+        "total": total,
+        "by_status": by_status,
+        "scored_count": len(scores),
+        "avg_score": avg_score,
+        "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
+    }
+
+
+async def tool_schedule_publish(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Mark an article for scheduled publish at a given datetime."""
+    from datetime import datetime as dt
+
+    aid = int(args["article_id"])
+    scheduled_at_str = args.get("scheduled_at", "")
+
+    async with SessionLocal() as s:
+        art = await s.get(Article, aid)
+        if not art:
+            return {"ok": False, "error": f"article {aid} not found"}
+        art.status = "scheduled"
+        if scheduled_at_str:
+            try:
+                art.scheduled_at = dt.fromisoformat(scheduled_at_str)
+            except ValueError:
+                return {"ok": False, "error": f"invalid datetime: {scheduled_at_str}"}
         await s.commit()
         await s.refresh(art)
         return {"ok": True, "article": art.to_dict()}
@@ -938,6 +1110,72 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "按指定模板生成一篇笔记并入库。",
             {"template_id": {"type": "integer"}, "topic": {"type": "string"}},
             required=["template_id", "topic"],
+        ),
+    },
+    "search_articles": {
+        "fn": tool_search_articles,
+        "schema": _fn_schema(
+            "search_articles",
+            "按关键词搜索笔记，可按状态/标签过滤。",
+            {
+                "keyword": {"type": "string", "description": "搜索关键词（标题或正文）"},
+                "status": {"type": "string", "description": "按状态过滤：draft/published/scheduled"},
+                "tag": {"type": "string", "description": "按标签过滤"},
+                "limit": {"type": "integer"},
+            },
+        ),
+    },
+    "batch_score": {
+        "fn": tool_batch_score,
+        "schema": _fn_schema(
+            "batch_score",
+            "批量打分多篇笔记（最多 10 篇），返回各自评分。",
+            {"article_ids": {"type": "array", "items": {"type": "integer"}, "description": "笔记 ID 列表"}},
+            required=["article_ids"],
+        ),
+    },
+    "batch_optimize": {
+        "fn": tool_batch_optimize,
+        "schema": _fn_schema(
+            "batch_optimize",
+            "批量优化多篇笔记（最多 5 篇）。",
+            {
+                "article_ids": {"type": "array", "items": {"type": "integer"}, "description": "笔记 ID 列表"},
+                "focus": {"type": "string", "description": "优化重点"},
+            },
+            required=["article_ids"],
+        ),
+    },
+    "export_articles": {
+        "fn": tool_export_articles,
+        "schema": _fn_schema(
+            "export_articles",
+            "导出笔记为 JSON（可按状态/标签过滤）。",
+            {
+                "status": {"type": "string"},
+                "tag": {"type": "string"},
+                "limit": {"type": "integer"},
+            },
+        ),
+    },
+    "article_stats": {
+        "fn": tool_article_stats,
+        "schema": _fn_schema(
+            "article_stats",
+            "返回笔记统计：各状态数量、平均分、标签分布。",
+            {},
+        ),
+    },
+    "schedule_publish": {
+        "fn": tool_schedule_publish,
+        "schema": _fn_schema(
+            "schedule_publish",
+            "设置笔记定时发布（状态改为 scheduled + 设置发布时间）。",
+            {
+                "article_id": {"type": "integer"},
+                "scheduled_at": {"type": "string", "description": "ISO 格式时间，如 2025-01-15T09:00:00"},
+            },
+            required=["article_id"],
         ),
     },
 }

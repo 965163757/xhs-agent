@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box,
@@ -10,30 +10,57 @@ import {
   Typography,
   TextField,
   InputAdornment,
+  ToggleButton,
+  ToggleButtonGroup,
+  MenuItem,
+  Select,
+  FormControl,
 } from '@mui/material'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import SearchIcon from '@mui/icons-material/Search'
 import AddIcon from '@mui/icons-material/Add'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import EditNoteIcon from '@mui/icons-material/EditNote'
+import SortIcon from '@mui/icons-material/Sort'
 import { deleteArticle, listArticles, type Article } from '../api/client'
+import { toast } from 'sonner'
+
+type SortKey = 'updated' | 'score' | 'title'
 
 export default function ArticlesPage() {
   const [items, setItems] = useState<Article[]>([])
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [sortBy, setSortBy] = useState<SortKey>('updated')
   const nav = useNavigate()
   const refresh = () => listArticles().then(setItems).catch(() => setItems([]))
   useEffect(() => {
     refresh()
   }, [])
 
-  const filtered = items.filter(
-    a =>
-      !query ||
-      a.title.toLowerCase().includes(query.toLowerCase()) ||
-      a.body.toLowerCase().includes(query.toLowerCase()) ||
-      (a.tags || []).some(t => t.toLowerCase().includes(query.toLowerCase()))
-  )
+  const statuses = useMemo(() => {
+    const set = new Set(items.map(a => a.status))
+    return Array.from(set).sort()
+  }, [items])
+
+  const filtered = useMemo(() => {
+    let list = items.filter(
+      a =>
+        !query ||
+        a.title.toLowerCase().includes(query.toLowerCase()) ||
+        a.body.toLowerCase().includes(query.toLowerCase()) ||
+        (a.tags || []).some(t => t.toLowerCase().includes(query.toLowerCase()))
+    )
+    if (statusFilter !== 'all') {
+      list = list.filter(a => a.status === statusFilter)
+    }
+    list = [...list].sort((a, b) => {
+      if (sortBy === 'score') return (b.score?.overall ?? 0) - (a.score?.overall ?? 0)
+      if (sortBy === 'title') return a.title.localeCompare(b.title)
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    })
+    return list
+  }, [items, query, statusFilter, sortBy])
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1100, mx: 'auto' }}>
@@ -43,6 +70,30 @@ export default function ArticlesPage() {
         </Typography>
         <Typography sx={{ fontSize: 13, color: '#B8B4AB' }}>{items.length} 篇</Typography>
         <Box sx={{ flex: 1 }} />
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={statusFilter}
+          onChange={(_, v) => v && setStatusFilter(v)}
+          sx={{ '& .MuiToggleButton-root': { fontSize: 12, px: 1.2, py: 0.4, textTransform: 'none' } }}
+        >
+          <ToggleButton value="all">全部</ToggleButton>
+          {statuses.map(s => (
+            <ToggleButton key={s} value={s}>{s}</ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+        <FormControl size="small" sx={{ minWidth: 100 }}>
+          <Select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as SortKey)}
+            startAdornment={<SortIcon sx={{ fontSize: 16, mr: 0.5, color: '#8A8A8F' }} />}
+            sx={{ fontSize: 12, height: 32 }}
+          >
+            <MenuItem value="updated">最近更新</MenuItem>
+            <MenuItem value="score">评分最高</MenuItem>
+            <MenuItem value="title">标题排序</MenuItem>
+          </Select>
+        </FormControl>
         <TextField
           size="small"
           placeholder="搜索标题/正文/标签"
@@ -55,7 +106,7 @@ export default function ArticlesPage() {
               </InputAdornment>
             ),
           }}
-          sx={{ width: 240 }}
+          sx={{ width: 200 }}
         />
         <Button
           variant="contained"
@@ -213,7 +264,12 @@ export default function ArticlesPage() {
                     size="small"
                     onClick={e => {
                       e.stopPropagation()
-                      if (confirm('删除这篇笔记？')) deleteArticle(a.id).then(refresh)
+                      if (confirm('删除这篇笔记？')) {
+                        deleteArticle(a.id).then(() => {
+                          toast.success('已删除')
+                          refresh()
+                        })
+                      }
                     }}
                   >
                     <DeleteOutlineIcon fontSize="small" />
