@@ -5,6 +5,27 @@ export const api = axios.create({
   timeout: 180000,
 })
 
+const TOKEN_KEY = 'xhs_token'
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401 && !err.config?.url?.includes('/auth/')) {
+      localStorage.removeItem(TOKEN_KEY)
+      window.location.href = '/login'
+    }
+    return Promise.reject(err)
+  }
+)
+
 export interface Article {
   id: number
   title: string
@@ -121,9 +142,10 @@ export async function diagnoseStream(
   onEvent: (ev: DiagnoseEvent) => void,
   signal?: AbortSignal
 ) {
+  const token = localStorage.getItem(TOKEN_KEY)
   const res = await fetch('/api/diagnose/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(payload),
     signal,
   })
@@ -414,9 +436,10 @@ export async function chatStream(
   signal?: AbortSignal,
   conversationId?: number | null
 ) {
+  const token = localStorage.getItem(TOKEN_KEY)
   const res = await fetch('/api/chat/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify({ messages, conversation_id: conversationId || undefined }),
     signal,
   })
@@ -463,7 +486,8 @@ export async function streamTask(
   onEvent: (ev: StreamEvent) => void,
   signal?: AbortSignal
 ) {
-  const res = await fetch(`/api/tasks/${taskId}/stream`, { signal })
+  const token = localStorage.getItem(TOKEN_KEY)
+  const res = await fetch(`/api/tasks/${taskId}/stream`, { signal, headers: token ? { Authorization: `Bearer ${token}` } : {} })
   if (!res.body) throw new Error('no stream body')
   const reader = res.body.getReader()
   const decoder = new TextDecoder('utf-8')

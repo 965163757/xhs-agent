@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     image_dir: str = str(DATA_DIR / "images")
     port: int = 8787
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    jwt_secret: str = ""
 
     @property
     def cors_origin_list(self) -> List[str]:

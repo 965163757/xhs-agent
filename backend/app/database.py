@@ -153,6 +153,22 @@ class Template(Base):
         }
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "username": self.username,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 _SEED_TEMPLATES = [
     {
         "name": "亲测踩坑式",
