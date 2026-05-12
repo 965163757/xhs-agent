@@ -10,6 +10,7 @@ import type { ChatMessage } from '../api/client'
 
 const toolNameZh: Record<string, string> = {
   generate_article: '生成笔记',
+  create_complete_note_workflow: '一键成稿工作流',
   rewrite_article: '改写笔记',
   optimize_article: '优化笔记',
   polish_paragraph: '段落润色',
@@ -75,12 +76,12 @@ function ToolCard({
   const cover: string | undefined =
     result?.result?.article?.cover_image || undefined
   const article = result?.result?.article
-  const titles: string[] | undefined = result?.result?.titles
+  const titles: string[] | undefined = result?.result?.titles || result?.result?.workflow?.title_candidates
   const tags: string[] | undefined = result?.result?.tags
   const outline = result?.result?.outline
   const diagnostic = result?.result?.diagnostic
   const score = result?.result?.score
-  const coverData = result?.result?.cover
+  const coverData = result?.result?.cover || result?.result?.workflow?.cover_prompt
 
   const argJson = JSON.stringify(call?.arguments ?? {}, null, 2)
 

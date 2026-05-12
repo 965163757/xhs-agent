@@ -488,12 +488,13 @@ export async function updateSystemConfig(payload: { registration_open?: string }
 }
 
 export type StreamEvent =
-  | { type: 'token'; text: string }
-  | { type: 'task_id'; task_id: string }
-  | { type: 'tool_call'; name: string; arguments: any; id: string }
-  | { type: 'tool_result'; name: string; result: any; id: string }
-  | { type: 'done'; text?: string }
-  | { type: 'error'; message: string }
+  | { type: 'token'; text: string; seq?: number }
+  | { type: 'task_id'; task_id: string; seq?: number }
+  | { type: 'tool_call'; name: string; arguments: any; id: string; seq?: number }
+  | { type: 'tool_result'; name: string; result: any; id: string; seq?: number }
+  | { type: 'done'; text?: string; seq?: number }
+  | { type: 'cancelled'; text?: string; seq?: number }
+  | { type: 'error'; message: string; seq?: number }
 
 export async function chatStream(
   messages: ChatMessage[],
@@ -536,7 +537,7 @@ export async function chatStream(
 export interface TaskInfo {
   id: string
   conversation_id: number | null
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
   events: StreamEvent[]
   result_text: string
 }
@@ -546,13 +547,19 @@ export async function getTask(taskId: string): Promise<TaskInfo> {
   return r.data
 }
 
+export async function cancelTask(taskId: string) {
+  const r = await api.post(`/tasks/${taskId}/cancel`)
+  return r.data as { ok: boolean }
+}
+
 export async function streamTask(
   taskId: string,
   onEvent: (ev: StreamEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  fromIndex = 0
 ) {
   const token = localStorage.getItem(TOKEN_KEY)
-  const res = await fetch(`/api/tasks/${taskId}/stream`, { signal, headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  const res = await fetch(`/api/tasks/${taskId}/stream?from_index=${fromIndex}`, { signal, headers: token ? { Authorization: `Bearer ${token}` } : {} })
   handleStreamAuth(res, `/api/tasks/${taskId}/stream`)
   if (!res.body) throw new Error('no stream body')
   const reader = res.body.getReader()

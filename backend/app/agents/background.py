@@ -24,8 +24,10 @@ class TaskStream:
         self.done = False
 
     def push(self, ev: Dict[str, Any]):
+        ev = dict(ev)
+        ev.setdefault("seq", len(self.events))
         self.events.append(ev)
-        if ev.get("type") in ("done", "error"):
+        if ev.get("type") in ("done", "error", "cancelled"):
             self.done = True
         for w in self._waiters:
             w.set()
@@ -39,7 +41,7 @@ class TaskStream:
                 ev = self.events[idx]
                 idx += 1
                 yield ev
-                if ev.get("type") in ("done", "error"):
+                if ev.get("type") in ("done", "error", "cancelled"):
                     return
             if self.done:
                 return
@@ -58,6 +60,8 @@ class TaskStream:
 # In-memory registry
 _streams: Dict[str, TaskStream] = {}
 _running: Dict[str, bool] = {}
+_task_handles: Dict[str, asyncio.Task] = {}
+_cancelled: set[str] = set()
 
 
 async def spawn_agent_task(
@@ -81,7 +85,8 @@ async def spawn_agent_task(
     _streams[task_id] = stream
     _running[task_id] = True
 
-    asyncio.create_task(_run_loop(task_id, messages, conversation_id, user_id, stream))
+    task = asyncio.create_task(_run_loop(task_id, messages, conversation_id, user_id, stream))
+    _task_handles[task_id] = task
     return task_id
 
 
@@ -94,13 +99,14 @@ async def _run_loop(
 ):
     """Execute the agent stream, pushing events to the broadcast stream."""
     from ..config import get_effective_settings
-    from .tools import set_tool_user_id
-
-    set_tool_user_id(user_id)
+    from ..services.llm import reset_current_settings, set_current_settings
+    from .tools import reset_tool_user_id, set_tool_user_id
 
     settings = None
     if user_id:
         settings = await get_effective_settings(user_id)
+    user_token = set_tool_user_id(user_id)
+    settings_token = set_current_settings(settings)
 
     result_text = ""
     last_flush = time.time()
@@ -108,6 +114,9 @@ async def _run_loop(
 
     try:
         async for ev in run_agent_stream(messages, settings=settings):
+            if task_id in _cancelled:
+                status = "cancelled"
+                break
             stream.push(ev)
 
             if ev.get("type") == "token":
@@ -119,11 +128,19 @@ async def _run_loop(
             if now - last_flush > 2.0:
                 last_flush = now
                 await _flush_events(task_id, stream.events, result_text)
+    except asyncio.CancelledError:
+        status = "cancelled"
+        _cancelled.add(task_id)
     except Exception as e:
         stream.push({"type": "error", "message": str(e)})
         status = "failed"
     finally:
-        if not stream.done:
+        reset_current_settings(settings_token)
+        reset_tool_user_id(user_token)
+
+        if status == "cancelled" and not stream.done:
+            stream.push({"type": "cancelled", "text": result_text})
+        elif not stream.done:
             stream.push({"type": "done", "text": result_text})
 
         try:
@@ -132,6 +149,8 @@ async def _run_loop(
             pass
 
         _running.pop(task_id, None)
+        _task_handles.pop(task_id, None)
+        _cancelled.discard(task_id)
         await asyncio.sleep(60)
         _streams.pop(task_id, None)
 
@@ -189,3 +208,25 @@ def get_stream(task_id: str) -> Optional[TaskStream]:
 
 def is_running(task_id: str) -> bool:
     return _running.get(task_id, False)
+
+
+async def cancel_task(task_id: str, user_id: Optional[int] = None) -> bool:
+    """Cancel a running background agent task owned by user_id."""
+    async with SessionLocal() as s:
+        t = await s.get(Task, task_id)
+        if not t:
+            return False
+        if user_id is not None and t.user_id is not None and t.user_id != user_id:
+            return False
+        t.status = "cancelled"
+        await s.commit()
+
+    _cancelled.add(task_id)
+    stream = _streams.get(task_id)
+    if stream and not stream.done:
+        stream.push({"type": "cancelled", "text": ""})
+    handle = _task_handles.get(task_id)
+    if handle and not handle.done():
+        handle.cancel()
+    _running.pop(task_id, None)
+    return True

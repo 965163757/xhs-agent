@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..auth import get_current_user
+from ..config import get_effective_settings
 from ..database import Article, SessionLocal, User
 from ..agents.diagnosis import run_diagnosis
 
@@ -50,6 +51,7 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
         raise HTTPException(400, "标题和正文不能同时为空")
 
     progress_queue: asyncio.Queue = asyncio.Queue()
+    effective_settings = await get_effective_settings(user.id)
 
     async def progress_callback(step: str, message: str, data: Optional[Dict[str, Any]] = None):
         await progress_queue.put({"type": "progress", "step": step, "message": message, "data": data})
@@ -63,6 +65,7 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
                 image_count=image_count,
                 images=images,
                 progress=progress_callback,
+                settings=effective_settings,
             )
             await progress_queue.put({"type": "result", "data": {
                 "overall_score": result.overall_score,

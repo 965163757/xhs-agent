@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextvars
 import io
 import time
 import uuid
@@ -16,6 +17,27 @@ from ..config import Settings, get_settings
 _client: Optional[AsyncOpenAI] = None
 _client_key: Optional[tuple] = None
 _user_clients: Dict[tuple, AsyncOpenAI] = {}
+_current_settings: contextvars.ContextVar[Optional[Settings]] = contextvars.ContextVar(
+    "_current_llm_settings", default=None
+)
+
+
+def set_current_settings(settings: Optional[Settings]) -> contextvars.Token:
+    """Bind effective LLM settings to the current async context.
+
+    Tool calls can be triggered from REST, SSE background tasks, or MCP. Binding
+    settings here keeps nested calls (diagnosis agents, image tools, etc.) on the
+    same per-user model/API key without threading a parameter through every tool.
+    """
+    return _current_settings.set(settings)
+
+
+def reset_current_settings(token: contextvars.Token) -> None:
+    _current_settings.reset(token)
+
+
+def _effective_settings(settings: Optional[Settings] = None) -> Settings:
+    return settings or _current_settings.get() or get_settings()
 
 
 def reset_client() -> None:
@@ -113,8 +135,8 @@ async def chat_completion(
     model: Optional[str] = None,
     settings: Optional[Settings] = None,
 ) -> Any:
-    s = settings or get_settings()
-    client = get_client(settings)
+    s = _effective_settings(settings)
+    client = get_client(s)
     kwargs: Dict[str, Any] = {
         "model": model or s.chat_model,
         "messages": to_openai_messages(messages),
@@ -133,8 +155,8 @@ async def chat_completion_stream(
     model: Optional[str] = None,
     settings: Optional[Settings] = None,
 ) -> AsyncIterator[Any]:
-    s = settings or get_settings()
-    client = get_client(settings)
+    s = _effective_settings(settings)
+    client = get_client(s)
     kwargs: Dict[str, Any] = {
         "model": model or s.chat_model,
         "messages": to_openai_messages(messages),
@@ -156,8 +178,20 @@ async def generate_image(
     reference_images: Optional[List[str]] = None,
     settings: Optional[Settings] = None,
 ) -> List[str]:
-    s = settings or get_settings()
-    client = get_client(settings)
+    s = _effective_settings(settings)
+    # Reference-image requests are routed to image edit/variation. This gives
+    # the UI a practical "参考图生成" behavior even though images.generate itself
+    # does not consume reference images in the current SDK call below.
+    if reference_images:
+        return await edit_image(
+            image_url=reference_images[0],
+            mask_url=None,
+            prompt=prompt,
+            size=size,
+            n=n,
+            settings=s,
+        )
+    client = get_client(s)
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
     saved: List[str] = []
 
@@ -193,13 +227,18 @@ async def generate_image(
 def _resolve_local_path(url_or_path: str) -> Path:
     """Translate /static/images/foo.png (or absolute path) back to the on-disk file."""
     s = get_settings()
+    base = Path(s.image_dir).resolve()
     if url_or_path.startswith("/static/images/"):
         name = url_or_path.rsplit("/", 1)[-1]
-        return Path(s.image_dir) / name
+        return base / name
     p = Path(url_or_path)
     if p.is_absolute():
-        return p
-    return Path(s.image_dir) / p.name
+        candidate = p.resolve()
+    else:
+        candidate = (base / p.name).resolve()
+    if not candidate.is_relative_to(base):
+        raise ValueError(f"image path outside image_dir is not allowed: {url_or_path}")
+    return candidate
 
 
 async def edit_image(
@@ -217,8 +256,8 @@ async def edit_image(
                   (None means full-image edit / variation)
     - prompt:     what to paint in the masked region (for inpaint) or how to edit overall
     """
-    s = settings or get_settings()
-    client = get_client(settings)
+    s = _effective_settings(settings)
+    client = get_client(s)
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
 
     img_path = _resolve_local_path(image_url)
@@ -301,10 +340,10 @@ def crop_image(
         raise FileNotFoundError(f"image not found: {image_url}")
     with Image.open(src) as im:
         im = im.convert("RGBA")
-        x2 = max(x + 1, min(im.width, x + w))
-        y2 = max(y + 1, min(im.height, y + h))
         x = max(0, min(im.width - 1, x))
         y = max(0, min(im.height - 1, y))
+        x2 = max(x + 1, min(im.width, x + w))
+        y2 = max(y + 1, min(im.height, y + h))
         cropped = im.crop((x, y, x2, y2))
         buf = io.BytesIO()
         cropped.save(buf, format="PNG")

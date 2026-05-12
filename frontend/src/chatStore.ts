@@ -1,5 +1,6 @@
 import {
   chatStream,
+  cancelTask,
   createConversation,
   getConversation,
   getTask,
@@ -105,6 +106,7 @@ export function resetSession(key: string) {
 
 export function abortSession(key: string) {
   const s = ensure(key)
+  if (s.taskId) cancelTask(s.taskId).catch(() => {})
   if (s.abort) { try { s.abort.abort() } catch { /* */ } s.abort = undefined }
   s.streaming = false
   s.status = ''
@@ -160,6 +162,7 @@ function buildContextPreface(article?: Article | null): UiMessage[] {
 
 const toolLabel: Record<string, string> = {
   generate_article: '生成笔记',
+  create_complete_note_workflow: '一键成稿',
   rewrite_article: '改写',
   optimize_article: '优化',
   polish_paragraph: '润色',
@@ -295,6 +298,8 @@ export async function sendMessage(
           maybePersist()
         } else if (ev.type === 'done') {
           cur.status = ''
+        } else if (ev.type === 'cancelled') {
+          cur.status = ''
         }
 
         const copy = cur.messages.slice()
@@ -308,6 +313,8 @@ export async function sendMessage(
           last.tool_events.push({ type: 'tool_result', name: ev.name, result: ev.result })
         } else if (ev.type === 'error') {
           last.content += `\n\n⚠️ ${ev.message}`
+        } else if (ev.type === 'cancelled') {
+          if (!last.content.trim()) last.content = '已停止生成。'
         }
         copy[copy.length - 1] = last
         cur.messages = copy
@@ -361,13 +368,17 @@ export async function reconnectTask(
   try {
     const task = await getTask(taskId)
 
-    if (task.status === 'completed' || task.status === 'failed') {
+    if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
       // Task already finished — apply stored result
       const cur = ensure(key)
       const copy = cur.messages.slice()
       if (copy.length > 0 && copy[copy.length - 1].role === 'assistant') {
         const last = { ...copy[copy.length - 1] } as UiMessage
-        if (task.result_text) last.content = task.result_text
+        const storedText = task.result_text || (task.events || [])
+          .filter((ev): ev is Extract<StreamEvent, { type: 'token' }> => ev.type === 'token')
+          .map(ev => ev.text)
+          .join('')
+        if (storedText) last.content = storedText
         const toolEvents: ToolEvent[] = []
         for (const ev of task.events) {
           if (ev.type === 'tool_call') toolEvents.push(ev as ToolEvent)
@@ -388,6 +399,25 @@ export async function reconnectTask(
 
     // Task still running — connect to live stream
     const cur = ensure(key)
+    const replayEvents = task.events || []
+    if (replayEvents.length) {
+      const copy = cur.messages.slice()
+      if (copy.length > 0 && copy[copy.length - 1].role === 'assistant') {
+        const last = { ...copy[copy.length - 1] } as UiMessage
+        last.content = replayEvents
+          .filter((ev): ev is Extract<StreamEvent, { type: 'token' }> => ev.type === 'token')
+          .map(ev => ev.text)
+          .join('')
+        const toolEvents: ToolEvent[] = []
+        for (const ev of replayEvents) {
+          if (ev.type === 'tool_call') toolEvents.push(ev as ToolEvent)
+          else if (ev.type === 'tool_result') toolEvents.push(ev as ToolEvent)
+        }
+        last.tool_events = toolEvents
+        copy[copy.length - 1] = last
+      }
+      cur.messages = copy
+    }
     cur.status = '继续生成中…'
     bump(key)
 
@@ -405,6 +435,8 @@ export async function reconnectTask(
           opts.onArticleMayChange?.()
         } else if (ev.type === 'done') {
           cur.status = ''
+        } else if (ev.type === 'cancelled') {
+          cur.status = ''
         }
 
         const copy = cur.messages.slice()
@@ -419,13 +451,16 @@ export async function reconnectTask(
             last.tool_events.push({ type: 'tool_result', name: ev.name, result: ev.result })
           } else if (ev.type === 'error') {
             last.content += `\n\n⚠️ ${ev.message}`
+          } else if (ev.type === 'cancelled') {
+            if (!last.content.trim()) last.content = '已停止生成。'
           }
           copy[copy.length - 1] = last
         }
         cur.messages = copy
         bump(key)
       },
-      controller.signal
+      controller.signal,
+      replayEvents.length
     )
   } catch {
     // reconnection failed silently

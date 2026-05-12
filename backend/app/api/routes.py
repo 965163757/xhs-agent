@@ -7,11 +7,11 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
-from ..agents.background import get_stream, is_running, spawn_agent_task
+from ..agents.background import cancel_task, get_stream, is_running, spawn_agent_task
 from ..agents.runner import run_agent_stream
-from ..agents.tools import TOOLS, call_tool, openai_tool_schemas
+from ..agents.tools import TOOLS, call_tool_for_user, openai_tool_schemas
 from ..auth import get_current_user, require_admin
 from ..config import get_settings, update_settings
 from ..database import Article, ArticleVersion, Conversation, SessionLocal, Task, Template, User
@@ -47,10 +47,24 @@ from ..services.llm import generate_image
 router = APIRouter()
 
 
+async def _call_user_tool(name: str, arguments: Dict[str, Any], user: User) -> Dict[str, Any]:
+    """Call a registered tool with the authenticated user's context/settings."""
+    try:
+        return await call_tool_for_user(name, arguments, user.id)
+    except Exception as e:
+        return {"ok": False, "error": str(e), "tool": name}
+
+
 # ---------- chat ----------
 
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest, user: User = Depends(get_current_user)):
+    if req.conversation_id:
+        async with SessionLocal() as s:
+            conv = await s.get(Conversation, req.conversation_id)
+            if not conv or conv.user_id != user.id:
+                raise HTTPException(404, "conversation not found")
+
     messages: List[Dict[str, Any]] = []
     for m in req.messages:
         messages.append(
@@ -152,84 +166,84 @@ async def delete_article(aid: int, user: User = Depends(get_current_user)):
 
 @router.post("/articles/generate")
 async def api_generate(payload: GenerateArticleRequest, user: User = Depends(get_current_user)):
-    return await call_tool("generate_article", payload.model_dump())
+    return await _call_user_tool("generate_article", payload.model_dump(), user)
 
 
 @router.post("/articles/rewrite")
 async def api_rewrite(payload: RewriteRequest, user: User = Depends(get_current_user)):
-    return await call_tool("rewrite_article", payload.model_dump())
+    return await _call_user_tool("rewrite_article", payload.model_dump(), user)
 
 
 @router.post("/articles/optimize")
 async def api_optimize(payload: OptimizeRequest, user: User = Depends(get_current_user)):
-    return await call_tool("optimize_article", payload.model_dump())
+    return await _call_user_tool("optimize_article", payload.model_dump(), user)
 
 
 @router.post("/articles/score")
 async def api_score(payload: ScoreRequest, user: User = Depends(get_current_user)):
-    return await call_tool("score_article", payload.model_dump())
+    return await _call_user_tool("score_article", payload.model_dump(), user)
 
 
 @router.post("/articles/diagnose")
 async def api_diagnose(payload: DiagnoseRequest, user: User = Depends(get_current_user)):
-    return await call_tool("diagnose_article", payload.model_dump())
+    return await _call_user_tool("diagnose_article", payload.model_dump(), user)
 
 
 @router.post("/articles/outline")
 async def api_outline(payload: OutlineRequest, user: User = Depends(get_current_user)):
-    return await call_tool("outline_article", payload.model_dump())
+    return await _call_user_tool("outline_article", payload.model_dump(), user)
 
 
 @router.post("/articles/suggest_tags")
 async def api_suggest_tags_post(payload: SuggestTagsRequest, user: User = Depends(get_current_user)):
-    return await call_tool("suggest_tags", payload.model_dump())
+    return await _call_user_tool("suggest_tags", payload.model_dump(), user)
 
 
 @router.post("/articles/suggest_titles")
 async def api_suggest_titles(payload: SuggestTitlesRequest, user: User = Depends(get_current_user)):
-    return await call_tool("suggest_titles", payload.model_dump())
+    return await _call_user_tool("suggest_titles", payload.model_dump(), user)
 
 
 @router.post("/articles/polish")
 async def api_polish(payload: PolishRequest, user: User = Depends(get_current_user)):
-    return await call_tool("polish_paragraph", payload.model_dump())
+    return await _call_user_tool("polish_paragraph", payload.model_dump(), user)
 
 
 @router.post("/articles/cover_prompt")
 async def api_cover_prompt(payload: CoverPromptRequest, user: User = Depends(get_current_user)):
-    return await call_tool("cover_prompt", payload.model_dump())
+    return await _call_user_tool("cover_prompt", payload.model_dump(), user)
 
 
 @router.post("/articles/content_image_prompt")
 async def api_content_image_prompt(payload: ContentImagePromptRequest, user: User = Depends(get_current_user)):
-    return await call_tool("content_image_prompt", payload.model_dump())
+    return await _call_user_tool("content_image_prompt", payload.model_dump(), user)
 
 
 @router.post("/articles/remove_image")
 async def api_remove_image(payload: RemoveImageRequest, user: User = Depends(get_current_user)):
-    return await call_tool("remove_image", payload.model_dump())
+    return await _call_user_tool("remove_image", payload.model_dump(), user)
 
 
 # ---------- image editing ----------
 
 @router.post("/images/crop")
 async def api_crop(payload: CropImageRequest, user: User = Depends(get_current_user)):
-    return await call_tool("crop_image", payload.model_dump())
+    return await _call_user_tool("crop_image", payload.model_dump(), user)
 
 
 @router.post("/images/inpaint")
 async def api_inpaint(payload: InpaintRequest, user: User = Depends(get_current_user)):
-    return await call_tool("inpaint_image", payload.model_dump())
+    return await _call_user_tool("inpaint_image", payload.model_dump(), user)
 
 
 @router.post("/images/remove_object")
 async def api_remove_object(payload: RemoveObjectRequest, user: User = Depends(get_current_user)):
-    return await call_tool("remove_object", payload.model_dump())
+    return await _call_user_tool("remove_object", payload.model_dump(), user)
 
 
 @router.post("/images/edit")
 async def api_edit_image(payload: EditImageRequest, user: User = Depends(get_current_user)):
-    return await call_tool("edit_image", payload.model_dump())
+    return await _call_user_tool("edit_image", payload.model_dump(), user)
 
 
 @router.post("/images/upload_mask")
@@ -238,18 +252,27 @@ async def upload_mask(file: UploadFile = File(...), user: User = Depends(get_cur
     import time, uuid
     settings = get_settings()
     Path(settings.image_dir).mkdir(parents=True, exist_ok=True)
+    ext = Path(file.filename or "").suffix.lower() or ".png"
+    if ext != ".png":
+        raise HTTPException(400, "mask 必须是 PNG")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(413, "文件过大，最大 10MB")
     name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}_mask.png"
-    (Path(settings.image_dir) / name).write_bytes(await file.read())
+    (Path(settings.image_dir) / name).write_bytes(content)
     return {"url": f"/static/images/{name}"}
 
 
 @router.post("/images/generate")
 async def api_image(payload: ImageGenRequest, user: User = Depends(get_current_user)):
+    from ..config import get_effective_settings
+    effective = await get_effective_settings(user.id)
     urls = await generate_image(
         prompt=payload.prompt,
         size=payload.size,
         n=payload.n,
         reference_images=payload.reference_images,
+        settings=effective,
     )
     return {"images": urls}
 
@@ -278,13 +301,17 @@ async def upload_image(file: UploadFile = File(...), user: User = Depends(get_cu
 @router.get("/templates")
 async def list_templates(user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
-        res = await s.execute(select(Template).order_by(Template.id.asc()))
+        res = await s.execute(
+            select(Template)
+            .where(or_(Template.creator_id.is_(None), Template.creator_id == user.id))
+            .order_by(Template.id.asc())
+        )
         return {"items": [t.to_dict() for t in res.scalars().all()]}
 
 
 @router.post("/templates/apply")
 async def apply_template(payload: ApplyTemplateRequest, user: User = Depends(get_current_user)):
-    return await call_tool("apply_template", payload.model_dump())
+    return await _call_user_tool("apply_template", payload.model_dump(), user)
 
 
 @router.post("/templates")
@@ -320,7 +347,9 @@ async def delete_template(tid: int, user: User = Depends(get_current_user)):
 @router.post("/templates/extract")
 async def extract_template(payload: ExtractTemplateRequest, user: User = Depends(get_current_user)):
     """Use LLM to extract a reusable template structure from an existing article."""
+    from ..config import get_effective_settings
     from ..services.llm import chat_completion
+    effective = await get_effective_settings(user.id)
     async with SessionLocal() as s:
         art = await s.get(Article, payload.article_id)
         if not art or art.user_id != user.id:
@@ -343,6 +372,7 @@ async def extract_template(payload: ExtractTemplateRequest, user: User = Depends
             },
         ],
         temperature=0.5,
+        settings=effective,
     )
     from ..agents.tools import _safe_json
     data = _safe_json(resp.choices[0].message.content or "")
@@ -387,10 +417,15 @@ async def get_conversation(cid: int, user: User = Depends(get_current_user)):
 @router.post("/conversations")
 async def create_conversation(payload: Dict[str, Any], user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
+        article_id = payload.get("article_id")
+        if article_id:
+            a = await s.get(Article, int(article_id))
+            if not a or a.user_id != user.id:
+                raise HTTPException(404, "article not found")
         c = Conversation(
             user_id=user.id,
             title=payload.get("title", "新对话"),
-            article_id=payload.get("article_id"),
+            article_id=article_id,
             messages=payload.get("messages", []),
         )
         s.add(c)
@@ -405,6 +440,10 @@ async def update_conversation(cid: int, payload: Dict[str, Any], user: User = De
         c = await s.get(Conversation, cid)
         if not c or c.user_id != user.id:
             raise HTTPException(404, "not found")
+        if "article_id" in payload and payload["article_id"]:
+            a = await s.get(Article, int(payload["article_id"]))
+            if not a or a.user_id != user.id:
+                raise HTTPException(404, "article not found")
         for k in ("title", "messages", "article_id"):
             if k in payload:
                 setattr(c, k, payload[k])
@@ -504,14 +543,20 @@ async def get_task(task_id: str, user: User = Depends(get_current_user)):
 
 
 @router.get("/tasks/{task_id}/stream")
-async def stream_task(task_id: str, user: User = Depends(get_current_user)):
+async def stream_task(task_id: str, from_index: int = 0, user: User = Depends(get_current_user)):
     """Reconnect to a running task's event stream."""
+    async with SessionLocal() as s:
+        t = await s.get(Task, task_id)
+        if not t or (t.user_id is not None and t.user_id != user.id):
+            raise HTTPException(404, "task not found")
+
     async def event_gen():
         if not is_running(task_id):
             async with SessionLocal() as s:
                 t = await s.get(Task, task_id)
             if t and t.status != "running":
-                yield f"data: {json.dumps({'type':'done','text': t.result_text or ''}, ensure_ascii=False)}\n\n"
+                ev_type = "cancelled" if t.status == "cancelled" else "done"
+                yield f"data: {json.dumps({'type': ev_type, 'text': t.result_text or ''}, ensure_ascii=False)}\n\n"
             else:
                 yield f"data: {json.dumps({'type':'error','message':'task not found or already finished'}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
@@ -525,13 +570,21 @@ async def stream_task(task_id: str, user: User = Depends(get_current_user)):
 
         # Subscribe from current position (skip already-consumed events)
         try:
-            async for ev in stream.subscribe(from_index=0):
+            async for ev in stream.subscribe(from_index=max(0, from_index)):
                 yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
         except asyncio.TimeoutError:
             yield f"data: {json.dumps({'type':'error','message':'timeout'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_running_task(task_id: str, user: User = Depends(get_current_user)):
+    ok = await cancel_task(task_id, user_id=user.id)
+    if not ok:
+        raise HTTPException(404, "task not found")
+    return {"ok": True}
 
 
 # ---------- settings ----------
@@ -569,8 +622,7 @@ async def test_settings(user: User = Depends(get_current_user)):
 
 @router.get("/stats")
 async def api_stats(user: User = Depends(get_current_user)):
-    from ..agents.tools import tool_article_stats
-    return await tool_article_stats({"user_id": user.id})
+    return await _call_user_tool("article_stats", {}, user)
 
 
 @router.get("/stats/calendar")
@@ -597,7 +649,8 @@ async def api_calendar(user: User = Depends(get_current_user)):
 
 @router.get("/meta")
 async def meta(user: User = Depends(get_current_user)):
-    s = get_settings()
+    from ..config import get_effective_settings
+    s = await get_effective_settings(user.id)
     return {
         "chat_model": s.chat_model,
         "image_model": s.image_model,
@@ -650,11 +703,9 @@ async def mcp_list_tools(user: User = Depends(get_current_user)):
 
 @router.post("/mcp/call")
 async def mcp_call(payload: MCPCallRequest, user: User = Depends(get_current_user)):
-    from ..agents.tools import set_tool_user_id
-    set_tool_user_id(user.id)
     if payload.name not in TOOLS:
         raise HTTPException(404, f"unknown tool: {payload.name}")
-    result = await call_tool(payload.name, payload.arguments or {})
+    result = await _call_user_tool(payload.name, payload.arguments or {}, user)
     return {"ok": True, "result": result}
 
 

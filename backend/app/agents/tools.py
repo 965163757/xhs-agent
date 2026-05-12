@@ -8,10 +8,17 @@ import json
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from ..database import Article, ArticleVersion, Conversation, SessionLocal, Template
-from ..services.llm import chat_completion, crop_image, edit_image, generate_image
+from ..services.llm import (
+    chat_completion,
+    crop_image,
+    edit_image,
+    generate_image,
+    reset_current_settings,
+    set_current_settings,
+)
 
 
 ToolFn = Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
@@ -29,11 +36,52 @@ def set_tool_user_id(uid: Optional[int]) -> contextvars.Token:
     return _current_user_id.set(uid)
 
 
+def reset_tool_user_id(token: contextvars.Token) -> None:
+    _current_user_id.reset(token)
+
+
 # ---------- helpers ----------
 
 async def _get_article(article_id: int) -> Optional[Article]:
     async with SessionLocal() as s:
         return await s.get(Article, article_id)
+
+
+async def _get_article_for_user(article_id: int) -> tuple[Optional[Article], Optional[str]]:
+    """Fetch an article and enforce current tool user ownership when present."""
+    art = await _get_article(article_id)
+    if not art:
+        return None, f"article {article_id} not found"
+    uid = get_tool_user_id()
+    if uid is not None and art.user_id != uid:
+        return art, "无权访问该笔记"
+    return art, None
+
+
+async def _ensure_article_access(article_id: Optional[int]) -> Optional[Dict[str, Any]]:
+    if not article_id:
+        return None
+    _, err = await _get_article_for_user(int(article_id))
+    if err:
+        return {"ok": False, "error": err}
+    return None
+
+
+async def _ensure_article_image_access(
+    article_id: Optional[int],
+    image_url: str,
+) -> Optional[Dict[str, Any]]:
+    """When editing in-place, ensure the source image belongs to the target article."""
+    if not article_id:
+        return None
+    art, err = await _get_article_for_user(int(article_id))
+    if err:
+        return {"ok": False, "error": err}
+    assert art is not None
+    allowed = {art.cover_image, *(art.images or [])}
+    if image_url not in allowed:
+        return {"ok": False, "error": "图片不属于该笔记"}
+    return None
 
 
 async def _snapshot_article(article_id: int, trigger: str = "auto") -> None:
@@ -52,6 +100,7 @@ async def _snapshot_article(article_id: int, trigger: str = "auto") -> None:
         next_ver = (last_v.version + 1) if last_v else 1
         v = ArticleVersion(
             article_id=article_id,
+            user_id=a.user_id,
             version=next_ver,
             title=a.title,
             body=a.body,
@@ -117,6 +166,96 @@ XHS_WRITER_SYSTEM = (
 )
 
 
+XHS_WORKFLOW_SYSTEM = (
+    "你是小红书端到端内容工作流总监。你不是只写一篇文案，而是要一次性交付"
+    "选题定位、标题、正文、标签、封面方向、内容配图方向和自检结论。\n\n"
+    "输出必须能直接进入草稿箱：标题≤20字，正文口语化、分段清晰、结尾有互动引导，"
+    "标签 5-10 个且都以 # 开头。\n"
+    "避免广告法绝对化、医疗承诺、收益承诺和站外引流表达。\n\n"
+    "严格按 JSON 返回，不要包 markdown：\n"
+    "{"
+    '"strategy":{"positioning":"定位","audience":"人群","hook_angle":"钩子角度","selling_points":["卖点"]},'
+    '"title":"主标题",'
+    '"title_candidates":["备选标题1","备选标题2","备选标题3","备选标题4","备选标题5","备选标题6"],'
+    '"body":"完整正文",'
+    '"tags":["#标签1","#标签2"],'
+    '"cover_prompt":{"prompt":"中文封面图生成提示词","size":"1024x1536"},'
+    '"content_image_prompts":[{"scene":"场景名","prompt":"中文配图提示词","size":"1024x1024"}],'
+    '"self_check":{"strengths":["亮点"],"risks":["风险"],"next_actions":["下一步建议"]}'
+    "}"
+)
+
+
+def _normalize_tags(tags: Any, limit: int = 10) -> List[str]:
+    if not isinstance(tags, list):
+        return []
+    out: List[str] = []
+    seen = set()
+    for raw in tags:
+        t = str(raw or "").strip()
+        if not t:
+            continue
+        if not t.startswith("#"):
+            t = "#" + t.lstrip("#")
+        if t not in seen:
+            out.append(t)
+            seen.add(t)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _normalize_shots(shots: Any, limit: int = 4) -> List[Dict[str, str]]:
+    if not isinstance(shots, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for item in shots[:limit]:
+        if not isinstance(item, dict):
+            continue
+        prompt = str(item.get("prompt") or "").strip()
+        if not prompt:
+            continue
+        out.append(
+            {
+                "scene": str(item.get("scene") or f"配图{len(out) + 1}"),
+                "prompt": prompt,
+                "size": str(item.get("size") or "1024x1024"),
+            }
+        )
+    return out
+
+
+def _article_quick_check(
+    title: str,
+    body: str,
+    tags: List[str],
+    image_count: int = 0,
+) -> Dict[str, Any]:
+    """Deterministic local verifier used by workflow tools before/after LLM calls."""
+    from .banned_words import check_banned_words
+    from .research_data import CATEGORY_CN, detect_category
+    from .text_analyzer import full_analysis
+
+    category = detect_category(title, body, tags)
+    analysis = full_analysis(title, body, category, tags, image_count)
+    banned = check_banned_words(f"{title}\n{body}\n{' '.join(tags)}")
+    issues = list(analysis.get("all_issues", []))
+    if banned.hits:
+        issues.extend([f"命中敏感词「{h.word}」（{h.category}）" for h in banned.hits[:8]])
+    model_a = analysis.get("model_a_score", {})
+    total_score = float(model_a.get("total_score") or 0)
+    publish_ready = banned.safe and total_score >= 70 and len(tags) >= 4
+    return {
+        "category": category,
+        "category_cn": CATEGORY_CN.get(category, category),
+        "model_a_score": model_a,
+        "text_analysis": analysis,
+        "banned_words": banned.to_dict(),
+        "issues": issues,
+        "publish_ready": publish_ready,
+    }
+
+
 # ---------- CRUD tools ----------
 
 async def tool_create_article(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -139,7 +278,7 @@ async def tool_update_article(args: Dict[str, Any]) -> Dict[str, Any]:
         art = await s.get(Article, aid)
         if not art:
             return {"ok": False, "error": f"article {aid} not found"}
-        if uid and art.user_id != uid:
+        if uid is not None and art.user_id != uid:
             return {"ok": False, "error": "无权操作该笔记"}
         for key in ("title", "body", "cover_image", "status"):
             if key in args and args[key] is not None:
@@ -159,7 +298,7 @@ async def tool_read_article(args: Dict[str, Any]) -> Dict[str, Any]:
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
-    if uid and art.user_id != uid:
+    if uid is not None and art.user_id != uid:
         return {"ok": False, "error": "无权访问该笔记"}
     return {"ok": True, "article": art.to_dict()}
 
@@ -183,7 +322,7 @@ async def tool_delete_article(args: Dict[str, Any]) -> Dict[str, Any]:
         art = await s.get(Article, aid)
         if not art:
             return {"ok": False, "error": f"article {aid} not found"}
-        if uid and art.user_id != uid:
+        if uid is not None and art.user_id != uid:
             return {"ok": False, "error": "无权删除该笔记"}
         await s.delete(art)
         await s.commit()
@@ -227,6 +366,174 @@ async def tool_generate_article(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "article": art.to_dict()}
 
 
+async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Planner → Executor → Verifier workflow for a publish-ready XHS note.
+
+    This high-level tool turns a brief into a complete draft with strategy,
+    title candidates, tags, visual directions, local safety checks, and an
+    optional one-pass self-improvement. It writes the final result to DB.
+    """
+    topic = (args.get("topic") or args.get("brief") or "").strip()
+    if not topic:
+        return {"ok": False, "error": "topic is required"}
+
+    audience = args.get("audience", "小红书主力用户")
+    tone = args.get("tone", args.get("style", "真诚、有温度、有网感"))
+    length = args.get("length", "中等")
+    extra = args.get("extra", "")
+    auto_optimize = bool(args.get("auto_optimize", True))
+    include_visual_prompts = bool(args.get("include_visual_prompts", True))
+    generate_cover = bool(args.get("generate_cover", False))
+    generate_content_images = bool(args.get("generate_content_images", False))
+    image_count = max(1, min(6, int(args.get("image_count", 4))))
+
+    plan_prompt = (
+        f"创作主题/brief：{topic}\n"
+        f"目标受众：{audience}\n"
+        f"语气风格：{tone}\n"
+        f"篇幅：{length}\n"
+        f"补充信息：{extra}\n"
+        f"是否需要视觉方向：{include_visual_prompts}\n"
+        "请一次性交付完整小红书笔记工作流结果。"
+    )
+    resp = await chat_completion(
+        messages=[
+            {"role": "system", "content": XHS_WORKFLOW_SYSTEM},
+            {"role": "user", "content": plan_prompt},
+        ],
+        temperature=0.85,
+    )
+    data = _safe_json(resp.choices[0].message.content or "")
+
+    title = str(data.get("title") or topic).strip()
+    body = str(data.get("body") or "").strip()
+    tags = _normalize_tags(data.get("tags") or [])
+    title_candidates = [
+        str(x).strip()
+        for x in (data.get("title_candidates") or [])
+        if str(x).strip()
+    ][:8]
+    if title and title not in title_candidates:
+        title_candidates.insert(0, title)
+
+    cover_prompt = data.get("cover_prompt") if isinstance(data.get("cover_prompt"), dict) else {}
+    if not cover_prompt:
+        cover_prompt = {
+            "prompt": f"小红书封面，主题：{topic}，干净高级感，竖图 2:3，主体明确，预留标题区域",
+            "size": "1024x1536",
+        }
+    content_shots = _normalize_shots(
+        data.get("content_image_prompts") or data.get("shots") or [],
+        limit=image_count,
+    )
+
+    initial = {"title": title, "body": body, "tags": tags}
+    checks_before = _article_quick_check(title, body, tags, image_count=0)
+    optimization_applied = False
+    changelog: List[str] = []
+
+    should_optimize = auto_optimize and (
+        len(title) > 20
+        or len(tags) < 5
+        or bool(checks_before["banned_words"].get("hits"))
+        or float(checks_before["model_a_score"].get("total_score") or 0) < 75
+    )
+
+    if should_optimize:
+        opt_prompt = (
+            "请基于自检结果做一次最终优化，只返回 JSON。\n"
+            "要求：标题≤20字，保留原主题；替换敏感/绝对化表达；补足标签；正文更有钩子和互动。\n\n"
+            f"原始草稿：{json.dumps(initial, ensure_ascii=False)}\n"
+            f"自检问题：{json.dumps(checks_before.get('issues', [])[:10], ensure_ascii=False)}\n"
+            'JSON格式：{"title":"...","body":"...","tags":["#..."],"changelog":["..."]}'
+        )
+        opt_resp = await chat_completion(
+            messages=[
+                {"role": "system", "content": XHS_WRITER_SYSTEM},
+                {"role": "user", "content": opt_prompt},
+            ],
+            temperature=0.65,
+        )
+        opt = _safe_json(opt_resp.choices[0].message.content or "")
+        if opt:
+            title = str(opt.get("title") or title).strip()
+            body = str(opt.get("body") or body).strip()
+            tags = _normalize_tags(opt.get("tags") or tags)
+            changelog = [str(x) for x in (opt.get("changelog") or [])]
+            optimization_applied = True
+            if title and title not in title_candidates:
+                title_candidates.insert(0, title)
+
+    checks_after = _article_quick_check(title, body, tags, image_count=0)
+    uid = get_tool_user_id()
+
+    async with SessionLocal() as s:
+        art = Article(
+            title=title,
+            body=body,
+            tags=",".join(tags),
+            status="draft",
+            user_id=uid,
+            score={
+                "overall": checks_after["model_a_score"].get("total_score"),
+                "model": "local_model_a",
+                "category": checks_after.get("category"),
+                "publish_ready": checks_after.get("publish_ready"),
+            },
+        )
+        s.add(art)
+        await s.commit()
+        await s.refresh(art)
+        article_id = art.id
+
+    generated_cover = ""
+    generated_content_images: List[str] = []
+    if generate_cover:
+        urls = await generate_image(
+            prompt=str(cover_prompt.get("prompt") or ""),
+            size=str(cover_prompt.get("size") or "1024x1536"),
+            n=1,
+        )
+        generated_cover = urls[0] if urls else ""
+        if generated_cover:
+            await _bind_image_to_article(generated_cover, article_id, role="cover")
+
+    if generate_content_images and content_shots:
+        for shot in content_shots[:image_count]:
+            urls = await generate_image(
+                prompt=shot["prompt"],
+                size=shot.get("size", "1024x1024"),
+                n=1,
+            )
+            generated_content_images.extend(urls[:1])
+        for idx, url in enumerate(generated_content_images):
+            await _bind_image_to_article(url, article_id, role="content", replace_index=idx)
+
+    final = await _get_article(article_id)
+    return {
+        "ok": True,
+        "article": final.to_dict() if final else {"id": article_id, "title": title, "body": body, "tags": tags},
+        "workflow": {
+            "strategy": data.get("strategy", {}),
+            "title_candidates": title_candidates[:8],
+            "cover_prompt": cover_prompt,
+            "content_image_prompts": content_shots,
+            "self_check": data.get("self_check", {}),
+            "checks_before": checks_before,
+            "checks_after": checks_after,
+            "optimization_applied": optimization_applied,
+            "changelog": changelog,
+            "generated_cover": generated_cover,
+            "generated_content_images": generated_content_images,
+            "next_actions": [
+                "打开笔记详情微调正文",
+                "生成或替换封面图",
+                "运行 diagnose_article 做深度发布前诊断",
+            ],
+        },
+    }
+
+
 async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
     aid = int(args["article_id"])
     style = args.get("style", "更有网感、更口语化")
@@ -236,7 +543,7 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
-    if uid and art.user_id != uid:
+    if uid is not None and art.user_id != uid:
         return {"ok": False, "error": "无权操作该笔记"}
 
     await _snapshot_article(aid, "rewrite")
@@ -276,7 +583,7 @@ async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
-    if uid and art.user_id != uid:
+    if uid is not None and art.user_id != uid:
         return {"ok": False, "error": "无权操作该笔记"}
 
     await _snapshot_article(aid, "optimize")
@@ -345,7 +652,7 @@ async def tool_score_article(args: Dict[str, Any]) -> Dict[str, Any]:
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
-    if uid and art.user_id != uid:
+    if uid is not None and art.user_id != uid:
         return {"ok": False, "error": "无权操作该笔记"}
     resp = await chat_completion(
         messages=[
@@ -378,9 +685,10 @@ async def tool_diagnose_article(args: Dict[str, Any]) -> Dict[str, Any]:
     from .text_analyzer import full_analysis
 
     aid = int(args["article_id"])
-    art = await _get_article(aid)
-    if not art:
-        return {"ok": False, "error": f"article {aid} not found"}
+    art, err = await _get_article_for_user(aid)
+    if err:
+        return {"ok": False, "error": err}
+    assert art is not None
 
     tags = [t for t in (art.tags or "").split(",") if t.strip()]
     images = art.images or []
@@ -518,10 +826,18 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
     prompt = args["prompt"]
     size = args.get("size", "1024x1536")
     n = int(args.get("n", 1))
-    urls = await generate_image(prompt=prompt, size=size, n=n)
     aid = args.get("article_id")
     role = args.get("role", "content")
     replace_index = args.get("replace_index")
+    access_err = await _ensure_article_access(int(aid) if aid else None)
+    if access_err:
+        return access_err
+    urls = await generate_image(
+        prompt=prompt,
+        size=size,
+        n=n,
+        reference_images=args.get("reference_images"),
+    )
     if aid:
         async with SessionLocal() as s:
             art = await s.get(Article, int(aid))
@@ -551,6 +867,9 @@ async def tool_remove_image(args: Dict[str, Any]) -> Dict[str, Any]:
         art = await s.get(Article, aid)
         if not art:
             return {"ok": False, "error": f"article {aid} not found"}
+        uid = get_tool_user_id()
+        if uid is not None and art.user_id != uid:
+            return {"ok": False, "error": "无权操作该笔记"}
         if role == "cover":
             art.cover_image = ""
         else:
@@ -575,11 +894,13 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
     body = args.get("body", "")
     n = int(args.get("n", 4))
     if aid and not body:
-        art = await _get_article(int(aid))
-        if art:
-            title = title or art.title
-            body = art.body
-            topic = topic or art.title
+        art, err = await _get_article_for_user(int(aid))
+        if err:
+            return {"ok": False, "error": err}
+        assert art is not None
+        title = title or art.title
+        body = art.body
+        topic = topic or art.title
     resp = await chat_completion(
         messages=[
             {
@@ -623,13 +944,16 @@ async def _bind_image_to_article(
     article_id: Optional[int],
     role: str = "content",
     replace_index: Optional[int] = None,
-) -> None:
+) -> Optional[Dict[str, Any]]:
     if not article_id:
-        return
+        return None
     async with SessionLocal() as s:
         art = await s.get(Article, int(article_id))
         if not art:
-            return
+            return {"ok": False, "error": f"article {article_id} not found"}
+        uid = get_tool_user_id()
+        if uid is not None and art.user_id != uid:
+            return {"ok": False, "error": "无权操作该笔记"}
         if role == "cover":
             art.cover_image = url
         else:
@@ -644,6 +968,7 @@ async def _bind_image_to_article(
                 imgs.append(url)
             art.images = imgs
         await s.commit()
+    return None
 
 
 async def tool_crop_image(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -655,13 +980,18 @@ async def tool_crop_image(args: Dict[str, Any]) -> Dict[str, Any]:
     h = int(args.get("h", 0))
     if w <= 0 or h <= 0:
         return {"ok": False, "error": "w/h must be > 0"}
+    access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
+    if access_err:
+        return access_err
     new_url = crop_image(image_url, x, y, w, h)
-    await _bind_image_to_article(
+    bind_err = await _bind_image_to_article(
         new_url,
         args.get("article_id"),
         args.get("role", "content"),
         args.get("replace_index"),
     )
+    if bind_err:
+        return bind_err
     return {"ok": True, "image": new_url}
 
 
@@ -671,15 +1001,20 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
     mask_url = args.get("mask_url")
     prompt = args.get("prompt") or "match surrounding style"
     size = args.get("size", "1024x1024")
+    access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
+    if access_err:
+        return access_err
     urls = await edit_image(image_url, mask_url, prompt, size=size, n=1)
     if not urls:
         return {"ok": False, "error": "no image returned"}
-    await _bind_image_to_article(
+    bind_err = await _bind_image_to_article(
         urls[0],
         args.get("article_id"),
         args.get("role", "content"),
         args.get("replace_index"),
     )
+    if bind_err:
+        return bind_err
     return {"ok": True, "image": urls[0]}
 
 
@@ -692,15 +1027,20 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
         "remove any object present in the masked area, keep the same lighting, texture and color"
     )
     size = args.get("size", "1024x1024")
+    access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
+    if access_err:
+        return access_err
     urls = await edit_image(image_url, mask_url, prompt, size=size, n=1)
     if not urls:
         return {"ok": False, "error": "no image returned"}
-    await _bind_image_to_article(
+    bind_err = await _bind_image_to_article(
         urls[0],
         args.get("article_id"),
         args.get("role", "content"),
         args.get("replace_index"),
     )
+    if bind_err:
+        return bind_err
     return {"ok": True, "image": urls[0]}
 
 
@@ -709,23 +1049,32 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
     image_url = args["image_url"]
     prompt = args.get("prompt") or "enhance clarity, keep composition"
     size = args.get("size", "1024x1024")
+    access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
+    if access_err:
+        return access_err
     urls = await edit_image(image_url, None, prompt, size=size, n=1)
     if not urls:
         return {"ok": False, "error": "no image returned"}
-    await _bind_image_to_article(
+    bind_err = await _bind_image_to_article(
         urls[0],
         args.get("article_id"),
         args.get("role", "content"),
         args.get("replace_index"),
     )
+    if bind_err:
+        return bind_err
     return {"ok": True, "image": urls[0]}
 
 
 # ---------- templates ----------
 
 async def tool_list_templates(args: Dict[str, Any]) -> Dict[str, Any]:
+    uid = get_tool_user_id()
     async with SessionLocal() as s:
-        res = await s.execute(select(Template).order_by(Template.id.asc()))
+        q = select(Template).order_by(Template.id.asc())
+        if uid is not None:
+            q = q.where(or_(Template.creator_id.is_(None), Template.creator_id == uid))
+        res = await s.execute(q)
         items = [t.to_dict() for t in res.scalars().all()]
     return {"ok": True, "items": items}
 
@@ -740,6 +1089,9 @@ async def tool_apply_template(args: Dict[str, Any]) -> Dict[str, Any]:
         tmpl = await s.get(Template, int(template_id)) if template_id else None
         if not tmpl:
             return {"ok": False, "error": "template not found"}
+        uid = get_tool_user_id()
+        if uid is not None and tmpl.creator_id is not None and tmpl.creator_id != uid:
+            return {"ok": False, "error": "无权使用该模板"}
     resp = await chat_completion(
         messages=[
             {"role": "system", "content": XHS_WRITER_SYSTEM},
@@ -808,7 +1160,12 @@ async def tool_batch_score(args: Dict[str, Any]) -> Dict[str, Any]:
     results = []
     for aid in article_ids[:10]:
         r = await tool_score_article({"article_id": int(aid)})
-        results.append({"article_id": int(aid), "score": r.get("score", {})})
+        results.append({
+            "article_id": int(aid),
+            "ok": r.get("ok", False),
+            "score": r.get("score", {}),
+            "error": r.get("error"),
+        })
 
     return {"ok": True, "results": results}
 
@@ -823,7 +1180,7 @@ async def tool_batch_optimize(args: Dict[str, Any]) -> Dict[str, Any]:
     results = []
     for aid in article_ids[:5]:
         r = await tool_optimize_article({"article_id": int(aid), "focus": focus})
-        results.append({"article_id": int(aid), "ok": r.get("ok", False)})
+        results.append({"article_id": int(aid), "ok": r.get("ok", False), "error": r.get("error")})
 
     return {"ok": True, "results": results}
 
@@ -897,6 +1254,9 @@ async def tool_schedule_publish(args: Dict[str, Any]) -> Dict[str, Any]:
         art = await s.get(Article, aid)
         if not art:
             return {"ok": False, "error": f"article {aid} not found"}
+        uid = get_tool_user_id()
+        if uid is not None and art.user_id != uid:
+            return {"ok": False, "error": "无权操作该笔记"}
         art.status = "scheduled"
         if scheduled_at_str:
             try:
@@ -937,6 +1297,26 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "length": {"type": "string"},
                 "audience": {"type": "string"},
                 "extra": {"type": "string"},
+            },
+            required=["topic"],
+        ),
+    },
+    "create_complete_note_workflow": {
+        "fn": tool_create_complete_note_workflow,
+        "schema": _fn_schema(
+            "create_complete_note_workflow",
+            "端到端创作工作流：解析 brief，生成笔记、标题候选、标签、封面/配图方向，本地自检并可自动二次优化后入库。复杂创作请求优先使用。",
+            {
+                "topic": {"type": "string", "description": "主题、灵感或完整 brief"},
+                "audience": {"type": "string", "description": "目标受众"},
+                "tone": {"type": "string", "description": "语气/风格"},
+                "length": {"type": "string", "description": "短/中等/长"},
+                "extra": {"type": "string", "description": "补充要求、产品卖点、禁用表达等"},
+                "auto_optimize": {"type": "boolean", "description": "是否基于自检自动二次优化，默认 true"},
+                "include_visual_prompts": {"type": "boolean", "description": "是否产出封面和内容配图 prompt，默认 true"},
+                "generate_cover": {"type": "boolean", "description": "是否直接生成封面图，默认 false"},
+                "generate_content_images": {"type": "boolean", "description": "是否直接生成正文配图，默认 false"},
+                "image_count": {"type": "integer", "description": "配图 prompt/生成数量，1-6"},
             },
             required=["topic"],
         ),
@@ -1054,6 +1434,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "prompt": {"type": "string"},
                 "size": {"type": "string", "description": "如 1024x1536 / 1024x1024"},
                 "n": {"type": "integer"},
+                "reference_images": {"type": "array", "items": {"type": "string"}},
                 "article_id": {"type": "integer"},
                 "role": {"type": "string", "enum": ["cover", "content"]},
                 "replace_index": {"type": "integer", "description": "替换第 N 张内容配图（0-based）"},
@@ -1280,3 +1661,26 @@ async def call_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": f"unknown tool: {name}"}
     fn: ToolFn = TOOLS[name]["fn"]
     return await fn(args or {})
+
+
+async def call_tool_for_user(
+    name: str,
+    args: Dict[str, Any],
+    user_id: Optional[int],
+) -> Dict[str, Any]:
+    """Call a tool with user ownership and per-user LLM settings bound.
+
+    This is the single entrypoint REST routes should use. The standalone stdio
+    MCP server intentionally calls `call_tool` without a user to preserve local
+    single-user compatibility.
+    """
+    from ..config import get_effective_settings
+
+    settings = await get_effective_settings(user_id) if user_id else None
+    user_token = set_tool_user_id(user_id)
+    settings_token = set_current_settings(settings)
+    try:
+        return await call_tool(name, args or {})
+    finally:
+        reset_current_settings(settings_token)
+        reset_tool_user_id(user_token)

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Coroutine, Dict, List, Optional
 
 from ...services.llm import chat_completion
+from ...config import Settings
 from ..research_data import build_data_prompt, detect_category, pre_score, CATEGORY_CN
 from ..text_analyzer import full_analysis
 from .prompts import (
@@ -68,13 +69,19 @@ def _safe_json_parse(text: str) -> Dict[str, Any]:
     return {}
 
 
-async def _call_agent(system_prompt: str, user_content: str, temperature: float = 0.7) -> Dict[str, Any]:
+async def _call_agent(
+    system_prompt: str,
+    user_content: str,
+    temperature: float = 0.7,
+    settings: Optional[Settings] = None,
+) -> Dict[str, Any]:
     resp = await chat_completion(
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
         temperature=temperature,
+        settings=settings,
     )
     text = resp.choices[0].message.content or ""
     return _safe_json_parse(text)
@@ -99,6 +106,7 @@ async def run_diagnosis(
     image_count: int = 0,
     images: List[str] | None = None,
     progress: Optional[ProgressCallback] = None,
+    settings: Optional[Settings] = None,
 ) -> DiagnosisResult:
     """执行完整诊断流程，返回 DiagnosisResult。"""
     start_time = time.time()
@@ -145,7 +153,7 @@ async def run_diagnosis(
         data_supplement = build_data_prompt(agent_type, category)
         full_prompt = prompt + data_supplement
         user_msg = note_context + analysis_context
-        result = await _call_agent(full_prompt, user_msg)
+        result = await _call_agent(full_prompt, user_msg, settings=settings)
         await emit(f"agent_done_{agent_type}", f"{name}完成评估", {"score": result.get("score", 0)})
         return result
 
@@ -177,7 +185,7 @@ async def run_diagnosis(
             agent_name=name,
             other_opinions="\n\n".join(other),
         )
-        result = await _call_agent(debate_prompt, note_context, temperature=0.6)
+        result = await _call_agent(debate_prompt, note_context, temperature=0.6, settings=settings)
         return result
 
     debate_results = await asyncio.gather(
@@ -217,7 +225,7 @@ async def run_diagnosis(
         )
     )
 
-    judge_result = await _call_agent(judge_system, judge_user, temperature=0.5)
+    judge_result = await _call_agent(judge_system, judge_user, temperature=0.5, settings=settings)
     await emit("judge_done", "裁判完成")
 
     # ─── Step 7: 组装结果 ───
