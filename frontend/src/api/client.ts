@@ -137,6 +137,15 @@ export interface DiagnosisReport {
   elapsed_ms: number
 }
 
+function handleStreamAuth(res: Response, url: string) {
+  if (res.status === 401 && !url.includes('/auth/')) {
+    localStorage.removeItem(TOKEN_KEY)
+    window.location.href = '/login'
+    throw new Error('未登录')
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+}
+
 export async function diagnoseStream(
   payload: { article_id?: number; title?: string; content?: string; tags?: string[]; image_count?: number },
   onEvent: (ev: DiagnoseEvent) => void,
@@ -149,7 +158,7 @@ export async function diagnoseStream(
     body: JSON.stringify(payload),
     signal,
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+  handleStreamAuth(res, '/api/diagnose/stream')
   if (!res.body) throw new Error('no stream body')
   const reader = res.body.getReader()
   const decoder = new TextDecoder('utf-8')
@@ -443,7 +452,7 @@ export async function chatStream(
     body: JSON.stringify({ messages, conversation_id: conversationId || undefined }),
     signal,
   })
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+  handleStreamAuth(res, '/api/chat/stream')
   if (!res.body) throw new Error('no stream body')
   const reader = res.body.getReader()
   const decoder = new TextDecoder('utf-8')
@@ -488,6 +497,7 @@ export async function streamTask(
 ) {
   const token = localStorage.getItem(TOKEN_KEY)
   const res = await fetch(`/api/tasks/${taskId}/stream`, { signal, headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  handleStreamAuth(res, `/api/tasks/${taskId}/stream`)
   if (!res.body) throw new Error('no stream body')
   const reader = res.body.getReader()
   const decoder = new TextDecoder('utf-8')

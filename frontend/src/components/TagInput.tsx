@@ -24,6 +24,8 @@ export default function TagInput({
   const [activeIdx, setActiveIdx] = useState(-1)
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
   const containerRef = useRef<HTMLDivElement>(null)
+  const tagsRef = useRef(tags)
+  tagsRef.current = tags
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
@@ -31,13 +33,13 @@ export default function TagInput({
     timerRef.current = setTimeout(async () => {
       try {
         const items = await suggestHotTags(input.replace(/^#/, ''), category || '', 12)
-        setSuggestions(items.filter(t => !tags.includes(t.tag.replace(/^#/, ''))))
+        setSuggestions(items.filter(t => !tagsRef.current.includes(t.tag.replace(/^#/, ''))))
         setShowSuggestions(true)
         setActiveIdx(-1)
       } catch { /* ignore */ }
     }, 200)
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [input, category, tags])
+  }, [input, category])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {

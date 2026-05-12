@@ -1,14 +1,21 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Box, Button, CircularProgress, Stack, Tab, Tabs, TextField, Typography } from '@mui/material'
 import { useAuth } from '../AuthContext'
 import { toast } from 'sonner'
 
 export default function LoginPage() {
-  const { login, register } = useAuth()
+  const { login, register, user } = useAuth()
+  const nav = useNavigate()
   const [tab, setTab] = useState(0)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
+
+  if (user) {
+    nav('/', { replace: true })
+    return null
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -20,6 +27,7 @@ export default function LoginPage() {
       } else {
         await register(username, password)
       }
+      nav('/', { replace: true })
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.message || '操作失败'
       toast.error(msg)
