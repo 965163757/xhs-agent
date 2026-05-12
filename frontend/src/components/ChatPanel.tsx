@@ -13,6 +13,7 @@ import {
 import SendRoundedIcon from '@mui/icons-material/SendRounded'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
 import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
+import CloseIcon from '@mui/icons-material/Close'
 import ReplayIcon from '@mui/icons-material/Replay'
 import { uploadImage, type Article } from '../api/client'
 import MessageBubble from './MessageBubble'
@@ -90,7 +91,7 @@ export default function ChatPanel({
         display: 'flex',
         flexDirection: 'column',
         height: height || '100%',
-        bgcolor: '#fff',
+        bgcolor: 'background.paper',
       }}
     >
       {showHeader && (
@@ -123,7 +124,7 @@ export default function ChatPanel({
             <Chip
               size="small"
               label={article.title?.slice(0, 14) || '（无标题）'}
-              sx={{ bgcolor: '#F4EFE5', fontSize: 11, height: 20, maxWidth: 160 }}
+              sx={{ bgcolor: 'action.hover', fontSize: 11, height: 20, maxWidth: 160 }}
             />
           )}
           {streaming && (
@@ -230,19 +231,20 @@ export default function ChatPanel({
                     sx={{
                       textAlign: 'left',
                       p: 1.6,
-                      border: '1px solid #EEE9E1',
+                      border: '1px solid',
+                      borderColor: 'divider',
                       borderRadius: 2.5,
-                      bgcolor: '#fff',
+                      bgcolor: 'background.paper',
                       cursor: 'pointer',
                       transition: 'all .15s',
                       '&:hover': {
-                        borderColor: '#1F1F1F',
+                        borderColor: 'text.primary',
                         bgcolor: 'background.default',
                         transform: 'translateY(-1px)',
                       },
                       '&:focus-visible': {
                         outline: 'none',
-                        borderColor: '#1F1F1F',
+                        borderColor: 'text.primary',
                         boxShadow: '0 0 0 3px rgba(31,31,31,0.08)',
                       },
                     }}
@@ -279,11 +281,12 @@ export default function ChatPanel({
                     clickable
                     onClick={() => handleSend(q.prompt)}
                     sx={{
-                      bgcolor: '#fff',
-                      border: '1px solid #EEE9E1',
+                      bgcolor: 'background.paper',
+                      border: '1px solid',
+                      borderColor: 'divider',
                       fontSize: 12,
                       height: 28,
-                      '&:hover': { bgcolor: 'background.default', borderColor: '#B8B4AB' },
+                      '&:hover': { bgcolor: 'background.default', borderColor: 'text.secondary' },
                     }}
                   />
                 ))}
@@ -332,18 +335,36 @@ export default function ChatPanel({
           {pendingImages.length > 0 && (
             <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', gap: 1 }}>
               {pendingImages.map((u, i) => (
-                <Box
-                  key={i}
-                  component="img"
-                  src={u}
-                  sx={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 1.2,
-                    objectFit: 'cover',
-                    border: '1px solid #EEE9E1',
-                  }}
-                />
+                <Box key={i} sx={{ position: 'relative' }}>
+                  <Box
+                    component="img"
+                    src={u}
+                    sx={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 1.2,
+                      objectFit: 'cover',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                    }}
+                  />
+                  <IconButton
+                    size="small"
+                    onClick={() => storeSetPendingImages(sessionKey, pendingImages.filter((_, idx) => idx !== i))}
+                    sx={{
+                      position: 'absolute',
+                      top: -6,
+                      right: -6,
+                      width: 18,
+                      height: 18,
+                      bgcolor: 'text.primary',
+                      color: 'background.paper',
+                      '&:hover': { bgcolor: 'error.main' },
+                    }}
+                  >
+                    <CloseIcon sx={{ fontSize: 12 }} />
+                  </IconButton>
+                </Box>
               ))}
             </Stack>
           )}
@@ -352,15 +373,16 @@ export default function ChatPanel({
               display: 'flex',
               alignItems: 'flex-end',
               gap: 0.4,
-              border: '1px solid #E6E0D4',
+              border: '1px solid',
+              borderColor: 'divider',
               borderRadius: 28,
               px: 1.2,
               py: 0.8,
-              bgcolor: '#fff',
+              bgcolor: 'background.paper',
               boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
               transition: 'border-color .15s, box-shadow .15s',
               '&:focus-within': {
-                borderColor: '#1F1F1F',
+                borderColor: 'text.primary',
                 boxShadow: '0 2px 8px rgba(31,31,31,0.06)',
               },
             }}
@@ -426,12 +448,12 @@ export default function ChatPanel({
                 disabled={!input.trim() && pendingImages.length === 0}
                 sx={{
                   bgcolor: 'text.primary',
-                  color: '#fff',
+                  color: 'background.paper',
                   width: 34,
                   height: 34,
                   alignSelf: 'center',
                   '&:hover': { bgcolor: '#000' },
-                  '&.Mui-disabled': { bgcolor: '#EEE9E1', color: '#B8B4AB' },
+                  '&.Mui-disabled': { bgcolor: 'action.disabledBackground', color: 'text.disabled' },
                 }}
               >
                 <SendRoundedIcon sx={{ fontSize: 18 }} />
@@ -442,7 +464,7 @@ export default function ChatPanel({
             sx={{
               mt: 1,
               fontSize: 11,
-              color: '#B8B4AB',
+              color: 'text.disabled',
               textAlign: 'center',
             }}
           >

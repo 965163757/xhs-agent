@@ -43,6 +43,7 @@ import {
 } from '../api/client'
 import { toast } from 'sonner'
 import ChatPanel from '../components/ChatPanel'
+import ConfirmDialog from '../components/ConfirmDialog'
 import ImageEditor from '../components/ImageEditor'
 import PhonePreview from '../components/PhonePreview'
 import TagInput from '../components/TagInput'
@@ -222,6 +223,8 @@ export default function ArticleDetailPage() {
   const [bannedHits, setBannedHits] = useState<BannedWordHit[]>([])
   const bannedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(id ? Number(id) : null)
+  const [deleteConvoId, setDeleteConvoId] = useState<number | null>(null)
+  const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
 
   const refreshConvos = useCallback(() => {
     listConversations().then(all => {
@@ -239,10 +242,15 @@ export default function ArticleDetailPage() {
   }
 
   const removeConvo = async (cid: number) => {
-    if (!confirm('删除这条对话？')) return
-    await deleteConversation(cid)
-    if (convId === String(cid)) newChat()
+    setDeleteConvoId(cid)
+  }
+
+  const confirmRemoveConvo = async () => {
+    if (deleteConvoId === null) return
+    await deleteConversation(deleteConvoId)
+    if (convId === String(deleteConvoId)) newChat()
     refreshConvos()
+    setDeleteConvoId(null)
   }
 
   const refreshVersions = useCallback(() => {
@@ -251,11 +259,16 @@ export default function ArticleDetailPage() {
   }, [id])
 
   const handleRollback = async (vid: number) => {
-    if (!confirm('确定回滚到此版本？当前内容将被覆盖。')) return
-    const a = await rollbackVersion(Number(id), vid)
+    setRollbackTarget(vid)
+  }
+
+  const confirmRollback = async () => {
+    if (rollbackTarget === null) return
+    const a = await rollbackVersion(Number(id), rollbackTarget)
     setArt(a)
     setSavedArt(a)
     toast.success('已回滚')
+    setRollbackTarget(null)
   }
 
   const load = useCallback(async () => {
@@ -701,11 +714,12 @@ export default function ArticleDetailPage() {
         sx={{
           width: 400,
           flexShrink: 0,
-          borderLeft: '1px solid #e5e7eb',
+          borderLeft: 1,
+          borderColor: 'divider',
           display: { xs: 'none', lg: 'flex' },
           alignItems: 'center',
           justifyContent: 'center',
-          bgcolor: '#FAFAFA',
+          bgcolor: 'background.default',
           overflow: 'auto',
           py: 3,
         }}
@@ -853,6 +867,26 @@ export default function ArticleDetailPage() {
           />
         </Box>
       </Drawer>
+
+      <ConfirmDialog
+        open={deleteConvoId !== null}
+        title="确认删除"
+        message="删除后无法恢复，确定要删除这条对话吗？"
+        confirmLabel="删除"
+        danger
+        onConfirm={confirmRemoveConvo}
+        onCancel={() => setDeleteConvoId(null)}
+      />
+
+      <ConfirmDialog
+        open={rollbackTarget !== null}
+        title="确认回滚"
+        message="回滚后当前内容将被覆盖，确定要回滚到此版本吗？"
+        confirmLabel="回滚"
+        danger
+        onConfirm={confirmRollback}
+        onCancel={() => setRollbackTarget(null)}
+      />
     </Box>
   )
 }

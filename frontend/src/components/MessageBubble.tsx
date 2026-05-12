@@ -88,8 +88,8 @@ function ToolCard({
     <Box
       sx={{
         border: '1px solid',
-        borderColor: running ? '#FFD9A1' : '#EEE9E1',
-        bgcolor: running ? '#FFF7E8' : '#FAF7F2',
+        borderColor: running ? 'warning.main' : 'divider',
+        bgcolor: running ? 'action.hover' : 'action.selected',
         borderRadius: 2,
         my: 1,
         overflow: 'hidden',
@@ -113,29 +113,30 @@ function ToolCard({
         <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.primary' }}>
           {running ? `调用 ${zh}…` : `${zh} · 完成`}
         </Typography>
-        <Typography sx={{ fontSize: 12, color: '#B8B4AB', fontFamily: 'monospace' }}>
+        <Typography sx={{ fontSize: 12, color: 'text.secondary', fontFamily: 'monospace' }}>
           {name}
         </Typography>
         <Box sx={{ flex: 1 }} />
         <KeyboardArrowDownIcon
           sx={{
             fontSize: 18,
-            color: '#B8B4AB',
+            color: 'text.disabled',
             transition: 'transform .2s',
             transform: open ? 'rotate(180deg)' : 'none',
           }}
         />
       </Stack>
       <Collapse in={open}>
-        <Box sx={{ px: 1.4, pb: 1.4, borderTop: '1px solid #e5e7eb', pt: 1 }}>
+        <Box sx={{ px: 1.4, pb: 1.4, borderTop: '1px solid', borderColor: 'divider', pt: 1 }}>
           {argJson !== '{}' && (
             <Box
               sx={{
                 fontFamily: 'ui-monospace, Menlo, monospace',
                 fontSize: 12,
                 color: 'text.primary',
-                bgcolor: '#ffffff',
-                border: '1px solid #EEE9E1',
+                bgcolor: 'background.paper',
+                border: '1px solid',
+                borderColor: 'divider',
                 borderRadius: 1,
                 p: 1,
                 whiteSpace: 'pre-wrap',
@@ -151,8 +152,9 @@ function ToolCard({
                 fontFamily: 'ui-monospace, Menlo, monospace',
                 fontSize: 12,
                 color: 'text.secondary',
-                bgcolor: '#ffffff',
-                border: '1px solid #EEE9E1',
+                bgcolor: 'background.paper',
+                border: '1px solid',
+                borderColor: 'divider',
                 borderRadius: 1,
                 p: 1,
                 maxHeight: 240,
@@ -178,7 +180,8 @@ function ToolCard({
                 sx={{
                   width: 180,
                   borderRadius: 2,
-                  border: '1px solid #EEE9E1',
+                  border: '1px solid',
+                  borderColor: 'divider',
                   objectFit: 'cover',
                   cursor: 'pointer',
                   '&:hover': { opacity: 0.85 },
@@ -194,7 +197,8 @@ function ToolCard({
                 sx={{
                   width: 180,
                   borderRadius: 2,
-                  border: '1px solid #EEE9E1',
+                  border: '1px solid',
+                  borderColor: 'divider',
                   objectFit: 'cover',
                   cursor: 'pointer',
                   '&:hover': { opacity: 0.85 },
@@ -215,15 +219,16 @@ function ToolCard({
         >
           <Box
             sx={{
-              border: '1px solid #EEE9E1',
-              bgcolor: '#ffffff',
+              border: '1px solid',
+              borderColor: 'divider',
+              bgcolor: 'background.paper',
               borderRadius: 2,
               p: 1.2,
             }}
           >
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-              <Typography sx={{ fontSize: 13, color: '#B8B4AB' }}>笔记 #{article.id}</Typography>
-              <Chip size="small" label={article.status} sx={{ bgcolor: '#F4EFE5', fontSize: 11 }} />
+              <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>笔记 #{article.id}</Typography>
+              <Chip size="small" label={article.status} sx={{ bgcolor: 'action.hover', fontSize: 11 }} />
             </Stack>
             <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 0.6 }}>
               {article.title || '（无标题）'}
@@ -243,7 +248,7 @@ function ToolCard({
             {Array.isArray(article.tags) && article.tags.length > 0 && (
               <Stack direction="row" spacing={0.5} sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}>
                 {article.tags.map((t: string) => (
-                  <Chip key={t} label={t} size="small" sx={{ bgcolor: '#F4EFE5', fontSize: 11 }} />
+                  <Chip key={t} label={t} size="small" sx={{ bgcolor: 'action.hover', fontSize: 11 }} />
                 ))}
               </Stack>
             )}
@@ -277,12 +282,13 @@ function ToolCard({
                 sx={{
                   px: 1.2,
                   py: 0.8,
-                  bgcolor: '#fff',
-                  border: '1px solid #EEE9E1',
+                  bgcolor: 'background.paper',
+                  border: '1px solid',
+                  borderColor: 'divider',
                   borderRadius: 1.5,
                   fontSize: 14,
                   cursor: 'pointer',
-                  '&:hover': { borderColor: '#B8B4AB' },
+                  '&:hover': { borderColor: 'text.secondary' },
                 }}
                 onClick={() => navigator.clipboard.writeText(t)}
               >
@@ -297,7 +303,7 @@ function ToolCard({
         <Box sx={{ px: 1.4, pb: 1.4 }}>
           <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
             {tags.map(t => (
-              <Chip key={t} label={t} size="small" sx={{ bgcolor: '#F4EFE5' }} />
+              <Chip key={t} label={t} size="small" sx={{ bgcolor: 'action.hover' }} />
             ))}
           </Stack>
         </Box>
@@ -305,10 +311,10 @@ function ToolCard({
 
       {outline && (
         <Box sx={{ px: 1.4, pb: 1.4 }}>
-          <Box sx={{ border: '1px solid #EEE9E1', borderRadius: 2, p: 1.2, bgcolor: '#fff' }}>
+          <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.2, bgcolor: 'background.paper' }}>
             {outline.hook && (
               <>
-                <Typography sx={{ fontSize: 12, color: '#B8B4AB' }}>钩子</Typography>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>钩子</Typography>
                 <Typography sx={{ fontSize: 14, mb: 0.8 }}>{outline.hook}</Typography>
               </>
             )}
@@ -327,7 +333,7 @@ function ToolCard({
             ))}
             {outline.cta && (
               <>
-                <Typography sx={{ fontSize: 12, color: '#B8B4AB', mt: 0.6 }}>CTA</Typography>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.6 }}>CTA</Typography>
                 <Typography sx={{ fontSize: 14 }}>{outline.cta}</Typography>
               </>
             )}
@@ -337,14 +343,14 @@ function ToolCard({
 
       {diagnostic && (
         <Box sx={{ px: 1.4, pb: 1.4 }}>
-          <Box sx={{ border: '1px solid #EEE9E1', borderRadius: 2, p: 1.2, bgcolor: '#fff' }}>
+          <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.2, bgcolor: 'background.paper' }}>
             <Typography sx={{ fontSize: 13, fontWeight: 700, mb: 0.5 }}>
               {diagnostic.publish_ready ? '✅ 可发布' : '⚠️ 建议修改再发'}
             </Typography>
             {['risks', 'missing', 'suggestions'].map(k =>
               Array.isArray(diagnostic[k]) && diagnostic[k].length > 0 ? (
                 <Box key={k} sx={{ mt: 0.6 }}>
-                  <Typography sx={{ fontSize: 12, color: '#B8B4AB' }}>
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
                     {k === 'risks' ? '风险' : k === 'missing' ? '缺失' : '建议'}
                   </Typography>
                   {diagnostic[k].map((x: string, i: number) => (
@@ -368,7 +374,7 @@ function ToolCard({
                   key={k}
                   size="small"
                   label={`${k} ${score[k]}`}
-                  sx={{ bgcolor: '#F4EFE5', fontFamily: 'monospace' }}
+                  sx={{ bgcolor: 'action.hover', fontFamily: 'monospace' }}
                 />
               ) : null
             )}
@@ -380,14 +386,15 @@ function ToolCard({
         <Box sx={{ px: 1.4, pb: 1.4 }}>
           <Box
             sx={{
-              border: '1px solid #EEE9E1',
+              border: '1px solid',
+              borderColor: 'divider',
               borderRadius: 2,
               p: 1.2,
-              bgcolor: '#fff',
+              bgcolor: 'background.paper',
               fontSize: 13,
             }}
           >
-            <Typography sx={{ fontSize: 12, color: '#B8B4AB' }}>
+            <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
               size: {coverData.size || '1024x1536'}
             </Typography>
             <Typography sx={{ whiteSpace: 'pre-wrap', mt: 0.5 }}>{coverData.prompt}</Typography>
@@ -437,9 +444,9 @@ export default function MessageBubble({
             height: 28,
             borderRadius: '50%',
             flexShrink: 0,
-            bgcolor: isUser ? '#EEE9E1' : 'transparent',
-            background: isUser ? '#EEE9E1' : 'linear-gradient(135deg,#ef4444,#f97316)',
-            color: isUser ? '#1F1F1F' : '#fff',
+            bgcolor: isUser ? 'action.hover' : 'transparent',
+            background: isUser ? undefined : 'linear-gradient(135deg,#ef4444,#f97316)',
+            color: isUser ? 'text.primary' : '#fff',
             display: 'grid',
             placeItems: 'center',
             fontSize: 12,
@@ -465,7 +472,8 @@ export default function MessageBubble({
                     maxWidth: 220,
                     maxHeight: 180,
                     borderRadius: 2,
-                    border: '1px solid #EEE9E1',
+                    border: '1px solid',
+                    borderColor: 'divider',
                     objectFit: 'cover',
                     cursor: 'pointer',
                     '&:hover': { opacity: 0.85 },

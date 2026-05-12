@@ -4,6 +4,7 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   IconButton,
   Stack,
   Tooltip,
@@ -24,16 +25,19 @@ import EditNoteIcon from '@mui/icons-material/EditNote'
 import SortIcon from '@mui/icons-material/Sort'
 import { deleteArticle, listArticles, type Article } from '../api/client'
 import { toast } from 'sonner'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 type SortKey = 'updated' | 'score' | 'title'
 
 export default function ArticlesPage() {
   const [items, setItems] = useState<Article[]>([])
+  const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<SortKey>('updated')
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
   const nav = useNavigate()
-  const refresh = () => listArticles().then(setItems).catch(() => setItems([]))
+  const refresh = () => listArticles().then(setItems).catch(() => setItems([])).finally(() => setLoading(false))
   useEffect(() => {
     refresh()
   }, [])
@@ -118,7 +122,13 @@ export default function ArticlesPage() {
         </Button>
       </Stack>
 
-      {filtered.length === 0 && (
+      {loading && (
+        <Box sx={{ display: 'grid', placeItems: 'center', py: 8 }}>
+          <CircularProgress size={28} />
+        </Box>
+      )}
+
+      {!loading && filtered.length === 0 && (
         <Box
           sx={{
             textAlign: 'center',
@@ -264,12 +274,7 @@ export default function ArticlesPage() {
                     size="small"
                     onClick={e => {
                       e.stopPropagation()
-                      if (confirm('删除这篇笔记？')) {
-                        deleteArticle(a.id).then(() => {
-                          toast.success('已删除')
-                          refresh()
-                        })
-                      }
+                      setDeleteTarget(a.id)
                     }}
                   >
                     <DeleteOutlineIcon fontSize="small" />
@@ -280,6 +285,24 @@ export default function ArticlesPage() {
           </Box>
         ))}
       </Stack>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="确认删除"
+        message="删除后无法恢复，确定要删除这篇笔记吗？"
+        confirmLabel="删除"
+        danger
+        onConfirm={() => {
+          if (deleteTarget !== null) {
+            deleteArticle(deleteTarget).then(() => {
+              toast.success('已删除')
+              refresh()
+            })
+          }
+          setDeleteTarget(null)
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </Box>
   )
 }

@@ -24,6 +24,7 @@ import {
   type Article,
 } from '../api/client'
 import ChatPanel from '../components/ChatPanel'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor, getSession } from '../chatStore'
 
 const suggestions = [
@@ -41,7 +42,7 @@ export default function ChatPage() {
   const [article, setArticle] = useState<Article | null>(null)
   const [sidebar, setSidebar] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
-
+  const [deleteConvoId, setDeleteConvoId] = useState<number | null>(null)
   // The session key used by chatStore
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(articleId ? Number(articleId) : null)
 
@@ -89,9 +90,14 @@ export default function ChatPage() {
   }, [articleId, setParams, currentSessionKey])
 
   const removeConvo = async (id: number) => {
-    if (!confirm('删除这条对话？')) return
-    await deleteConversation(id)
+    setDeleteConvoId(id)
+  }
+
+  const confirmRemoveConvo = async () => {
+    if (deleteConvoId === null) return
+    await deleteConversation(deleteConvoId)
     refreshConvos()
+    setDeleteConvoId(null)
   }
 
   return (
@@ -201,6 +207,16 @@ export default function ChatPage() {
           </List>
         </Box>
       </Drawer>
+
+      <ConfirmDialog
+        open={deleteConvoId !== null}
+        title="确认删除"
+        message="删除后无法恢复，确定要删除这条对话吗？"
+        confirmLabel="删除"
+        danger
+        onConfirm={confirmRemoveConvo}
+        onCancel={() => setDeleteConvoId(null)}
+      />
     </Box>
   )
 }

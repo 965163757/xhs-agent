@@ -1,5 +1,5 @@
 from typing import Any, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ArticleIn(BaseModel):
@@ -10,6 +10,13 @@ class ArticleIn(BaseModel):
     images: List[str] = Field(default_factory=list)
     status: str = "draft"
 
+    @field_validator("title")
+    @classmethod
+    def title_max_length(cls, v: str) -> str:
+        if len(v) > 20:
+            raise ValueError("标题不能超过 20 个字符")
+        return v
+
 
 class ArticleUpdate(BaseModel):
     title: Optional[str] = None
@@ -19,6 +26,13 @@ class ArticleUpdate(BaseModel):
     images: Optional[List[str]] = None
     status: Optional[str] = None
     score: Optional[dict] = None
+
+    @field_validator("title")
+    @classmethod
+    def title_max_length(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 20:
+            raise ValueError("标题不能超过 20 个字符")
+        return v
 
 
 class ChatMessage(BaseModel):

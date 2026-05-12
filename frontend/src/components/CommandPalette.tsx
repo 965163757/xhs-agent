@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box,
@@ -30,6 +30,7 @@ export default function CommandPalette() {
   const [query, setQuery] = useState('')
   const [articles, setArticles] = useState<Article[]>([])
   const [selectedIdx, setSelectedIdx] = useState(0)
+  const lastFetchRef = useRef(0)
   const nav = useNavigate()
 
   useEffect(() => {
@@ -45,7 +46,11 @@ export default function CommandPalette() {
 
   useEffect(() => {
     if (open) {
-      listArticles().then(setArticles).catch(() => {})
+      const now = Date.now()
+      if (now - lastFetchRef.current > 10000) {
+        listArticles().then(setArticles).catch(() => {})
+        lastFetchRef.current = now
+      }
       setQuery('')
       setSelectedIdx(0)
     }

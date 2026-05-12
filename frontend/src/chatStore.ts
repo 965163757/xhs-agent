@@ -316,8 +316,20 @@ export async function sendMessage(
       controller.signal,
       s.conversationId
     )
-  } catch {
-    // Stream interrupted (refresh/abort) — don't append error text
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      // User cancelled — no error message needed
+    } else {
+      const cur = ensure(key)
+      const copy = cur.messages.slice()
+      if (copy.length > 0 && copy[copy.length - 1].role === 'assistant') {
+        const last = { ...copy[copy.length - 1] } as UiMessage
+        last.content += `\n\n⚠️ 网络异常，请检查连接后重试`
+        copy[copy.length - 1] = last
+      }
+      cur.messages = copy
+      bump(key)
+    }
   } finally {
     const cur = ensure(key)
     cur.streaming = false

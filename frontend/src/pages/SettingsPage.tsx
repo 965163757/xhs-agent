@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Box,
   Button,
+  CircularProgress,
   Stack,
   TextField,
   Typography,
@@ -91,6 +92,12 @@ export default function SettingsPage() {
       <Typography sx={{ fontSize: 13.5, color: 'text.secondary', mb: 1 }}>
         管理 API 密钥、模型和 MCP 接入。修改保存后立即生效。
       </Typography>
+
+      {!s && (
+        <Box sx={{ display: 'grid', placeItems: 'center', py: 8 }}>
+          <CircularProgress size={28} />
+        </Box>
+      )}
 
       {s && (
         <Section
@@ -195,7 +202,7 @@ export default function SettingsPage() {
   "mcpServers": {
     "xhs-agent": {
       "command": "bash",
-      "args": ["/Users/yuan/Desktop/ai/xhs_agent/start_mcp.sh"]
+      "args": ["<项目路径>/start_mcp.sh"]
     }
   }
 }`}</Box>

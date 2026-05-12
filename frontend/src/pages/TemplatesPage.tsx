@@ -7,6 +7,7 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  DialogContentText,
   DialogTitle,
   IconButton,
   Stack,
@@ -22,14 +23,16 @@ import { toast } from 'sonner'
 
 export default function TemplatesPage() {
   const [items, setItems] = useState<Template[]>([])
+  const [loading, setLoading] = useState(true)
   const [active, setActive] = useState<Template | null>(null)
   const [topic, setTopic] = useState('')
   const [busy, setBusy] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number } | null>(null)
   const [form, setForm] = useState({ name: '', category: '', description: '', body: '', tags: '' })
   const nav = useNavigate()
 
-  const refresh = () => listTemplates().then(setItems).catch(() => setItems([]))
+  const refresh = () => listTemplates().then(setItems).catch(() => setItems([])).finally(() => setLoading(false))
   useEffect(() => { refresh() }, [])
 
   const apply = async () => {
@@ -67,12 +70,17 @@ export default function TemplatesPage() {
 
   const handleDelete = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!confirm('删除这个模板？')) return
+    setDeleteTarget({ id })
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
     try {
-      await deleteTemplate(id)
+      await deleteTemplate(deleteTarget.id)
       toast.success('已删除')
       refresh()
     } catch { /* ignore */ }
+    setDeleteTarget(null)
   }
 
   return (
@@ -94,6 +102,14 @@ export default function TemplatesPage() {
       <Typography sx={{ fontSize: 13.5, color: 'text.secondary', mb: 3 }}>
         选一个结构模板，给一个主题，AI 会按模板骨架生成完整笔记。也可以自己创建模板。
       </Typography>
+
+      {loading && (
+        <Box sx={{ display: 'grid', placeItems: 'center', py: 8 }}>
+          <CircularProgress size={28} />
+        </Box>
+      )}
+
+      {!loading && (
       <Box
         sx={{
           display: 'grid',
@@ -169,6 +185,19 @@ export default function TemplatesPage() {
           </Box>
         ))}
       </Box>
+      )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)}>
+        <DialogTitle>确认删除</DialogTitle>
+        <DialogContent>
+          <DialogContentText>删除后无法恢复，确定要删除这个模板吗？</DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)}>取消</Button>
+          <Button onClick={confirmDelete} color="error" variant="contained">删除</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Apply dialog */}
       <Dialog open={!!active} onClose={() => !busy && setActive(null)} maxWidth="sm" fullWidth>
