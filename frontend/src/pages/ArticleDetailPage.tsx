@@ -25,6 +25,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import MenuIcon from '@mui/icons-material/Menu'
 import AddIcon from '@mui/icons-material/Add'
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import ReactECharts from 'echarts-for-react'
 import {
   getArticle,
@@ -33,8 +34,11 @@ import {
   deleteConversation,
   listVersions,
   rollbackVersion,
+  checkBannedWords,
+  extractTemplate,
   type Article,
   type ArticleVersion,
+  type BannedWordHit,
   type Conversation,
 } from '../api/client'
 import { toast } from 'sonner'
@@ -70,8 +74,8 @@ function ImageFrame({
         aspectRatio: aspect,
         borderRadius: 2,
         overflow: 'hidden',
-        border: '1px solid #EEE9E1',
-        bgcolor: '#FAF7F2',
+        border: '1px solid', borderColor: 'divider',
+        bgcolor: 'background.default',
         '&:hover .img-toolbar': { opacity: 1 },
       }}
     >
@@ -160,7 +164,7 @@ function ImageFrame({
               width: 28,
               height: 28,
               borderRadius: '50%',
-              '&:hover': { bgcolor: '#1F1F1F' },
+              '&:hover': { bgcolor: 'text.primary' },
             }}
           >
             <MoreVertIcon sx={{ fontSize: 14 }} />
@@ -211,9 +215,12 @@ export default function ArticleDetailPage() {
   >('inpaint')
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [sidebar, setSidebar] = useState(false)
+  const [mobileChat, setMobileChat] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
   const [versions, setVersions] = useState<ArticleVersion[]>([])
   const [showVersions, setShowVersions] = useState(false)
+  const [bannedHits, setBannedHits] = useState<BannedWordHit[]>([])
+  const bannedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(id ? Number(id) : null)
 
   const refreshConvos = useCallback(() => {
@@ -260,6 +267,21 @@ export default function ArticleDetailPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  // Real-time banned word detection (debounced)
+  useEffect(() => {
+    if (!art) return
+    if (bannedTimerRef.current) clearTimeout(bannedTimerRef.current)
+    bannedTimerRef.current = setTimeout(() => {
+      const text = `${art.title} ${art.body}`
+      if (text.trim().length > 2) {
+        checkBannedWords(text).then(r => setBannedHits(r.hits)).catch(() => {})
+      } else {
+        setBannedHits([])
+      }
+    }, 800)
+    return () => { if (bannedTimerRef.current) clearTimeout(bannedTimerRef.current) }
+  }, [art?.title, art?.body])
 
   // Hydrate chat from backend when page loads with ?c= (refresh or navigation)
   useEffect(() => {
@@ -328,7 +350,7 @@ export default function ArticleDetailPage() {
           { name: '综合', max: 100 },
         ],
         radius: '62%',
-        axisName: { color: '#8A8A8F', fontSize: 12 },
+        axisName: { color: 'text.secondary', fontSize: 12 },
         splitLine: { lineStyle: { color: '#EEE9E1' } },
         splitArea: { areaStyle: { color: ['#fafafa', '#ffffff'] } },
       },
@@ -375,13 +397,14 @@ export default function ArticleDetailPage() {
   }
 
   return (
-    <Box sx={{ height: 'calc(100vh - 56px)', display: 'flex', bgcolor: '#fff' }}>
+    <Box sx={{ height: 'calc(100vh - 56px)', display: 'flex', bgcolor: 'background.paper' }}>
       {/* left: chat panel */}
       <Box
         sx={{
           width: 380,
           flexShrink: 0,
-          borderRight: '1px solid #e5e7eb',
+          borderRight: 1,
+          borderColor: 'divider',
           display: { xs: 'none', md: 'flex' },
           flexDirection: 'column',
         }}
@@ -390,14 +413,14 @@ export default function ArticleDetailPage() {
           direction="row"
           alignItems="center"
           spacing={1}
-          sx={{ px: 1.5, py: 0.8, borderBottom: '1px solid #EEE9E1', flexShrink: 0 }}
+          sx={{ px: 1.5, py: 0.8, borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}
         >
           <Tooltip title="历史对话">
             <IconButton onClick={() => { refreshConvos(); setSidebar(true) }} size="small">
               <MenuIcon sx={{ fontSize: 18 }} />
             </IconButton>
           </Tooltip>
-          <Typography noWrap sx={{ fontSize: 12, color: '#8A8A8F', flex: 1 }}>
+          <Typography noWrap sx={{ fontSize: 12, color: 'text.secondary', flex: 1 }}>
             {convId ? `对话 #${convId}` : '新对话'}
           </Typography>
           <Tooltip title="新建对话">
@@ -438,7 +461,7 @@ export default function ArticleDetailPage() {
             <Chip
               size="small"
               label={art.status}
-              sx={{ bgcolor: '#F4EFE5', fontSize: 11, height: 20 }}
+              sx={{ bgcolor: 'action.hover', fontSize: 11, height: 20 }}
             />
             {typeof art.score?.overall === 'number' && (
               <Chip
@@ -448,6 +471,21 @@ export default function ArticleDetailPage() {
               />
             )}
             <Box sx={{ flex: 1 }} />
+            <Button
+              onClick={async () => {
+                try {
+                  await extractTemplate(art.id)
+                  toast.success('模板已提取，前往模板库查看')
+                } catch (e: any) {
+                  toast.error(e?.message || '提取失败')
+                }
+              }}
+              variant="outlined"
+              size="small"
+              sx={{ mr: 1 }}
+            >
+              提取模板
+            </Button>
             <Button
               onClick={() => nav(`/articles/${art.id}/diagnose`)}
               variant="outlined"
@@ -498,7 +536,7 @@ export default function ArticleDetailPage() {
                 onChange={e => setArt({ ...art, body: e.target.value })}
                 InputProps={{ sx: { fontSize: 14.5, lineHeight: 1.75 } }}
               />
-              <Typography sx={{ mt: 0.5, fontSize: 11, textAlign: 'right', color: '#8A8A8F' }}>
+              <Typography sx={{ mt: 0.5, fontSize: 11, textAlign: 'right', color: 'text.secondary' }}>
                 {art.body.length} 字
               </Typography>
             </Box>
@@ -506,6 +544,27 @@ export default function ArticleDetailPage() {
               tags={art.tags || []}
               onChange={tags => setArt({ ...art, tags })}
             />
+
+            {/* banned words warning */}
+            {bannedHits.length > 0 && (
+              <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: '#FEF2F2', border: '1px solid #FECACA' }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#DC2626', mb: 0.5 }}>
+                  ⚠️ 检测到 {bannedHits.length} 个违禁/敏感词
+                </Typography>
+                <Stack spacing={0.3}>
+                  {bannedHits.slice(0, 8).map((h, i) => (
+                    <Typography key={i} sx={{ fontSize: 11, color: '#991B1B' }}>
+                      · 「{h.word}」— {h.category}{h.replacement ? `，建议替换为：${h.replacement}` : ''}
+                    </Typography>
+                  ))}
+                  {bannedHits.length > 8 && (
+                    <Typography sx={{ fontSize: 11, color: '#991B1B' }}>
+                      …还有 {bannedHits.length - 8} 个
+                    </Typography>
+                  )}
+                </Stack>
+              </Box>
+            )}
 
             {/* images area */}
             <Box sx={{ mt: 0.5 }}>
@@ -516,7 +575,7 @@ export default function ArticleDetailPage() {
               >
                 {/* cover */}
                 <Box sx={{ width: { xs: '100%', sm: 200 } }}>
-                  <Typography sx={{ fontSize: 12, color: '#8A8A8F', mb: 0.8, fontWeight: 600 }}>
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.8, fontWeight: 600 }}>
                     封面（2:3）
                   </Typography>
                   <ImageFrame
@@ -539,7 +598,7 @@ export default function ArticleDetailPage() {
 
                 {/* content images grid */}
                 <Box sx={{ flex: 1, width: '100%' }}>
-                  <Typography sx={{ fontSize: 12, color: '#8A8A8F', mb: 0.8, fontWeight: 600 }}>
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.8, fontWeight: 600 }}>
                     内容配图（1:1）
                   </Typography>
                   <Box
@@ -575,9 +634,9 @@ export default function ArticleDetailPage() {
 
             {/* score radar */}
             {typeof art.score?.overall === 'number' && (
-              <Box sx={{ border: '1px solid #EEE9E1', borderRadius: 2.5, p: 2 }}>
+              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2 }}>
                 <Stack direction="row" alignItems="center" spacing={1}>
-                  <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#8A8A8F' }}>
+                  <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
                     五维评分
                   </Typography>
                   <Chip
@@ -590,7 +649,7 @@ export default function ArticleDetailPage() {
                 {art.score?.advice && (
                   <Stack spacing={0.5} sx={{ mt: 0.5 }}>
                     {(art.score.advice as string[]).slice(0, 3).map((x, i) => (
-                      <Typography key={i} sx={{ fontSize: 12, color: '#8A8A8F' }}>
+                      <Typography key={i} sx={{ fontSize: 12, color: 'text.secondary' }}>
                         · {x}
                       </Typography>
                     ))}
@@ -600,29 +659,29 @@ export default function ArticleDetailPage() {
             )}
 
             {/* version history */}
-            <Box sx={{ border: '1px solid #EEE9E1', borderRadius: 2.5, p: 2 }}>
+            <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ cursor: 'pointer' }} onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#8A8A8F' }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
                   版本历史
                 </Typography>
                 {versions.length > 0 && (
                   <Chip size="small" label={`${versions.length}个版本`} sx={{ fontSize: 10, height: 18 }} />
                 )}
                 <Box flex={1} />
-                <Typography sx={{ fontSize: 11, color: '#8A8A8F' }}>{showVersions ? '收起' : '展开'}</Typography>
+                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{showVersions ? '收起' : '展开'}</Typography>
               </Stack>
               {showVersions && (
                 <Stack spacing={1} sx={{ mt: 1.5 }}>
                   {versions.length === 0 && (
-                    <Typography sx={{ fontSize: 12, color: '#8A8A8F' }}>暂无版本记录（改写/优化时自动保存）</Typography>
+                    <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>暂无版本记录（改写/优化时自动保存）</Typography>
                   )}
                   {versions.map(v => (
-                    <Stack key={v.id} direction="row" alignItems="center" spacing={1} sx={{ p: 1, borderRadius: 1, bgcolor: '#FAF7F2' }}>
+                    <Stack key={v.id} direction="row" alignItems="center" spacing={1} sx={{ p: 1, borderRadius: 1, bgcolor: 'background.default' }}>
                       <Typography sx={{ fontSize: 12, fontWeight: 600 }}>v{v.version}</Typography>
-                      <Typography sx={{ fontSize: 11, color: '#8A8A8F', flex: 1 }} noWrap>
+                      <Typography sx={{ fontSize: 11, color: 'text.secondary', flex: 1 }} noWrap>
                         {v.title || '(无标题)'} · {v.trigger}
                       </Typography>
-                      <Typography sx={{ fontSize: 10, color: '#8A8A8F' }}>
+                      <Typography sx={{ fontSize: 10, color: 'text.secondary' }}>
                         {new Date(v.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </Typography>
                       <Button size="small" onClick={() => handleRollback(v.id)} sx={{ fontSize: 11, minWidth: 0, px: 1 }}>
@@ -693,7 +752,7 @@ export default function ArticleDetailPage() {
 
       {/* History drawer */}
       <Drawer open={sidebar} onClose={() => setSidebar(false)}>
-        <Box sx={{ width: 300, bgcolor: '#fff' }}>
+        <Box sx={{ width: 300, bgcolor: 'background.paper' }}>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
             <Typography variant="subtitle1" fontWeight={700}>
               笔记对话记录
@@ -742,6 +801,56 @@ export default function ArticleDetailPage() {
               </Typography>
             )}
           </List>
+        </Box>
+      </Drawer>
+
+      {/* Mobile chat FAB */}
+      <IconButton
+        onClick={() => setMobileChat(true)}
+        sx={{
+          display: { xs: 'flex', md: 'none' },
+          position: 'fixed',
+          bottom: 24,
+          right: 24,
+          width: 52,
+          height: 52,
+          bgcolor: 'primary.main',
+          color: '#fff',
+          boxShadow: '0 4px 16px rgba(255,39,65,0.3)',
+          '&:hover': { bgcolor: 'primary.dark' },
+          zIndex: 1100,
+        }}
+      >
+        <ChatBubbleOutlineIcon />
+      </IconButton>
+
+      {/* Mobile chat drawer */}
+      <Drawer
+        anchor="bottom"
+        open={mobileChat}
+        onClose={() => setMobileChat(false)}
+        PaperProps={{ sx: { height: '85vh', borderTopLeftRadius: 16, borderTopRightRadius: 16 } }}
+        sx={{ display: { xs: 'block', md: 'none' } }}
+      >
+        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Stack direction="row" alignItems="center" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
+            <Typography sx={{ fontSize: 14, fontWeight: 600, flex: 1 }}>AI 助手</Typography>
+            <IconButton size="small" onClick={() => setMobileChat(false)}>
+              <ArrowBackIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Stack>
+          <ChatPanel
+            article={art}
+            sessionKey={currentSessionKey}
+            onArticleMayChange={load}
+            onConversationCreated={handleConversationCreated}
+            showHeader={false}
+            quickActions={[
+              { label: '整体改写', prompt: '帮我整体改写这篇笔记，风格更有网感、更口语化' },
+              { label: '打分', prompt: '帮我从内容、视觉、增长、互动四个维度给这篇笔记打分' },
+              { label: '生成封面', prompt: '为这篇笔记生成一张干净、有高级感的竖版封面' },
+            ]}
+          />
         </Box>
       </Drawer>
     </Box>

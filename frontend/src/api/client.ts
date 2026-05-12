@@ -268,6 +268,39 @@ export async function getMeta() {
   const r = await api.get('/meta')
   return r.data
 }
+
+export interface BannedWordHit {
+  word: string
+  category: string
+  position: number
+  replacement: string
+  severity: string
+}
+export interface BanCheckResult {
+  safe: boolean
+  hit_count: number
+  summary: string
+  hits: BannedWordHit[]
+}
+export async function checkBannedWords(text: string): Promise<BanCheckResult> {
+  const r = await api.post('/check_banned_words', { text })
+  return r.data
+}
+export async function getBannedWords(): Promise<Record<string, any>> {
+  const r = await api.get('/banned_words')
+  return r.data
+}
+export interface HotTag {
+  tag: string
+  heat: string
+  heat_label: string
+  category: string
+}
+export async function suggestHotTags(query = '', category = '', limit = 20): Promise<HotTag[]> {
+  const r = await api.get('/tags/suggest', { params: { query, category, limit } })
+  return r.data.items
+}
+
 export async function listTemplates(): Promise<Template[]> {
   const r = await api.get('/templates')
   return r.data.items
@@ -275,6 +308,17 @@ export async function listTemplates(): Promise<Template[]> {
 export async function applyTemplate(template_id: number, topic: string): Promise<Article> {
   const r = await api.post('/templates/apply', { template_id, topic })
   return r.data.article
+}
+export async function createTemplate(payload: Omit<Template, 'id'>): Promise<Template> {
+  const r = await api.post('/templates', payload)
+  return r.data
+}
+export async function deleteTemplate(id: number) {
+  await api.delete(`/templates/${id}`)
+}
+export async function extractTemplate(article_id: number): Promise<Template> {
+  const r = await api.post('/templates/extract', { article_id })
+  return r.data
 }
 export async function listConversations(): Promise<Conversation[]> {
   const r = await api.get('/conversations')
@@ -333,6 +377,22 @@ export async function updateSettings(payload: Partial<PublicSettings> & { openai
 export async function testSettings() {
   const r = await api.post('/settings/test')
   return r.data as { ok: boolean; reply?: string; error?: string }
+}
+
+export async function getStats(): Promise<{
+  total: number
+  by_status: Record<string, number>
+  scored_count: number
+  avg_score: number | null
+  top_tags: Array<{ tag: string; count: number }>
+}> {
+  const r = await api.get('/stats')
+  return r.data
+}
+
+export async function getCalendar(): Promise<Record<string, Array<{ id: number; title: string; status: string }>>> {
+  const r = await api.get('/stats/calendar')
+  return r.data.calendar
 }
 
 export async function getMcpTools() {

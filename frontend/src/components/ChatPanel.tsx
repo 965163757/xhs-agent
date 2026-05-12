@@ -32,6 +32,7 @@ export default function ChatPanel({
   article,
   onArticleMayChange,
   onConversationCreated,
+  onArticleCreated,
   quickActions,
   heroActions,
   heroTitle,
@@ -44,6 +45,7 @@ export default function ChatPanel({
   article?: Article | null
   onArticleMayChange?: () => void
   onConversationCreated?: (id: number) => void
+  onArticleCreated?: (id: number) => void
   quickActions?: Array<{ label: string; prompt: string }>
   heroActions?: HeroAction[]
   heroTitle?: string
@@ -73,6 +75,7 @@ export default function ChatPanel({
       article,
       onArticleMayChange,
       onConversationCreated,
+      onArticleCreated,
     })
   }
 
@@ -95,7 +98,7 @@ export default function ChatPanel({
           direction="row"
           alignItems="center"
           spacing={1}
-          sx={{ px: 2, py: 1.2, borderBottom: '1px solid #EEE9E1' }}
+          sx={{ px: 2, py: 1.2, borderBottom: 1, borderColor: 'divider' }}
         >
           <Box
             sx={{
@@ -160,7 +163,7 @@ export default function ChatPanel({
                     fontSize: { xs: 26, md: 30 },
                     fontWeight: 600,
                     letterSpacing: -0.5,
-                    color: '#1F1F1F',
+                    color: 'text.primary',
                     textAlign: 'center',
                   }}
                 >
@@ -169,7 +172,7 @@ export default function ChatPanel({
                 <Typography
                   sx={{
                     fontSize: 14,
-                    color: '#8A8A8F',
+                    color: 'text.secondary',
                     mt: 1,
                     textAlign: 'center',
                   }}
@@ -184,7 +187,7 @@ export default function ChatPanel({
                     fontSize: { xs: 28, md: 32 },
                     fontWeight: 600,
                     letterSpacing: -0.5,
-                    color: '#1F1F1F',
+                    color: 'text.primary',
                     textAlign: 'center',
                   }}
                 >
@@ -193,7 +196,7 @@ export default function ChatPanel({
                 <Typography
                   sx={{
                     fontSize: 14,
-                    color: '#8A8A8F',
+                    color: 'text.secondary',
                     mt: 1,
                     textAlign: 'center',
                   }}
@@ -234,7 +237,7 @@ export default function ChatPanel({
                       transition: 'all .15s',
                       '&:hover': {
                         borderColor: '#1F1F1F',
-                        bgcolor: '#FAF7F2',
+                        bgcolor: 'background.default',
                         transform: 'translateY(-1px)',
                       },
                       '&:focus-visible': {
@@ -246,11 +249,11 @@ export default function ChatPanel({
                   >
                     <Typography sx={{ fontSize: 18, lineHeight: 1 }}>{a.icon}</Typography>
                     <Typography
-                      sx={{ fontSize: 13.5, fontWeight: 600, mt: 0.6, color: '#1F1F1F' }}
+                      sx={{ fontSize: 13.5, fontWeight: 600, mt: 0.6, color: 'text.primary' }}
                     >
                       {a.title}
                     </Typography>
-                    <Typography sx={{ fontSize: 12.5, color: '#8A8A8F', mt: 0.3 }}>
+                    <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mt: 0.3 }}>
                       {a.prompt}
                     </Typography>
                   </Box>
@@ -280,7 +283,7 @@ export default function ChatPanel({
                       border: '1px solid #EEE9E1',
                       fontSize: 12,
                       height: 28,
-                      '&:hover': { bgcolor: '#FAF7F2', borderColor: '#B8B4AB' },
+                      '&:hover': { bgcolor: 'background.default', borderColor: '#B8B4AB' },
                     }}
                   />
                 ))}
@@ -300,9 +303,9 @@ export default function ChatPanel({
                 direction="row"
                 spacing={1}
                 alignItems="center"
-                sx={{ color: '#8A8A8F', mt: 0.5 }}
+                sx={{ color: 'text.secondary', mt: 0.5 }}
               >
-                <CircularProgress size={12} sx={{ color: '#1F1F1F' }} />
+                <CircularProgress size={12} sx={{ color: 'text.primary' }} />
                 <Typography sx={{ fontSize: 12 }}>{status}</Typography>
               </Stack>
             )}
@@ -315,7 +318,7 @@ export default function ChatPanel({
                   const lastUser = [...messages].reverse().find(m => m.role === 'user')
                   if (lastUser) handleSend(lastUser.content || '')
                 }}
-                sx={{ mt: 1, fontSize: 12, color: '#8A8A8F', textTransform: 'none' }}
+                sx={{ mt: 1, fontSize: 12, color: 'text.secondary', textTransform: 'none' }}
               >
                 重试
               </Button>
@@ -366,7 +369,7 @@ export default function ChatPanel({
               <IconButton
                 component="label"
                 size="small"
-                sx={{ color: '#8A8A8F', alignSelf: 'center' }}
+                sx={{ color: 'text.secondary', alignSelf: 'center' }}
               >
                 <ImageOutlinedIcon sx={{ fontSize: 20 }} />
                 <input
@@ -406,7 +409,7 @@ export default function ChatPanel({
                 size="small"
                 onClick={() => abortSession(sessionKey)}
                 sx={{
-                  bgcolor: '#1F1F1F',
+                  bgcolor: 'text.primary',
                   color: '#fff',
                   width: 34,
                   height: 34,
@@ -422,7 +425,7 @@ export default function ChatPanel({
                 onClick={() => handleSend()}
                 disabled={!input.trim() && pendingImages.length === 0}
                 sx={{
-                  bgcolor: '#1F1F1F',
+                  bgcolor: 'text.primary',
                   color: '#fff',
                   width: 34,
                   height: 34,

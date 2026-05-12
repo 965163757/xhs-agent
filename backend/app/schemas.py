@@ -153,6 +153,18 @@ class ApplyTemplateRequest(BaseModel):
     topic: str
 
 
+class TemplateCreate(BaseModel):
+    name: str
+    category: str = ""
+    description: str = ""
+    body: str = ""
+    tags: List[str] = Field(default_factory=list)
+
+
+class ExtractTemplateRequest(BaseModel):
+    article_id: int
+
+
 class SettingsUpdate(BaseModel):
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None

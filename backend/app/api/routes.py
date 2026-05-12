@@ -24,6 +24,7 @@ from ..schemas import (
     CropImageRequest,
     DiagnoseRequest,
     EditImageRequest,
+    ExtractTemplateRequest,
     GenerateArticleRequest,
     ImageGenRequest,
     InpaintRequest,
@@ -38,6 +39,7 @@ from ..schemas import (
     SettingsUpdate,
     SuggestTagsRequest,
     SuggestTitlesRequest,
+    TemplateCreate,
 )
 from ..services.llm import generate_image
 
@@ -274,6 +276,76 @@ async def apply_template(payload: ApplyTemplateRequest):
     return await call_tool("apply_template", payload.model_dump())
 
 
+@router.post("/templates")
+async def create_template(payload: TemplateCreate):
+    async with SessionLocal() as s:
+        t = Template(
+            name=payload.name,
+            category=payload.category,
+            description=payload.description,
+            body=payload.body,
+            tags=payload.tags,
+        )
+        s.add(t)
+        await s.commit()
+        await s.refresh(t)
+        return t.to_dict()
+
+
+@router.delete("/templates/{tid}")
+async def delete_template(tid: int):
+    async with SessionLocal() as s:
+        t = await s.get(Template, tid)
+        if not t:
+            raise HTTPException(404, "not found")
+        await s.delete(t)
+        await s.commit()
+        return {"ok": True}
+
+
+@router.post("/templates/extract")
+async def extract_template(payload: ExtractTemplateRequest):
+    """Use LLM to extract a reusable template structure from an existing article."""
+    from ..services.llm import chat_completion
+    async with SessionLocal() as s:
+        art = await s.get(Article, payload.article_id)
+        if not art:
+            raise HTTPException(404, "article not found")
+    resp = await chat_completion(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "你是小红书模板提取专家。分析给定笔记的结构，提取出可复用的模板骨架。\n"
+                    "模板应该抽象掉具体内容，保留结构框架和写作指导。\n"
+                    "严格按 JSON 返回：\n"
+                    '{"name":"模板名称","category":"分类","description":"一句话描述适用场景",'
+                    '"body":"模板骨架（用 [占位符] 标注可替换部分）","tags":["#标签模板"]}'
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"标题：{art.title}\n正文：\n{art.body}\n标签：{art.tags}",
+            },
+        ],
+        temperature=0.5,
+    )
+    from ..agents.tools import _safe_json
+    data = _safe_json(resp.choices[0].message.content or "")
+    template = Template(
+        name=data.get("name", f"从笔记#{art.id}提取"),
+        category=data.get("category", "自定义"),
+        description=data.get("description", ""),
+        body=data.get("body", ""),
+        tags=data.get("tags", []),
+    )
+    async with SessionLocal() as s:
+        s.add(template)
+        await s.commit()
+        await s.refresh(template)
+        return template.to_dict()
+
+
 # ---------- conversations ----------
 
 @router.get("/conversations")
@@ -467,6 +539,29 @@ async def test_settings():
         return {"ok": False, "error": str(e)}
 
 
+# ---------- stats ----------
+
+@router.get("/stats")
+async def api_stats():
+    from ..agents.tools import tool_article_stats
+    return await tool_article_stats({})
+
+
+@router.get("/stats/calendar")
+async def api_calendar():
+    """Return articles grouped by creation date for calendar view."""
+    async with SessionLocal() as s:
+        res = await s.execute(select(Article).order_by(Article.created_at.desc()).limit(200))
+        articles = res.scalars().all()
+    calendar: Dict[str, List[Dict[str, Any]]] = {}
+    for a in articles:
+        day = a.created_at.strftime("%Y-%m-%d") if a.created_at else "unknown"
+        if day not in calendar:
+            calendar[day] = []
+        calendar[day].append({"id": a.id, "title": a.title, "status": a.status})
+    return {"calendar": calendar}
+
+
 # ---------- meta ----------
 
 @router.get("/meta")
@@ -477,6 +572,30 @@ async def meta():
         "image_model": s.image_model,
         "base_url": s.openai_base_url,
     }
+
+
+# ---------- banned words ----------
+
+@router.post("/check_banned_words")
+async def api_check_banned_words(payload: Dict[str, Any]):
+    from ..agents.banned_words import check_banned_words
+    text = payload.get("text", "")
+    result = check_banned_words(text)
+    return result.to_dict()
+
+
+@router.get("/banned_words")
+async def api_get_banned_words():
+    from ..agents.banned_words import get_all_banned_words
+    return get_all_banned_words()
+
+
+# ---------- hot tags ----------
+
+@router.get("/tags/suggest")
+async def api_suggest_tags(query: str = "", category: str = "", limit: int = 20):
+    from ..agents.hot_tags import suggest_tags
+    return {"items": suggest_tags(query=query, category=category, limit=limit)}
 
 
 # ---------- MCP HTTP bridge (embedded server) ----------

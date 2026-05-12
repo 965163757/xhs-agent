@@ -17,10 +17,10 @@ import { getSettings, updateSettings, testSettings, getMcpTools, type PublicSett
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: any }) {
   return (
-    <Box sx={{ py: 3, borderBottom: '1px solid #EEE9E1' }}>
-      <Typography sx={{ fontSize: 16, fontWeight: 600, color: '#1F1F1F' }}>{title}</Typography>
+    <Box sx={{ py: 3, borderBottom: 1, borderColor: 'divider' }}>
+      <Typography sx={{ fontSize: 16, fontWeight: 600, color: 'text.primary' }}>{title}</Typography>
       {desc && (
-        <Typography sx={{ fontSize: 13, color: '#8A8A8F', mt: 0.5, mb: 1.5 }}>{desc}</Typography>
+        <Typography sx={{ fontSize: 13, color: 'text.secondary', mt: 0.5, mb: 1.5 }}>{desc}</Typography>
       )}
       {children}
     </Box>
@@ -88,7 +88,7 @@ export default function SettingsPage() {
       <Typography sx={{ fontSize: 26, fontWeight: 600, letterSpacing: -0.3, mb: 0.5 }}>
         设置
       </Typography>
-      <Typography sx={{ fontSize: 13.5, color: '#8A8A8F', mb: 1 }}>
+      <Typography sx={{ fontSize: 13.5, color: 'text.secondary', mb: 1 }}>
         管理 API 密钥、模型和 MCP 接入。修改保存后立即生效。
       </Typography>
 
@@ -106,8 +106,8 @@ export default function SettingsPage() {
                 color: s.openai_api_key_set ? '#0F8C3D' : '#8A8A8F',
               }}
             />
-            <Chip size="small" label={`对话 ${s.chat_model}`} sx={{ bgcolor: '#F4EFE5' }} />
-            <Chip size="small" label={`图片 ${s.image_model}`} sx={{ bgcolor: '#F4EFE5' }} />
+            <Chip size="small" label={`对话 ${s.chat_model}`} sx={{ bgcolor: 'action.hover' }} />
+            <Chip size="small" label={`图片 ${s.image_model}`} sx={{ bgcolor: 'action.hover' }} />
           </Stack>
 
           <Stack spacing={2}>
@@ -173,10 +173,10 @@ export default function SettingsPage() {
         desc="本项目同时提供 HTTP 桥 (/api/mcp/*) 和 stdio server 两种 MCP 接入方式。"
       >
         <Stack spacing={0.6} sx={{ mb: 2 }}>
-          <Typography sx={{ fontSize: 13, color: '#1F1F1F' }}>
+          <Typography sx={{ fontSize: 13, color: 'text.primary' }}>
             · HTTP 桥：<code>GET /api/mcp/tools</code> · <code>POST /api/mcp/call</code>
           </Typography>
-          <Typography sx={{ fontSize: 13, color: '#1F1F1F' }}>
+          <Typography sx={{ fontSize: 13, color: 'text.primary' }}>
             · stdio server：<code>bash start_mcp.sh</code>，适配 Claude Desktop / Cursor
           </Typography>
         </Stack>
@@ -210,7 +210,7 @@ export default function SettingsPage() {
               size="small"
               label={t.name}
               title={t.description}
-              sx={{ bgcolor: '#F4EFE5', fontFamily: 'monospace', fontSize: 11 }}
+              sx={{ bgcolor: 'action.hover', fontFamily: 'monospace', fontSize: 11 }}
             />
           ))}
         </Stack>

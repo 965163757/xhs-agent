@@ -336,7 +336,7 @@ export default function ImageEditor({
   } as const
 
   return (
-    <Dialog open={open} onClose={onClose} fullScreen PaperProps={{ sx: { bgcolor: '#FAF7F2' } }}>
+    <Dialog open={open} onClose={onClose} fullScreen PaperProps={{ sx: { bgcolor: 'background.default' } }}>
       <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column', height: '100vh' }}>
         {/* top bar */}
         <Stack
@@ -346,7 +346,7 @@ export default function ImageEditor({
           sx={{
             px: 2.5,
             py: 1.5,
-            borderBottom: '1px solid #EEE9E1',
+            borderBottom: 1, borderColor: 'divider',
             bgcolor: '#fff',
           }}
         >
@@ -373,7 +373,7 @@ export default function ImageEditor({
               />
             ))}
           </Stack>
-          <Typography sx={{ fontSize: 12, color: '#8A8A8F' }}>{modeInfo[mode].hint}</Typography>
+          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{modeInfo[mode].hint}</Typography>
           <Box sx={{ flex: 1 }} />
           <Tooltip title="撤销">
             <span>
@@ -496,7 +496,7 @@ export default function ImageEditor({
           >
             {mode !== 'variation' && mode !== 'crop' && (
               <Box>
-                <Typography sx={{ fontSize: 12, color: '#8A8A8F', mb: 0.8 }}>画笔大小</Typography>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.8 }}>画笔大小</Typography>
                 <Slider
                   value={brush}
                   min={6}
@@ -506,7 +506,7 @@ export default function ImageEditor({
                     color: '#FF2741',
                   }}
                 />
-                <Typography sx={{ fontSize: 11, color: '#8A8A8F' }}>
+                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
                   涂抹后会作为 AI 的编辑范围，红色越厚代表越确信
                 </Typography>
               </Box>
@@ -514,7 +514,7 @@ export default function ImageEditor({
 
             {(mode === 'inpaint' || mode === 'variation') && (
               <Box>
-                <Typography sx={{ fontSize: 12, color: '#8A8A8F', mb: 0.8 }}>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.8 }}>
                   Prompt {mode === 'inpaint' ? '（描述涂抹区域要变成什么）' : '（整张图的新描述）'}
                 </Typography>
                 <TextField
@@ -534,7 +534,7 @@ export default function ImageEditor({
 
             {mode === 'crop' && (
               <Box>
-                <Typography sx={{ fontSize: 12, color: '#8A8A8F', mb: 0.5 }}>裁剪区域</Typography>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.5 }}>裁剪区域</Typography>
                 {cropBox ? (
                   <Typography sx={{ fontSize: 12 }}>
                     x={cropBox.x} y={cropBox.y} · {cropBox.w} × {cropBox.h}px
@@ -574,7 +574,7 @@ export default function ImageEditor({
 
             {resultUrl && (
               <Box>
-                <Typography sx={{ fontSize: 12, color: '#8A8A8F', mb: 0.8 }}>处理结果</Typography>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.8 }}>处理结果</Typography>
                 <Box
                   component="img"
                   src={absUrl(resultUrl)}
@@ -597,7 +597,7 @@ export default function ImageEditor({
                   disabled={!cropBox || !!busy}
                   onClick={doCrop}
                   sx={{
-                    bgcolor: '#1F1F1F',
+                    bgcolor: 'text.primary',
                     '&:hover': { bgcolor: '#000' },
                     borderRadius: 999,
                   }}
@@ -645,7 +645,7 @@ export default function ImageEditor({
                   onClick={doVariation}
                   startIcon={<TuneIcon />}
                   sx={{
-                    bgcolor: '#1F1F1F',
+                    bgcolor: 'text.primary',
                     '&:hover': { bgcolor: '#000' },
                     borderRadius: 999,
                   }}

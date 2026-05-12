@@ -10,7 +10,9 @@ import ArticleDetailPage from './pages/ArticleDetailPage'
 import SettingsPage from './pages/SettingsPage'
 import TemplatesPage from './pages/TemplatesPage'
 import DiagnosePage from './pages/DiagnosePage'
+import AnalyticsPage from './pages/AnalyticsPage'
 import CommandPalette from './components/CommandPalette'
+import OnboardingDialog from './components/OnboardingDialog'
 
 function TopTab({ to, label }: { to: string; label: string }) {
   return (
@@ -23,10 +25,10 @@ function TopTab({ to, label }: { to: string; label: string }) {
             py: 1.8,
             fontSize: 15,
             fontWeight: 600,
-            color: isActive ? '#1F1F1F' : '#8A8A8F',
+            color: isActive ? 'text.primary' : 'text.secondary',
             cursor: 'pointer',
             transition: 'color .15s',
-            '&:hover': { color: '#1F1F1F' },
+            '&:hover': { color: 'text.primary' },
             '&::after': {
               content: '""',
               position: 'absolute',
@@ -93,6 +95,7 @@ export default function App() {
             <TopTab to="/" label="创作" />
             <TopTab to="/articles" label="笔记" />
             <TopTab to="/templates" label="模板" />
+            <TopTab to="/analytics" label="数据" />
             <TopTab to="/settings" label="设置" />
           </Stack>
 
@@ -131,10 +134,12 @@ export default function App() {
           <Route path="/articles/:id" element={<ArticleDetailPage />} />
           <Route path="/articles/:id/diagnose" element={<DiagnosePage />} />
           <Route path="/templates" element={<TemplatesPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </Box>
       <CommandPalette />
+      <OnboardingDialog />
     </Box>
   )
 }

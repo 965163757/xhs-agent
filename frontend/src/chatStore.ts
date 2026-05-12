@@ -222,6 +222,7 @@ export async function sendMessage(
     images?: string[]
     onArticleMayChange?: () => void
     onConversationCreated?: (id: number) => void
+    onArticleCreated?: (id: number) => void
   } = {}
 ) {
   const s = ensure(key)
@@ -288,6 +289,9 @@ export async function sendMessage(
         } else if (ev.type === 'tool_result') {
           cur.status = '整合结果…'
           opts.onArticleMayChange?.()
+          if (ev.name === 'generate_article' && ev.result?.ok && ev.result?.article?.id) {
+            opts.onArticleCreated?.(ev.result.article.id)
+          }
           maybePersist()
         } else if (ev.type === 'done') {
           cur.status = ''

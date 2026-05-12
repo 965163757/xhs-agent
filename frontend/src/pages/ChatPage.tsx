@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
   Button,
@@ -34,6 +34,7 @@ const suggestions = [
 ]
 
 export default function ChatPage() {
+  const nav = useNavigate()
   const [params, setParams] = useSearchParams()
   const articleId = params.get('article')
   const convId = params.get('c')
@@ -99,14 +100,14 @@ export default function ChatPage() {
         direction="row"
         alignItems="center"
         spacing={1}
-        sx={{ px: 2, py: 0.8, borderBottom: '1px solid #EEE9E1' }}
+        sx={{ px: 2, py: 0.8, borderBottom: 1, borderColor: 'divider' }}
       >
         <Tooltip title="历史对话">
           <IconButton onClick={() => { refreshConvos(); setSidebar(true) }} size="small">
             <MenuIcon sx={{ fontSize: 20 }} />
           </IconButton>
         </Tooltip>
-        <Typography sx={{ ml: 0.5, fontSize: 13, color: '#8A8A8F' }}>
+        <Typography sx={{ ml: 0.5, fontSize: 13, color: 'text.secondary' }}>
           {article ? `锁定笔记 #${article.id} · ${article.title?.slice(0, 18) || ''}` : '新对话'}
         </Typography>
         <Box sx={{ flex: 1 }} />
@@ -114,7 +115,7 @@ export default function ChatPage() {
           size="small"
           startIcon={<AddIcon sx={{ fontSize: 18 }} />}
           onClick={newChat}
-          sx={{ color: '#1F1F1F' }}
+          sx={{ color: 'text.primary' }}
         >
           新对话
         </Button>
@@ -129,6 +130,7 @@ export default function ChatPage() {
             placeholder={article ? '继续对这篇笔记说…' : '发消息给小红书助手…'}
             heroActions={article ? undefined : suggestions}
             onConversationCreated={handleConversationCreated}
+            onArticleCreated={(id) => nav(`/articles/${id}`)}
             quickActions={
               article
                 ? [
@@ -145,7 +147,7 @@ export default function ChatPage() {
       </Box>
 
       <Drawer open={sidebar} onClose={() => setSidebar(false)}>
-        <Box sx={{ width: 300, bgcolor: '#fff' }}>
+        <Box sx={{ width: 300, bgcolor: 'background.paper' }}>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
             <Typography variant="subtitle1" fontWeight={700}>
               历史对话

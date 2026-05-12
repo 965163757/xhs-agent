@@ -86,7 +86,7 @@ export default function ArticlesPage() {
           <Select
             value={sortBy}
             onChange={e => setSortBy(e.target.value as SortKey)}
-            startAdornment={<SortIcon sx={{ fontSize: 16, mr: 0.5, color: '#8A8A8F' }} />}
+            startAdornment={<SortIcon sx={{ fontSize: 16, mr: 0.5, color: 'text.secondary' }} />}
             sx={{ fontSize: 12, height: 32 }}
           >
             <MenuItem value="updated">最近更新</MenuItem>
@@ -143,13 +143,13 @@ export default function ArticlesPage() {
               display: 'flex',
               gap: 2,
               p: 1.6,
-              border: '1px solid #EEE9E1',
+              border: '1px solid', borderColor: 'divider',
               borderRadius: 2.5,
               cursor: 'pointer',
               transition: 'all .15s',
               '&:hover': {
                 borderColor: '#B8B4AB',
-                bgcolor: '#FAF7F2',
+                bgcolor: 'background.default',
                 '& .row-actions': { opacity: 1 },
               },
             }}
@@ -159,7 +159,7 @@ export default function ArticlesPage() {
                 width: 84,
                 height: 84,
                 borderRadius: 2,
-                bgcolor: '#F4EFE5',
+                bgcolor: 'action.hover',
                 backgroundImage: a.cover_image ? `url(${a.cover_image})` : undefined,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
@@ -181,7 +181,7 @@ export default function ArticlesPage() {
                 <Chip
                   size="small"
                   label={a.status}
-                  sx={{ bgcolor: '#F4EFE5', fontSize: 11, height: 20 }}
+                  sx={{ bgcolor: 'action.hover', fontSize: 11, height: 20 }}
                 />
                 {typeof a.score?.overall === 'number' && (
                   <Chip
@@ -201,7 +201,7 @@ export default function ArticlesPage() {
               <Typography
                 sx={{
                   fontSize: 13,
-                  color: '#8A8A8F',
+                  color: 'text.secondary',
                   mt: 0.5,
                   display: '-webkit-box',
                   WebkitLineClamp: 2,
@@ -218,8 +218,8 @@ export default function ArticlesPage() {
                     label={t}
                     size="small"
                     sx={{
-                      bgcolor: '#fff',
-                      border: '1px solid #EEE9E1',
+                      bgcolor: 'background.paper',
+                      border: '1px solid', borderColor: 'divider',
                       fontSize: 11,
                       height: 20,
                     }}

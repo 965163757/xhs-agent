@@ -110,7 +110,7 @@ function ToolCard({
             bgcolor: running ? '#F59E0B' : '#16A34A',
           }}
         />
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#1F1F1F' }}>
+        <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.primary' }}>
           {running ? `调用 ${zh}…` : `${zh} · 完成`}
         </Typography>
         <Typography sx={{ fontSize: 12, color: '#B8B4AB', fontFamily: 'monospace' }}>
@@ -133,7 +133,7 @@ function ToolCard({
               sx={{
                 fontFamily: 'ui-monospace, Menlo, monospace',
                 fontSize: 12,
-                color: '#1F1F1F',
+                color: 'text.primary',
                 bgcolor: '#ffffff',
                 border: '1px solid #EEE9E1',
                 borderRadius: 1,
@@ -150,7 +150,7 @@ function ToolCard({
               sx={{
                 fontFamily: 'ui-monospace, Menlo, monospace',
                 fontSize: 12,
-                color: '#8A8A8F',
+                color: 'text.secondary',
                 bgcolor: '#ffffff',
                 border: '1px solid #EEE9E1',
                 borderRadius: 1,
@@ -231,7 +231,7 @@ function ToolCard({
             <Typography
               sx={{
                 fontSize: 13.5,
-                color: '#1F1F1F',
+                color: 'text.primary',
                 whiteSpace: 'pre-wrap',
                 maxHeight: 220,
                 overflow: 'auto',
@@ -254,7 +254,7 @@ function ToolCard({
                 component="a"
                 clickable
                 href={`/articles/${article.id}${searchParams.get('c') ? `?c=${searchParams.get('c')}` : ''}`}
-                sx={{ bgcolor: '#1F1F1F', color: '#fff', '&:hover': { bgcolor: '#1F1F1F' } }}
+                sx={{ bgcolor: 'text.primary', color: '#fff', '&:hover': { bgcolor: 'text.primary' } }}
               />
               <IconButton
                 size="small"
@@ -319,7 +319,7 @@ function ToolCard({
                 </Typography>
                 {Array.isArray(s.points) &&
                   s.points.map((p: string, j: number) => (
-                    <Typography key={j} sx={{ fontSize: 13, color: '#8A8A8F', ml: 1.5 }}>
+                    <Typography key={j} sx={{ fontSize: 13, color: 'text.secondary', ml: 1.5 }}>
                       · {p}
                     </Typography>
                   ))}
@@ -348,7 +348,7 @@ function ToolCard({
                     {k === 'risks' ? '风险' : k === 'missing' ? '缺失' : '建议'}
                   </Typography>
                   {diagnostic[k].map((x: string, i: number) => (
-                    <Typography key={i} sx={{ fontSize: 13, color: '#1F1F1F' }}>
+                    <Typography key={i} sx={{ fontSize: 13, color: 'text.primary' }}>
                       · {x}
                     </Typography>
                   ))}
@@ -449,7 +449,7 @@ export default function MessageBubble({
           {isUser ? '我' : '红'}
         </Box>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#8A8A8F', mb: 0.6 }}>
+          <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary', mb: 0.6 }}>
             {isUser ? '你' : '小红书助手'}
           </Typography>
 
@@ -486,7 +486,7 @@ export default function MessageBubble({
                   whiteSpace: 'pre-wrap',
                   fontSize: 15,
                   lineHeight: 1.75,
-                  color: '#1F1F1F',
+                  color: 'text.primary',
                 }}
               >
                 {msg.content}
@@ -504,7 +504,7 @@ export default function MessageBubble({
                   navigator.clipboard.writeText(msg.content || '')
                   toast.success('已复制', { duration: 1200 })
                 }}
-                sx={{ mt: 0.5, color: '#B8B4AB', '&:hover': { color: '#1F1F1F' } }}
+                sx={{ mt: 0.5, color: '#B8B4AB', '&:hover': { color: 'text.primary' } }}
               >
                 <ContentCopyIcon sx={{ fontSize: 15 }} />
               </IconButton>
