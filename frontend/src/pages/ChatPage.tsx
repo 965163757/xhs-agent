@@ -27,10 +27,10 @@ import ChatPanel from '../components/ChatPanel'
 import { loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor, getSession } from '../chatStore'
 
 const suggestions = [
-  { icon: '✍️', title: '从零写一篇', prompt: '帮我写一篇「早C晚A护肤」的小红书笔记' },
-  { icon: '🔄', title: '改写现有稿', prompt: '帮我把笔记 #1 改写得更有网感、加强钩子' },
-  { icon: '🎨', title: '生成封面', prompt: '为笔记 #1 生成一张干净、高级感的竖版封面' },
-  { icon: '🧪', title: '发布前诊断', prompt: '帮我诊断笔记 #1 能不能发，有没有违禁词' },
+  { icon: '✍️', title: '从零写一篇', prompt: '帮我写一篇关于「早C晚A护肤」的小红书笔记，目标受众是20-25岁学生党' },
+  { icon: '📋', title: '给我选题灵感', prompt: '我是美妆博主，帮我列5个最近适合发的选题方向，要有爆款潜力' },
+  { icon: '🎨', title: '生成封面图', prompt: '帮我生成一张小红书风格的封面图，主题是「秋冬护肤」，要干净高级感' },
+  { icon: '🧪', title: '诊断我的笔记', prompt: '帮我诊断笔记 #1，看看哪里可以优化' },
 ]
 
 export default function ChatPage() {

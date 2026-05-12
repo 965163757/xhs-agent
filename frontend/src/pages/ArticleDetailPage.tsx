@@ -31,7 +31,10 @@ import {
   updateArticle,
   listConversations,
   deleteConversation,
+  listVersions,
+  rollbackVersion,
   type Article,
+  type ArticleVersion,
   type Conversation,
 } from '../api/client'
 import { toast } from 'sonner'
@@ -209,7 +212,8 @@ export default function ArticleDetailPage() {
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [sidebar, setSidebar] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
-
+  const [versions, setVersions] = useState<ArticleVersion[]>([])
+  const [showVersions, setShowVersions] = useState(false)
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(id ? Number(id) : null)
 
   const refreshConvos = useCallback(() => {
@@ -232,6 +236,19 @@ export default function ArticleDetailPage() {
     await deleteConversation(cid)
     if (convId === String(cid)) newChat()
     refreshConvos()
+  }
+
+  const refreshVersions = useCallback(() => {
+    if (!id) return
+    listVersions(Number(id)).then(setVersions).catch(() => setVersions([]))
+  }, [id])
+
+  const handleRollback = async (vid: number) => {
+    if (!confirm('确定回滚到此版本？当前内容将被覆盖。')) return
+    const a = await rollbackVersion(Number(id), vid)
+    setArt(a)
+    setSavedArt(a)
+    toast.success('已回滚')
   }
 
   const load = useCallback(async () => {
@@ -432,6 +449,14 @@ export default function ArticleDetailPage() {
             )}
             <Box sx={{ flex: 1 }} />
             <Button
+              onClick={() => nav(`/articles/${art.id}/diagnose`)}
+              variant="outlined"
+              size="small"
+              sx={{ mr: 1, borderColor: '#FF7A00', color: '#FF7A00', '&:hover': { borderColor: '#E06800', bgcolor: '#FFF8F0' } }}
+            >
+              诊断
+            </Button>
+            <Button
               onClick={handleSave}
               variant="contained"
               size="small"
@@ -573,6 +598,41 @@ export default function ArticleDetailPage() {
                 )}
               </Box>
             )}
+
+            {/* version history */}
+            <Box sx={{ border: '1px solid #EEE9E1', borderRadius: 2.5, p: 2 }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ cursor: 'pointer' }} onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#8A8A8F' }}>
+                  版本历史
+                </Typography>
+                {versions.length > 0 && (
+                  <Chip size="small" label={`${versions.length}个版本`} sx={{ fontSize: 10, height: 18 }} />
+                )}
+                <Box flex={1} />
+                <Typography sx={{ fontSize: 11, color: '#8A8A8F' }}>{showVersions ? '收起' : '展开'}</Typography>
+              </Stack>
+              {showVersions && (
+                <Stack spacing={1} sx={{ mt: 1.5 }}>
+                  {versions.length === 0 && (
+                    <Typography sx={{ fontSize: 12, color: '#8A8A8F' }}>暂无版本记录（改写/优化时自动保存）</Typography>
+                  )}
+                  {versions.map(v => (
+                    <Stack key={v.id} direction="row" alignItems="center" spacing={1} sx={{ p: 1, borderRadius: 1, bgcolor: '#FAF7F2' }}>
+                      <Typography sx={{ fontSize: 12, fontWeight: 600 }}>v{v.version}</Typography>
+                      <Typography sx={{ fontSize: 11, color: '#8A8A8F', flex: 1 }} noWrap>
+                        {v.title || '(无标题)'} · {v.trigger}
+                      </Typography>
+                      <Typography sx={{ fontSize: 10, color: '#8A8A8F' }}>
+                        {new Date(v.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </Typography>
+                      <Button size="small" onClick={() => handleRollback(v.id)} sx={{ fontSize: 11, minWidth: 0, px: 1 }}>
+                        回滚
+                      </Button>
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+            </Box>
           </Stack>
         </Box>
       </Box>

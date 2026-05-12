@@ -13,7 +13,7 @@ from ..agents.background import get_stream, is_running, spawn_agent_task
 from ..agents.runner import run_agent_stream
 from ..agents.tools import TOOLS, call_tool, openai_tool_schemas
 from ..config import get_settings, update_settings
-from ..database import Article, Conversation, SessionLocal, Task, Template
+from ..database import Article, ArticleVersion, Conversation, SessionLocal, Task, Template
 from ..schemas import (
     ApplyTemplateRequest,
     ArticleIn,
@@ -331,6 +331,70 @@ async def delete_conversation(cid: int):
         await s.delete(c)
         await s.commit()
         return {"ok": True}
+
+
+# ---------- article versions ----------
+
+@router.get("/articles/{aid}/versions")
+async def list_versions(aid: int):
+    async with SessionLocal() as s:
+        res = await s.execute(
+            select(ArticleVersion)
+            .where(ArticleVersion.article_id == aid)
+            .order_by(ArticleVersion.version.desc())
+        )
+        return {"items": [v.to_dict() for v in res.scalars().all()]}
+
+
+@router.post("/articles/{aid}/versions")
+async def create_version(aid: int, payload: Dict[str, Any] = {}):
+    """Snapshot current article state as a new version."""
+    async with SessionLocal() as s:
+        a = await s.get(Article, aid)
+        if not a:
+            raise HTTPException(404, "article not found")
+        last = await s.execute(
+            select(ArticleVersion)
+            .where(ArticleVersion.article_id == aid)
+            .order_by(ArticleVersion.version.desc())
+            .limit(1)
+        )
+        last_v = last.scalars().first()
+        next_ver = (last_v.version + 1) if last_v else 1
+        v = ArticleVersion(
+            article_id=aid,
+            version=next_ver,
+            title=a.title,
+            body=a.body,
+            tags=a.tags,
+            cover_image=a.cover_image,
+            images=a.images or [],
+            trigger=payload.get("trigger", "manual"),
+        )
+        s.add(v)
+        await s.commit()
+        await s.refresh(v)
+        return v.to_dict()
+
+
+@router.post("/articles/{aid}/versions/{vid}/rollback")
+async def rollback_version(aid: int, vid: int):
+    """Rollback article to a specific version."""
+    async with SessionLocal() as s:
+        v = await s.get(ArticleVersion, vid)
+        if not v or v.article_id != aid:
+            raise HTTPException(404, "version not found")
+        a = await s.get(Article, aid)
+        if not a:
+            raise HTTPException(404, "article not found")
+        a.title = v.title
+        a.body = v.body
+        a.tags = v.tags
+        a.cover_image = v.cover_image
+        a.images = v.images or []
+        await s.commit()
+        await s.refresh(a)
+        return a.to_dict()
 
 
 # ---------- tasks ----------

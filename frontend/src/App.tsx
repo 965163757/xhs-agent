@@ -9,6 +9,7 @@ import ArticlesPage from './pages/ArticlesPage'
 import ArticleDetailPage from './pages/ArticleDetailPage'
 import SettingsPage from './pages/SettingsPage'
 import TemplatesPage from './pages/TemplatesPage'
+import DiagnosePage from './pages/DiagnosePage'
 import CommandPalette from './components/CommandPalette'
 
 function TopTab({ to, label }: { to: string; label: string }) {
@@ -128,6 +129,7 @@ export default function App() {
           <Route path="/" element={<ChatPage />} />
           <Route path="/articles" element={<ArticlesPage />} />
           <Route path="/articles/:id" element={<ArticleDetailPage />} />
+          <Route path="/articles/:id/diagnose" element={<DiagnosePage />} />
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>

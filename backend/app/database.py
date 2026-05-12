@@ -101,6 +101,35 @@ class Task(Base):
         }
 
 
+class ArticleVersion(Base):
+    __tablename__ = "article_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    article_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[str] = mapped_column(String(512), default="")
+    cover_image: Mapped[str] = mapped_column(String(1024), default="")
+    images: Mapped[list] = mapped_column(JSON, default=list)
+    trigger: Mapped[str] = mapped_column(String(64), default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "article_id": self.article_id,
+            "version": self.version,
+            "title": self.title,
+            "body": self.body,
+            "tags": [t for t in self.tags.split(",") if t] if self.tags else [],
+            "cover_image": self.cover_image,
+            "images": self.images or [],
+            "trigger": self.trigger,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Template(Base):
     __tablename__ = "templates"
 

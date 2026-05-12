@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .api.routes import router
+from .api.diagnose import router as diagnose_router
 from .config import get_settings
 from .database import init_db
 
@@ -31,6 +32,7 @@ Path(settings.image_dir).mkdir(parents=True, exist_ok=True)
 app.mount("/static/images", StaticFiles(directory=settings.image_dir), name="images")
 
 app.include_router(router, prefix="/api")
+app.include_router(diagnose_router, prefix="/api")
 
 
 @app.get("/healthz")

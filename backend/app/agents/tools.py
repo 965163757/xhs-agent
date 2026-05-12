@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy import select
 
-from ..database import Article, Conversation, SessionLocal, Template
+from ..database import Article, ArticleVersion, Conversation, SessionLocal, Template
 from ..services.llm import chat_completion, crop_image, edit_image, generate_image
 
 
@@ -21,6 +21,34 @@ ToolFn = Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
 async def _get_article(article_id: int) -> Optional[Article]:
     async with SessionLocal() as s:
         return await s.get(Article, article_id)
+
+
+async def _snapshot_article(article_id: int, trigger: str = "auto") -> None:
+    """Save a version snapshot before destructive operations."""
+    async with SessionLocal() as s:
+        a = await s.get(Article, article_id)
+        if not a:
+            return
+        last = await s.execute(
+            select(ArticleVersion)
+            .where(ArticleVersion.article_id == article_id)
+            .order_by(ArticleVersion.version.desc())
+            .limit(1)
+        )
+        last_v = last.scalars().first()
+        next_ver = (last_v.version + 1) if last_v else 1
+        v = ArticleVersion(
+            article_id=article_id,
+            version=next_ver,
+            title=a.title,
+            body=a.body,
+            tags=a.tags,
+            cover_image=a.cover_image,
+            images=a.images or [],
+            trigger=trigger,
+        )
+        s.add(v)
+        await s.commit()
 
 
 def _safe_json(text: str) -> Dict[str, Any]:
@@ -182,6 +210,8 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
 
+    await _snapshot_article(aid, "rewrite")
+
     resp = await chat_completion(
         messages=[
             {"role": "system", "content": XHS_WRITER_SYSTEM},
@@ -216,6 +246,8 @@ async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
+
+    await _snapshot_article(aid, "optimize")
 
     resp = await chat_completion(
         messages=[
@@ -305,32 +337,44 @@ async def tool_score_article(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def tool_diagnose_article(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Publish-readiness diagnostic: risk points, missing elements, fix suggestions."""
+    """Multi-agent diagnosis: 4 experts + debate + judge."""
+    from .diagnosis import run_diagnosis
+    from .research_data import detect_category
+    from .text_analyzer import full_analysis
+
     aid = int(args["article_id"])
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
-    resp = await chat_completion(
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "你是小红书审稿专家，发稿前做诊断。列出："
-                    "风险（平台违禁词、敏感表达、广告法禁用词）、"
-                    "缺失（钩子/标签/CTA/分段）、"
-                    "可改进建议（3-5 条，可执行）。"
-                    '严格 JSON：{"risks":["..."],"missing":["..."],"suggestions":["..."],"publish_ready":true|false}'
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"标题：{art.title}\n正文：\n{art.body}\n标签：{art.tags}",
-            },
-        ],
-        temperature=0.2,
+
+    tags = [t for t in (art.tags or "").split(",") if t.strip()]
+    images = art.images or []
+    image_count = len(images) + (1 if art.cover_image else 0)
+
+    result = await run_diagnosis(
+        title=art.title or "",
+        content=art.body or "",
+        tags=tags,
+        image_count=image_count,
+        images=images,
     )
-    data = _safe_json(resp.choices[0].message.content or "")
-    return {"ok": True, "article_id": aid, "diagnostic": data}
+
+    return {
+        "ok": True,
+        "article_id": aid,
+        "overall_score": result.overall_score,
+        "grade": result.grade,
+        "radar_data": result.radar_data,
+        "issues": result.issues,
+        "suggestions": result.suggestions,
+        "optimized_title": result.optimized_title,
+        "optimized_content": result.optimized_content,
+        "optimized_tags": result.optimized_tags,
+        "simulated_comments": result.simulated_comments,
+        "debate_summary": result.debate_summary,
+        "category": result.category_cn,
+        "elapsed_ms": result.elapsed_ms,
+    }
 
 
 # ---------- ideation ----------

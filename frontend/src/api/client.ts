@@ -89,6 +89,68 @@ export async function diagnoseArticle(id: number) {
   const r = await api.post('/articles/diagnose', { article_id: id })
   return r.data
 }
+
+export type DiagnoseEvent =
+  | { type: 'progress'; step: string; message: string; data?: any }
+  | { type: 'result'; data: DiagnosisReport }
+  | { type: 'error'; message: string }
+
+export interface DiagnosisReport {
+  overall_score: number
+  grade: string
+  radar_data: Record<string, number>
+  issues: Array<{ severity: string; description: string; from_agent: string }>
+  suggestions: Array<{ priority: number; description: string; expected_impact: string }>
+  debate_summary: string
+  optimized_title: string
+  optimized_content: string
+  optimized_tags: string[]
+  cover_direction: { layout: string; color_scheme: string; text_style: string; tips: string[] }
+  simulated_comments: Array<{ username: string; avatar_emoji: string; comment: string; sentiment: string; likes: number; persona?: string }>
+  agent_opinions: Array<{ agent_name: string; dimension: string; score: number; issues: string[]; suggestions: string[]; reasoning: string }>
+  debate_results: Array<{ agent: string; agreements: string[]; disagreements: string[]; additions: string[]; revised_score?: number }>
+  model_a_score: Record<string, any>
+  text_analysis: Record<string, any>
+  category: string
+  category_cn: string
+  elapsed_ms: number
+}
+
+export async function diagnoseStream(
+  payload: { article_id?: number; title?: string; content?: string; tags?: string[]; image_count?: number },
+  onEvent: (ev: DiagnoseEvent) => void,
+  signal?: AbortSignal
+) {
+  const res = await fetch('/api/diagnose/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+  if (!res.body) throw new Error('no stream body')
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() || ''
+    for (const part of parts) {
+      const line = part.trim()
+      if (!line.startsWith('data:')) continue
+      const payload2 = line.slice(5).trim()
+      if (payload2 === '[DONE]') return
+      try {
+        onEvent(JSON.parse(payload2))
+      } catch (e) {
+        console.warn('bad sse payload', payload2)
+      }
+    }
+  }
+}
 export async function outlineArticle(topic: string, audience?: string) {
   const r = await api.post('/articles/outline', { topic, audience })
   return r.data
@@ -232,6 +294,32 @@ export async function updateConversation(id: number, payload: Partial<Conversati
 }
 export async function deleteConversation(id: number) {
   await api.delete(`/conversations/${id}`)
+}
+
+export interface ArticleVersion {
+  id: number
+  article_id: number
+  version: number
+  title: string
+  body: string
+  tags: string[]
+  cover_image: string
+  images: string[]
+  trigger: string
+  created_at: string
+}
+
+export async function listVersions(articleId: number): Promise<ArticleVersion[]> {
+  const r = await api.get(`/articles/${articleId}/versions`)
+  return r.data.items
+}
+export async function createVersion(articleId: number, trigger = 'manual'): Promise<ArticleVersion> {
+  const r = await api.post(`/articles/${articleId}/versions`, { trigger })
+  return r.data
+}
+export async function rollbackVersion(articleId: number, versionId: number): Promise<Article> {
+  const r = await api.post(`/articles/${articleId}/versions/${versionId}/rollback`)
+  return r.data
 }
 
 export async function getSettings(): Promise<PublicSettings> {
