@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
@@ -43,10 +43,9 @@ export default function ChatPage() {
   const [sidebar, setSidebar] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
   const [deleteConvoId, setDeleteConvoId] = useState<number | null>(null)
-  // The session key used by chatStore
+  const justCreatedRef = useRef(false)
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(articleId ? Number(articleId) : null)
 
-  // Load article context if ?article= is set
   useEffect(() => {
     if (articleId) {
       getArticle(Number(articleId))
@@ -57,10 +56,12 @@ export default function ChatPage() {
     }
   }, [articleId])
 
-  // On mount / when ?c= changes, hydrate store from backend conversation
   useEffect(() => {
     if (convId) {
-      // Don't reload from backend if we're already streaming (e.g. just created this conversation)
+      if (justCreatedRef.current) {
+        justCreatedRef.current = false
+        return
+      }
       const current = getSession(currentSessionKey)
       if (current.streaming) return
       loadFromConversation(Number(convId), currentSessionKey).then((activeTaskId) => {
@@ -82,6 +83,7 @@ export default function ChatPage() {
   }
 
   const handleConversationCreated = useCallback((id: number) => {
+    justCreatedRef.current = true
     const newKey = `conv:${id}`
     migrateSession(currentSessionKey, newKey)
     const next: Record<string, string> = { c: String(id) }
@@ -102,31 +104,59 @@ export default function ChatPage() {
 
   return (
     <Box sx={{ height: 'calc(100vh - 56px)', display: 'flex', flexDirection: 'column' }}>
+      {/* Top bar with context info */}
       <Stack
         direction="row"
         alignItems="center"
         spacing={1}
-        sx={{ px: 2, py: 0.8, borderBottom: 1, borderColor: 'divider' }}
+        sx={{
+          px: 2.5,
+          py: 1,
+          borderBottom: 1,
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+        }}
       >
         <Tooltip title="历史对话">
           <IconButton onClick={() => { refreshConvos(); setSidebar(true) }} size="small">
-            <MenuIcon sx={{ fontSize: 20 }} />
+            <MenuIcon sx={{ fontSize: 18 }} />
           </IconButton>
         </Tooltip>
-        <Typography sx={{ ml: 0.5, fontSize: 13, color: 'text.secondary' }}>
-          {article ? `锁定笔记 #${article.id} · ${article.title?.slice(0, 18) || ''}` : '新对话'}
-        </Typography>
+        {article ? (
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.8,
+              px: 1.2,
+              py: 0.4,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,36,66,0.05)',
+              border: '1px solid rgba(255,36,66,0.1)',
+            }}
+          >
+            <Box sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: '#FF2442' }} />
+            <Typography sx={{ fontSize: 12, color: 'text.primary', fontWeight: 500 }}>
+              笔记 #{article.id} · {article.title?.slice(0, 18) || ''}
+            </Typography>
+          </Box>
+        ) : (
+          <Typography sx={{ fontSize: 12.5, color: 'text.secondary', fontWeight: 500 }}>
+            新对话
+          </Typography>
+        )}
         <Box sx={{ flex: 1 }} />
         <Button
           size="small"
-          startIcon={<AddIcon sx={{ fontSize: 18 }} />}
+          startIcon={<AddIcon sx={{ fontSize: 16 }} />}
           onClick={newChat}
-          sx={{ color: 'text.primary' }}
+          sx={{ fontSize: 12, color: 'text.secondary', fontWeight: 500 }}
         >
           新对话
         </Button>
       </Stack>
 
+      {/* Chat area */}
       <Box sx={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center' }}>
         <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <ChatPanel
@@ -152,26 +182,28 @@ export default function ChatPage() {
         </Box>
       </Box>
 
+      {/* History drawer */}
       <Drawer open={sidebar} onClose={() => setSidebar(false)}>
-        <Box sx={{ width: 300, bgcolor: 'background.paper' }}>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
-            <Typography variant="subtitle1" fontWeight={700}>
+        <Box sx={{ width: 300, bgcolor: 'background.paper', height: '100%' }}>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2.5 }}>
+            <Typography sx={{ fontSize: 15, fontWeight: 700 }}>
               历史对话
             </Typography>
             <Box sx={{ flex: 1 }} />
             <Button
               size="small"
-              startIcon={<AddIcon sx={{ fontSize: 16 }} />}
+              startIcon={<AddIcon sx={{ fontSize: 14 }} />}
               onClick={() => {
                 newChat()
                 setSidebar(false)
               }}
+              sx={{ fontSize: 12 }}
             >
               新建
             </Button>
           </Stack>
           <Divider />
-          <List dense>
+          <List dense sx={{ px: 0.5, py: 1 }}>
             {convos.map(c => (
               <ListItemButton
                 key={c.id}
@@ -181,11 +213,12 @@ export default function ChatPage() {
                   setParams(next)
                   setSidebar(false)
                 }}
+                sx={{ borderRadius: 2, mb: 0.3 }}
               >
                 <ListItemText
                   primary={c.title || '新对话'}
                   secondary={new Date(c.updated_at).toLocaleString()}
-                  primaryTypographyProps={{ fontSize: 14, noWrap: true }}
+                  primaryTypographyProps={{ fontSize: 13.5, noWrap: true, fontWeight: 500 }}
                   secondaryTypographyProps={{ fontSize: 11 }}
                 />
                 <IconButton
@@ -195,12 +228,12 @@ export default function ChatPage() {
                     removeConvo(c.id)
                   }}
                 >
-                  <DeleteOutlineIcon fontSize="small" />
+                  <DeleteOutlineIcon sx={{ fontSize: 15 }} />
                 </IconButton>
               </ListItemButton>
             ))}
             {convos.length === 0 && (
-              <Typography variant="caption" color="text.secondary" sx={{ px: 2 }}>
+              <Typography sx={{ px: 2, py: 3, fontSize: 13, color: 'text.secondary', textAlign: 'center' }}>
                 暂无对话
               </Typography>
             )}

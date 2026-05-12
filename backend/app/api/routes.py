@@ -5,15 +5,16 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
 from ..agents.background import get_stream, is_running, spawn_agent_task
 from ..agents.runner import run_agent_stream
 from ..agents.tools import TOOLS, call_tool, openai_tool_schemas
+from ..auth import get_current_user, require_admin
 from ..config import get_settings, update_settings
-from ..database import Article, ArticleVersion, Conversation, SessionLocal, Task, Template
+from ..database import Article, ArticleVersion, Conversation, SessionLocal, Task, Template, User
 from ..schemas import (
     ApplyTemplateRequest,
     ArticleIn,
@@ -49,14 +50,14 @@ router = APIRouter()
 # ---------- chat ----------
 
 @router.post("/chat/stream")
-async def chat_stream(req: ChatRequest):
+async def chat_stream(req: ChatRequest, user: User = Depends(get_current_user)):
     messages: List[Dict[str, Any]] = []
     for m in req.messages:
         messages.append(
             {"role": m.role, "content": m.content, "images": m.images}
         )
 
-    task_id = await spawn_agent_task(messages, conversation_id=req.conversation_id)
+    task_id = await spawn_agent_task(messages, conversation_id=req.conversation_id, user_id=user.id)
 
     async def event_gen():
         stream = get_stream(task_id)
@@ -81,27 +82,31 @@ async def chat_stream(req: ChatRequest):
 # ---------- articles CRUD ----------
 
 @router.get("/articles")
-async def list_articles(limit: int = 50):
+async def list_articles(limit: int = 50, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         res = await s.execute(
-            select(Article).order_by(Article.updated_at.desc()).limit(limit)
+            select(Article)
+            .where(Article.user_id == user.id)
+            .order_by(Article.updated_at.desc())
+            .limit(limit)
         )
         return {"items": [a.to_dict() for a in res.scalars().all()]}
 
 
 @router.get("/articles/{aid}")
-async def get_article(aid: int):
+async def get_article(aid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a:
+        if not a or a.user_id != user.id:
             raise HTTPException(404, "not found")
         return a.to_dict()
 
 
 @router.post("/articles")
-async def create_article(payload: ArticleIn):
+async def create_article(payload: ArticleIn, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = Article(
+            user_id=user.id,
             title=payload.title,
             body=payload.body,
             tags=",".join(payload.tags),
@@ -116,10 +121,10 @@ async def create_article(payload: ArticleIn):
 
 
 @router.patch("/articles/{aid}")
-async def update_article(aid: int, payload: ArticleUpdate):
+async def update_article(aid: int, payload: ArticleUpdate, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a:
+        if not a or a.user_id != user.id:
             raise HTTPException(404, "not found")
         data = payload.model_dump(exclude_unset=True)
         if "tags" in data and data["tags"] is not None:
@@ -133,10 +138,10 @@ async def update_article(aid: int, payload: ArticleUpdate):
 
 
 @router.delete("/articles/{aid}")
-async def delete_article(aid: int):
+async def delete_article(aid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a:
+        if not a or a.user_id != user.id:
             raise HTTPException(404, "not found")
         await s.delete(a)
         await s.commit()
@@ -146,89 +151,89 @@ async def delete_article(aid: int):
 # ---------- higher-level actions ----------
 
 @router.post("/articles/generate")
-async def api_generate(payload: GenerateArticleRequest):
+async def api_generate(payload: GenerateArticleRequest, user: User = Depends(get_current_user)):
     return await call_tool("generate_article", payload.model_dump())
 
 
 @router.post("/articles/rewrite")
-async def api_rewrite(payload: RewriteRequest):
+async def api_rewrite(payload: RewriteRequest, user: User = Depends(get_current_user)):
     return await call_tool("rewrite_article", payload.model_dump())
 
 
 @router.post("/articles/optimize")
-async def api_optimize(payload: OptimizeRequest):
+async def api_optimize(payload: OptimizeRequest, user: User = Depends(get_current_user)):
     return await call_tool("optimize_article", payload.model_dump())
 
 
 @router.post("/articles/score")
-async def api_score(payload: ScoreRequest):
+async def api_score(payload: ScoreRequest, user: User = Depends(get_current_user)):
     return await call_tool("score_article", payload.model_dump())
 
 
 @router.post("/articles/diagnose")
-async def api_diagnose(payload: DiagnoseRequest):
+async def api_diagnose(payload: DiagnoseRequest, user: User = Depends(get_current_user)):
     return await call_tool("diagnose_article", payload.model_dump())
 
 
 @router.post("/articles/outline")
-async def api_outline(payload: OutlineRequest):
+async def api_outline(payload: OutlineRequest, user: User = Depends(get_current_user)):
     return await call_tool("outline_article", payload.model_dump())
 
 
 @router.post("/articles/suggest_tags")
-async def api_suggest_tags(payload: SuggestTagsRequest):
+async def api_suggest_tags_post(payload: SuggestTagsRequest, user: User = Depends(get_current_user)):
     return await call_tool("suggest_tags", payload.model_dump())
 
 
 @router.post("/articles/suggest_titles")
-async def api_suggest_titles(payload: SuggestTitlesRequest):
+async def api_suggest_titles(payload: SuggestTitlesRequest, user: User = Depends(get_current_user)):
     return await call_tool("suggest_titles", payload.model_dump())
 
 
 @router.post("/articles/polish")
-async def api_polish(payload: PolishRequest):
+async def api_polish(payload: PolishRequest, user: User = Depends(get_current_user)):
     return await call_tool("polish_paragraph", payload.model_dump())
 
 
 @router.post("/articles/cover_prompt")
-async def api_cover_prompt(payload: CoverPromptRequest):
+async def api_cover_prompt(payload: CoverPromptRequest, user: User = Depends(get_current_user)):
     return await call_tool("cover_prompt", payload.model_dump())
 
 
 @router.post("/articles/content_image_prompt")
-async def api_content_image_prompt(payload: ContentImagePromptRequest):
+async def api_content_image_prompt(payload: ContentImagePromptRequest, user: User = Depends(get_current_user)):
     return await call_tool("content_image_prompt", payload.model_dump())
 
 
 @router.post("/articles/remove_image")
-async def api_remove_image(payload: RemoveImageRequest):
+async def api_remove_image(payload: RemoveImageRequest, user: User = Depends(get_current_user)):
     return await call_tool("remove_image", payload.model_dump())
 
 
 # ---------- image editing ----------
 
 @router.post("/images/crop")
-async def api_crop(payload: CropImageRequest):
+async def api_crop(payload: CropImageRequest, user: User = Depends(get_current_user)):
     return await call_tool("crop_image", payload.model_dump())
 
 
 @router.post("/images/inpaint")
-async def api_inpaint(payload: InpaintRequest):
+async def api_inpaint(payload: InpaintRequest, user: User = Depends(get_current_user)):
     return await call_tool("inpaint_image", payload.model_dump())
 
 
 @router.post("/images/remove_object")
-async def api_remove_object(payload: RemoveObjectRequest):
+async def api_remove_object(payload: RemoveObjectRequest, user: User = Depends(get_current_user)):
     return await call_tool("remove_object", payload.model_dump())
 
 
 @router.post("/images/edit")
-async def api_edit_image(payload: EditImageRequest):
+async def api_edit_image(payload: EditImageRequest, user: User = Depends(get_current_user)):
     return await call_tool("edit_image", payload.model_dump())
 
 
 @router.post("/images/upload_mask")
-async def upload_mask(file: UploadFile = File(...)):
+async def upload_mask(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     """Upload a PNG mask (transparent where the user wants to edit)."""
     import time, uuid
     settings = get_settings()
@@ -239,7 +244,7 @@ async def upload_mask(file: UploadFile = File(...)):
 
 
 @router.post("/images/generate")
-async def api_image(payload: ImageGenRequest):
+async def api_image(payload: ImageGenRequest, user: User = Depends(get_current_user)):
     urls = await generate_image(
         prompt=payload.prompt,
         size=payload.size,
@@ -250,14 +255,20 @@ async def api_image(payload: ImageGenRequest):
 
 
 @router.post("/upload")
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     import time, uuid
+    ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+    MAX_SIZE = 10 * 1024 * 1024
     settings = get_settings()
     Path(settings.image_dir).mkdir(parents=True, exist_ok=True)
-    ext = Path(file.filename or "").suffix or ".png"
+    ext = Path(file.filename or "").suffix.lower() or ".png"
+    if ext not in ALLOWED_EXT:
+        raise HTTPException(400, f"不支持的文件类型: {ext}")
+    content = await file.read()
+    if len(content) > MAX_SIZE:
+        raise HTTPException(413, "文件过大，最大 10MB")
     name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}{ext}"
     path = Path(settings.image_dir) / name
-    content = await file.read()
     path.write_bytes(content)
     return {"url": f"/static/images/{name}"}
 
@@ -265,21 +276,22 @@ async def upload_image(file: UploadFile = File(...)):
 # ---------- templates ----------
 
 @router.get("/templates")
-async def list_templates():
+async def list_templates(user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         res = await s.execute(select(Template).order_by(Template.id.asc()))
         return {"items": [t.to_dict() for t in res.scalars().all()]}
 
 
 @router.post("/templates/apply")
-async def apply_template(payload: ApplyTemplateRequest):
+async def apply_template(payload: ApplyTemplateRequest, user: User = Depends(get_current_user)):
     return await call_tool("apply_template", payload.model_dump())
 
 
 @router.post("/templates")
-async def create_template(payload: TemplateCreate):
+async def create_template(payload: TemplateCreate, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         t = Template(
+            creator_id=user.id,
             name=payload.name,
             category=payload.category,
             description=payload.description,
@@ -293,23 +305,25 @@ async def create_template(payload: TemplateCreate):
 
 
 @router.delete("/templates/{tid}")
-async def delete_template(tid: int):
+async def delete_template(tid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         t = await s.get(Template, tid)
         if not t:
             raise HTTPException(404, "not found")
+        if t.creator_id is not None and t.creator_id != user.id and user.role != "admin":
+            raise HTTPException(403, "无权删除")
         await s.delete(t)
         await s.commit()
         return {"ok": True}
 
 
 @router.post("/templates/extract")
-async def extract_template(payload: ExtractTemplateRequest):
+async def extract_template(payload: ExtractTemplateRequest, user: User = Depends(get_current_user)):
     """Use LLM to extract a reusable template structure from an existing article."""
     from ..services.llm import chat_completion
     async with SessionLocal() as s:
         art = await s.get(Article, payload.article_id)
-        if not art:
+        if not art or art.user_id != user.id:
             raise HTTPException(404, "article not found")
     resp = await chat_completion(
         messages=[
@@ -338,6 +352,7 @@ async def extract_template(payload: ExtractTemplateRequest):
         description=data.get("description", ""),
         body=data.get("body", ""),
         tags=data.get("tags", []),
+        creator_id=user.id,
     )
     async with SessionLocal() as s:
         s.add(template)
@@ -349,27 +364,31 @@ async def extract_template(payload: ExtractTemplateRequest):
 # ---------- conversations ----------
 
 @router.get("/conversations")
-async def list_conversations():
+async def list_conversations(user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         res = await s.execute(
-            select(Conversation).order_by(Conversation.updated_at.desc()).limit(100)
+            select(Conversation)
+            .where(Conversation.user_id == user.id)
+            .order_by(Conversation.updated_at.desc())
+            .limit(100)
         )
         return {"items": [c.to_dict() for c in res.scalars().all()]}
 
 
 @router.get("/conversations/{cid}")
-async def get_conversation(cid: int):
+async def get_conversation(cid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         c = await s.get(Conversation, cid)
-        if not c:
+        if not c or c.user_id != user.id:
             raise HTTPException(404, "not found")
         return c.to_dict()
 
 
 @router.post("/conversations")
-async def create_conversation(payload: Dict[str, Any]):
+async def create_conversation(payload: Dict[str, Any], user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         c = Conversation(
+            user_id=user.id,
             title=payload.get("title", "新对话"),
             article_id=payload.get("article_id"),
             messages=payload.get("messages", []),
@@ -381,10 +400,10 @@ async def create_conversation(payload: Dict[str, Any]):
 
 
 @router.patch("/conversations/{cid}")
-async def update_conversation(cid: int, payload: Dict[str, Any]):
+async def update_conversation(cid: int, payload: Dict[str, Any], user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         c = await s.get(Conversation, cid)
-        if not c:
+        if not c or c.user_id != user.id:
             raise HTTPException(404, "not found")
         for k in ("title", "messages", "article_id"):
             if k in payload:
@@ -395,10 +414,10 @@ async def update_conversation(cid: int, payload: Dict[str, Any]):
 
 
 @router.delete("/conversations/{cid}")
-async def delete_conversation(cid: int):
+async def delete_conversation(cid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         c = await s.get(Conversation, cid)
-        if not c:
+        if not c or c.user_id != user.id:
             raise HTTPException(404, "not found")
         await s.delete(c)
         await s.commit()
@@ -408,8 +427,11 @@ async def delete_conversation(cid: int):
 # ---------- article versions ----------
 
 @router.get("/articles/{aid}/versions")
-async def list_versions(aid: int):
+async def list_versions(aid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
+        a = await s.get(Article, aid)
+        if not a or a.user_id != user.id:
+            raise HTTPException(404, "not found")
         res = await s.execute(
             select(ArticleVersion)
             .where(ArticleVersion.article_id == aid)
@@ -419,11 +441,11 @@ async def list_versions(aid: int):
 
 
 @router.post("/articles/{aid}/versions")
-async def create_version(aid: int, payload: Dict[str, Any] = {}):
+async def create_version(aid: int, payload: Dict[str, Any] = {}, user: User = Depends(get_current_user)):
     """Snapshot current article state as a new version."""
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a:
+        if not a or a.user_id != user.id:
             raise HTTPException(404, "article not found")
         last = await s.execute(
             select(ArticleVersion)
@@ -435,6 +457,7 @@ async def create_version(aid: int, payload: Dict[str, Any] = {}):
         next_ver = (last_v.version + 1) if last_v else 1
         v = ArticleVersion(
             article_id=aid,
+            user_id=user.id,
             version=next_ver,
             title=a.title,
             body=a.body,
@@ -450,15 +473,15 @@ async def create_version(aid: int, payload: Dict[str, Any] = {}):
 
 
 @router.post("/articles/{aid}/versions/{vid}/rollback")
-async def rollback_version(aid: int, vid: int):
+async def rollback_version(aid: int, vid: int, user: User = Depends(get_current_user)):
     """Rollback article to a specific version."""
     async with SessionLocal() as s:
+        a = await s.get(Article, aid)
+        if not a or a.user_id != user.id:
+            raise HTTPException(404, "article not found")
         v = await s.get(ArticleVersion, vid)
         if not v or v.article_id != aid:
             raise HTTPException(404, "version not found")
-        a = await s.get(Article, aid)
-        if not a:
-            raise HTTPException(404, "article not found")
         a.title = v.title
         a.body = v.body
         a.tags = v.tags
@@ -472,16 +495,16 @@ async def rollback_version(aid: int, vid: int):
 # ---------- tasks ----------
 
 @router.get("/tasks/{task_id}")
-async def get_task(task_id: str):
+async def get_task(task_id: str, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         t = await s.get(Task, task_id)
-        if not t:
+        if not t or (t.user_id is not None and t.user_id != user.id):
             raise HTTPException(404, "task not found")
         return t.to_dict()
 
 
 @router.get("/tasks/{task_id}/stream")
-async def stream_task(task_id: str):
+async def stream_task(task_id: str, user: User = Depends(get_current_user)):
     """Reconnect to a running task's event stream."""
     async def event_gen():
         if not is_running(task_id):
@@ -514,24 +537,27 @@ async def stream_task(task_id: str):
 # ---------- settings ----------
 
 @router.get("/settings")
-async def get_public_settings():
+async def get_public_settings(user: User = Depends(get_current_user)):
     return get_settings().public_dict()
 
 
 @router.put("/settings")
-async def put_settings(payload: SettingsUpdate):
+async def put_settings(payload: SettingsUpdate, user: User = Depends(require_admin)):
     new = update_settings(payload.model_dump(exclude_unset=True))
     return new.public_dict()
 
 
 @router.post("/settings/test")
-async def test_settings():
+async def test_settings(user: User = Depends(get_current_user)):
     """Quick connectivity test against the currently saved config."""
     from ..services.llm import chat_completion
+    from ..config import get_effective_settings
+    effective = await get_effective_settings(user.id)
     try:
         r = await chat_completion(
             messages=[{"role": "user", "content": "Say ok"}],
             temperature=0.0,
+            settings=effective,
         )
         content = r.choices[0].message.content or ""
         return {"ok": True, "reply": content[:80]}
@@ -542,16 +568,21 @@ async def test_settings():
 # ---------- stats ----------
 
 @router.get("/stats")
-async def api_stats():
+async def api_stats(user: User = Depends(get_current_user)):
     from ..agents.tools import tool_article_stats
-    return await tool_article_stats({})
+    return await tool_article_stats({"user_id": user.id})
 
 
 @router.get("/stats/calendar")
-async def api_calendar():
+async def api_calendar(user: User = Depends(get_current_user)):
     """Return articles grouped by creation date for calendar view."""
     async with SessionLocal() as s:
-        res = await s.execute(select(Article).order_by(Article.created_at.desc()).limit(200))
+        res = await s.execute(
+            select(Article)
+            .where(Article.user_id == user.id)
+            .order_by(Article.created_at.desc())
+            .limit(200)
+        )
         articles = res.scalars().all()
     calendar: Dict[str, List[Dict[str, Any]]] = {}
     for a in articles:
@@ -565,7 +596,7 @@ async def api_calendar():
 # ---------- meta ----------
 
 @router.get("/meta")
-async def meta():
+async def meta(user: User = Depends(get_current_user)):
     s = get_settings()
     return {
         "chat_model": s.chat_model,
@@ -577,7 +608,7 @@ async def meta():
 # ---------- banned words ----------
 
 @router.post("/check_banned_words")
-async def api_check_banned_words(payload: Dict[str, Any]):
+async def api_check_banned_words(payload: Dict[str, Any], user: User = Depends(get_current_user)):
     from ..agents.banned_words import check_banned_words
     text = payload.get("text", "")
     result = check_banned_words(text)
@@ -585,7 +616,7 @@ async def api_check_banned_words(payload: Dict[str, Any]):
 
 
 @router.get("/banned_words")
-async def api_get_banned_words():
+async def api_get_banned_words(user: User = Depends(get_current_user)):
     from ..agents.banned_words import get_all_banned_words
     return get_all_banned_words()
 
@@ -593,7 +624,7 @@ async def api_get_banned_words():
 # ---------- hot tags ----------
 
 @router.get("/tags/suggest")
-async def api_suggest_tags(query: str = "", category: str = "", limit: int = 20):
+async def api_suggest_tags_get(query: str = "", category: str = "", limit: int = 20, user: User = Depends(get_current_user)):
     from ..agents.hot_tags import suggest_tags
     return {"items": suggest_tags(query=query, category=category, limit=limit)}
 
@@ -601,7 +632,7 @@ async def api_suggest_tags(query: str = "", category: str = "", limit: int = 20)
 # ---------- MCP HTTP bridge (embedded server) ----------
 
 @router.get("/mcp/tools")
-async def mcp_list_tools():
+async def mcp_list_tools(user: User = Depends(get_current_user)):
     """Same tools as stdio server, exposed over HTTP."""
     return {
         "tools": [
@@ -618,7 +649,9 @@ async def mcp_list_tools():
 
 
 @router.post("/mcp/call")
-async def mcp_call(payload: MCPCallRequest):
+async def mcp_call(payload: MCPCallRequest, user: User = Depends(get_current_user)):
+    from ..agents.tools import set_tool_user_id
+    set_tool_user_id(user.id)
     if payload.name not in TOOLS:
         raise HTTPException(404, f"unknown tool: {payload.name}")
     result = await call_tool(payload.name, payload.arguments or {})
@@ -626,6 +659,6 @@ async def mcp_call(payload: MCPCallRequest):
 
 
 @router.get("/tools")
-async def tools_openai_schema():
+async def tools_openai_schema(user: User = Depends(get_current_user)):
     """OpenAI function-calling schemas for any external agent that wants to drive the same tools."""
     return {"tools": openai_tool_schemas()}

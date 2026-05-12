@@ -14,6 +14,28 @@ interface Stats {
 
 type CalendarData = Record<string, Array<{ id: number; title: string; status: string }>>
 
+function StatCard({ value, label, color }: { value: string | number; label: string; color?: string }) {
+  return (
+    <Paper
+      sx={{
+        p: 2.5,
+        textAlign: 'center',
+        position: 'relative',
+        overflow: 'hidden',
+        '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' },
+        transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
+      }}
+    >
+      <Typography sx={{ fontSize: 32, fontWeight: 800, color: color || 'text.primary', letterSpacing: -1 }}>
+        {value}
+      </Typography>
+      <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mt: 0.3, fontWeight: 500 }}>
+        {label}
+      </Typography>
+    </Paper>
+  )
+}
+
 export default function AnalyticsPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [calendar, setCalendar] = useState<CalendarData>({})
@@ -31,17 +53,35 @@ export default function AnalyticsPage() {
   }
 
   const tagChartOption = stats ? {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', backgroundColor: '#1A1A1A', borderColor: 'transparent', textStyle: { color: '#fff', fontSize: 12 } },
     xAxis: {
       type: 'category',
       data: stats.top_tags.map(t => t.tag),
-      axisLabel: { rotate: 30, fontSize: 11 },
+      axisLabel: { rotate: 30, fontSize: 11, color: '#8C8C8C' },
+      axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
+      axisTick: { show: false },
     },
-    yAxis: { type: 'value' },
+    yAxis: {
+      type: 'value',
+      axisLabel: { fontSize: 11, color: '#8C8C8C' },
+      splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+      axisLine: { show: false },
+    },
     series: [{
       type: 'bar',
       data: stats.top_tags.map(t => t.count),
-      itemStyle: { color: '#FF2741', borderRadius: [4, 4, 0, 0] },
+      itemStyle: {
+        borderRadius: [6, 6, 0, 0],
+        color: {
+          type: 'linear',
+          x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: '#FF2442' },
+            { offset: 1, color: '#FF7A00' },
+          ],
+        },
+      },
+      barWidth: '60%',
     }],
     grid: { left: 40, right: 20, top: 20, bottom: 60 },
   } : null
@@ -53,43 +93,30 @@ export default function AnalyticsPage() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1100, mx: 'auto' }}>
-      <Typography sx={{ fontSize: 26, fontWeight: 600, letterSpacing: -0.3, mb: 3 }}>
-        数据概览
-      </Typography>
+      <Stack spacing={0.3} sx={{ mb: 3.5 }}>
+        <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
+          数据概览
+        </Typography>
+        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+          创作数据一目了然
+        </Typography>
+      </Stack>
 
       {/* Stats cards */}
       {stats && (
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2, mb: 4 }}>
-          <Paper sx={{ p: 2.5, textAlign: 'center' }}>
-            <Typography sx={{ fontSize: 32, fontWeight: 700, color: 'primary.main' }}>{stats.total}</Typography>
-            <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>总笔记数</Typography>
-          </Paper>
-          <Paper sx={{ p: 2.5, textAlign: 'center' }}>
-            <Typography sx={{ fontSize: 32, fontWeight: 700, color: 'success.main' }}>
-              {stats.by_status['published'] || 0}
-            </Typography>
-            <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>已发布</Typography>
-          </Paper>
-          <Paper sx={{ p: 2.5, textAlign: 'center' }}>
-            <Typography sx={{ fontSize: 32, fontWeight: 700, color: 'warning.main' }}>
-              {stats.by_status['draft'] || 0}
-            </Typography>
-            <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>草稿</Typography>
-          </Paper>
-          <Paper sx={{ p: 2.5, textAlign: 'center' }}>
-            <Typography sx={{ fontSize: 32, fontWeight: 700 }}>
-              {stats.avg_score ?? '—'}
-            </Typography>
-            <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>平均评分</Typography>
-          </Paper>
+          <StatCard value={stats.total} label="总笔记数" color="#FF2442" />
+          <StatCard value={stats.by_status['published'] || 0} label="已发布" color="#16A34A" />
+          <StatCard value={stats.by_status['draft'] || 0} label="草稿" color="#D97706" />
+          <StatCard value={stats.avg_score ?? '—'} label="平均评分" />
         </Box>
       )}
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, mb: 4 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2.5, mb: 4 }}>
         {/* Tag distribution */}
         {tagChartOption && (
           <Paper sx={{ p: 2.5 }}>
-            <Typography sx={{ fontSize: 15, fontWeight: 600, mb: 1.5 }}>标签分布 Top 15</Typography>
+            <Typography sx={{ fontSize: 14, fontWeight: 600, mb: 1.5 }}>标签分布 Top 15</Typography>
             <ReactECharts option={tagChartOption} style={{ height: 240 }} />
           </Paper>
         )}
@@ -97,22 +124,23 @@ export default function AnalyticsPage() {
         {/* Status pie */}
         {stats && (
           <Paper sx={{ p: 2.5 }}>
-            <Typography sx={{ fontSize: 15, fontWeight: 600, mb: 1.5 }}>状态分布</Typography>
+            <Typography sx={{ fontSize: 14, fontWeight: 600, mb: 1.5 }}>状态分布</Typography>
             <ReactECharts
               style={{ height: 240 }}
               option={{
-                tooltip: { trigger: 'item' },
+                tooltip: { trigger: 'item', backgroundColor: '#1A1A1A', borderColor: 'transparent', textStyle: { color: '#fff', fontSize: 12 } },
                 series: [{
                   type: 'pie',
-                  radius: ['40%', '70%'],
+                  radius: ['42%', '72%'],
                   data: Object.entries(stats.by_status).map(([k, v]) => ({
                     name: statusLabel[k] || k,
                     value: v,
                   })),
-                  itemStyle: { borderRadius: 6 },
-                  label: { fontSize: 12 },
+                  itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 3 },
+                  label: { fontSize: 12, color: '#6B6B6B' },
+                  emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.1)' } },
                 }],
-                color: ['#FF2741', '#16A34A', '#FFB800', '#8A8A8F'],
+                color: ['#FF2442', '#16A34A', '#FFB800', '#8C8C8C'],
               }}
             />
           </Paper>
@@ -121,12 +149,12 @@ export default function AnalyticsPage() {
 
       {/* Content calendar */}
       <Paper sx={{ p: 2.5 }}>
-        <Typography sx={{ fontSize: 15, fontWeight: 600, mb: 2 }}>
+        <Typography sx={{ fontSize: 14, fontWeight: 600, mb: 2 }}>
           内容日历 · {today.getFullYear()}年{today.getMonth() + 1}月
         </Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0.5 }}>
           {['日', '一', '二', '三', '四', '五', '六'].map(d => (
-            <Typography key={d} sx={{ textAlign: 'center', fontSize: 12, color: 'text.secondary', py: 0.5 }}>
+            <Typography key={d} sx={{ textAlign: 'center', fontSize: 11, color: 'text.secondary', py: 0.5, fontWeight: 600 }}>
               {d}
             </Typography>
           ))}
@@ -145,11 +173,12 @@ export default function AnalyticsPage() {
                   minHeight: { xs: 40, md: 64 },
                   border: '1px solid',
                   borderColor: isToday ? 'primary.main' : 'divider',
-                  borderRadius: 1.5,
+                  borderRadius: 2,
                   p: 0.5,
                   cursor: articles.length ? 'pointer' : 'default',
-                  bgcolor: isToday ? 'rgba(255,39,65,0.04)' : 'transparent',
-                  '&:hover': articles.length ? { bgcolor: 'action.hover' } : {},
+                  bgcolor: isToday ? 'rgba(255,36,66,0.03)' : 'transparent',
+                  transition: 'all 0.15s ease',
+                  '&:hover': articles.length ? { bgcolor: 'rgba(0,0,0,0.02)', borderColor: 'text.secondary' } : {},
                 }}
               >
                 <Typography sx={{ fontSize: 11, fontWeight: isToday ? 700 : 400, color: isToday ? 'primary.main' : 'text.secondary' }}>
@@ -158,7 +187,7 @@ export default function AnalyticsPage() {
                 {articles.slice(0, 2).map(a => (
                   <Chip
                     key={a.id}
-                    label={a.title?.slice(0, 6) || `#${a.id}`}
+                    label={a.title?.slice(0, 5) || `#${a.id}`}
                     size="small"
                     onClick={() => nav(`/articles/${a.id}`)}
                     sx={{ fontSize: 9, height: 16, mt: 0.3, maxWidth: '100%', '& .MuiChip-label': { px: 0.5 } }}

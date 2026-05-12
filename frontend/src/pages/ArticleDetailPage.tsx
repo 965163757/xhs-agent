@@ -549,8 +549,18 @@ export default function ArticleDetailPage() {
                 onChange={e => setArt({ ...art, body: e.target.value })}
                 InputProps={{ sx: { fontSize: 14.5, lineHeight: 1.75 } }}
               />
-              <Typography sx={{ mt: 0.5, fontSize: 11, textAlign: 'right', color: 'text.secondary' }}>
+              <Typography
+                sx={{
+                  mt: 0.5,
+                  fontSize: 11,
+                  textAlign: 'right',
+                  color: art.body.length < 300 ? '#D97706' : art.body.length > 1000 ? '#D97706' : 'text.secondary',
+                }}
+              >
                 {art.body.length} 字
+                {art.body.length < 300 && ' · 建议 300 字以上'}
+                {art.body.length > 1000 && ' · 建议控制在 1000 字内'}
+                {art.body.length >= 300 && art.body.length <= 1000 && ' · 字数合适'}
               </Typography>
             </Box>
             <TagInput

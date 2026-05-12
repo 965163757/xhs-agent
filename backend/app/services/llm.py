@@ -10,23 +10,35 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 import httpx
 from openai import AsyncOpenAI
 
-from ..config import get_settings
+from ..config import Settings, get_settings
 
 
 _client: Optional[AsyncOpenAI] = None
 _client_key: Optional[tuple] = None
+_user_clients: Dict[tuple, AsyncOpenAI] = {}
 
 
 def reset_client() -> None:
-    global _client, _client_key
+    global _client, _client_key, _user_clients
     _client = None
     _client_key = None
+    _user_clients.clear()
 
 
-def get_client() -> AsyncOpenAI:
+def get_client(settings: Optional[Settings] = None) -> AsyncOpenAI:
     global _client, _client_key
-    s = get_settings()
+    s = settings or get_settings()
     key = (s.openai_api_key, s.openai_base_url)
+
+    if settings is not None:
+        if key not in _user_clients:
+            _user_clients[key] = AsyncOpenAI(
+                api_key=s.openai_api_key,
+                base_url=s.openai_base_url,
+                timeout=180.0,
+            )
+        return _user_clients[key]
+
     if _client is None or _client_key != key:
         _client = AsyncOpenAI(
             api_key=s.openai_api_key,
@@ -99,9 +111,10 @@ async def chat_completion(
     tool_choice: str = "auto",
     temperature: float = 0.7,
     model: Optional[str] = None,
+    settings: Optional[Settings] = None,
 ) -> Any:
-    client = get_client()
-    s = get_settings()
+    s = settings or get_settings()
+    client = get_client(settings)
     kwargs: Dict[str, Any] = {
         "model": model or s.chat_model,
         "messages": to_openai_messages(messages),
@@ -118,9 +131,10 @@ async def chat_completion_stream(
     tools: Optional[List[Dict[str, Any]]] = None,
     temperature: float = 0.7,
     model: Optional[str] = None,
+    settings: Optional[Settings] = None,
 ) -> AsyncIterator[Any]:
-    client = get_client()
-    s = get_settings()
+    s = settings or get_settings()
+    client = get_client(settings)
     kwargs: Dict[str, Any] = {
         "model": model or s.chat_model,
         "messages": to_openai_messages(messages),
@@ -140,9 +154,10 @@ async def generate_image(
     size: str = "1024x1536",
     n: int = 1,
     reference_images: Optional[List[str]] = None,
+    settings: Optional[Settings] = None,
 ) -> List[str]:
-    client = get_client()
-    s = get_settings()
+    s = settings or get_settings()
+    client = get_client(settings)
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
     saved: List[str] = []
 
@@ -193,6 +208,7 @@ async def edit_image(
     prompt: str,
     size: str = "1024x1024",
     n: int = 1,
+    settings: Optional[Settings] = None,
 ) -> List[str]:
     """Image-to-image edit via OpenAI `images.edit`.
 
@@ -201,8 +217,8 @@ async def edit_image(
                   (None means full-image edit / variation)
     - prompt:     what to paint in the masked region (for inpaint) or how to edit overall
     """
-    client = get_client()
-    s = get_settings()
+    s = settings or get_settings()
+    client = get_client(settings)
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
 
     img_path = _resolve_local_path(image_url)

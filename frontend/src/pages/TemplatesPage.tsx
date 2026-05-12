@@ -85,115 +85,145 @@ export default function TemplatesPage() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1100, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" sx={{ mb: 0.5 }}>
-        <Typography sx={{ fontSize: 26, fontWeight: 600, letterSpacing: -0.3 }}>
-          模板库
-        </Typography>
+      <Stack direction="row" alignItems="flex-start" sx={{ mb: 3.5 }}>
+        <Stack spacing={0.3}>
+          <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
+            模板库
+          </Typography>
+          <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+            选一个结构模板，给一个主题，AI 按骨架生成完整笔记
+          </Typography>
+        </Stack>
         <Box sx={{ flex: 1 }} />
         <Button
           startIcon={<AddIcon />}
           variant="outlined"
           size="small"
           onClick={() => setShowCreate(true)}
+          sx={{ mt: 0.5 }}
         >
           自定义模板
         </Button>
       </Stack>
-      <Typography sx={{ fontSize: 13.5, color: 'text.secondary', mb: 3 }}>
-        选一个结构模板，给一个主题，AI 会按模板骨架生成完整笔记。也可以自己创建模板。
-      </Typography>
 
       {loading && (
-        <Box sx={{ display: 'grid', placeItems: 'center', py: 8 }}>
+        <Box sx={{ display: 'grid', placeItems: 'center', py: 10 }}>
           <CircularProgress size={28} />
         </Box>
       )}
 
-      {!loading && (
-      <Box
-        sx={{
-          display: 'grid',
-          gap: 1.5,
-          gridTemplateColumns: {
-            xs: '1fr',
-            sm: 'repeat(2, 1fr)',
-            md: 'repeat(3, 1fr)',
-          },
-        }}
-      >
-        {items.map(t => (
-          <Box
-            key={t.id}
-            onClick={() => {
-              setActive(t)
-              setTopic('')
-            }}
-            sx={{
-              border: '1px solid',
-              borderColor: 'divider',
-              borderRadius: 2.5,
-              p: 2,
-              cursor: 'pointer',
-              transition: 'all .15s',
-              position: 'relative',
-              '&:hover': { borderColor: 'text.secondary', bgcolor: 'background.default' },
-              '&:hover .del-btn': { opacity: 1 },
-            }}
-          >
-            <IconButton
-              className="del-btn"
-              size="small"
-              onClick={(e) => handleDelete(t.id, e)}
-              sx={{ position: 'absolute', top: 8, right: 8, opacity: 0, transition: 'opacity .15s' }}
-            >
-              <DeleteOutlineIcon sx={{ fontSize: 16 }} />
-            </IconButton>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.8 }}>
-              <Typography sx={{ fontSize: 16, fontWeight: 600 }}>{t.name}</Typography>
-              <Chip
-                size="small"
-                label={t.category}
-                sx={{ bgcolor: 'action.hover', fontSize: 11, height: 20 }}
-              />
-            </Stack>
-            <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 1.2 }}>
-              {t.description}
-            </Typography>
-            <Box
-              sx={{
-                p: 1.4,
-                bgcolor: 'background.default',
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: 1.5,
-                whiteSpace: 'pre-wrap',
-                fontSize: 12,
-                color: 'text.secondary',
-                maxHeight: 160,
-                overflow: 'hidden',
-                lineHeight: 1.65,
-                fontFamily: 'ui-monospace, Menlo, monospace',
-              }}
-            >
-              {t.body}
-            </Box>
-            <Stack direction="row" spacing={0.5} sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}>
-              {(t.tags || []).map(x => (
-                <Chip key={x} label={x} size="small" sx={{ fontSize: 11, height: 20 }} />
-              ))}
-            </Stack>
-          </Box>
-        ))}
-      </Box>
+      {!loading && items.length === 0 && (
+        <Box sx={{ textAlign: 'center', py: 10 }}>
+          <Typography sx={{ fontSize: 48, mb: 1.5 }}>📄</Typography>
+          <Typography sx={{ fontSize: 14, color: 'text.secondary' }}>
+            暂无模板，创建一个或在对话中让助手提取
+          </Typography>
+        </Box>
       )}
 
-      {/* Delete confirmation dialog */}
+      {!loading && (
+        <Box
+          sx={{
+            display: 'grid',
+            gap: 2,
+            gridTemplateColumns: {
+              xs: '1fr',
+              sm: 'repeat(2, 1fr)',
+              md: 'repeat(3, 1fr)',
+            },
+          }}
+        >
+          {items.map(t => (
+            <Box
+              key={t.id}
+              onClick={() => {
+                setActive(t)
+                setTopic('')
+              }}
+              sx={{
+                bgcolor: 'background.paper',
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 3,
+                p: 2.5,
+                cursor: 'pointer',
+                transition: 'all .2s cubic-bezier(0.4,0,0.2,1)',
+                position: 'relative',
+                '&:hover': {
+                  borderColor: 'rgba(255,36,66,0.15)',
+                  boxShadow: '0 6px 20px rgba(255,36,66,0.06), 0 2px 8px rgba(0,0,0,0.03)',
+                  transform: 'translateY(-2px)',
+                },
+                '&:hover .del-btn': { opacity: 1 },
+              }}
+            >
+              <IconButton
+                className="del-btn"
+                size="small"
+                onClick={(e) => handleDelete(t.id, e)}
+                sx={{ position: 'absolute', top: 10, right: 10, opacity: 0, transition: 'opacity .15s' }}
+              >
+                <DeleteOutlineIcon sx={{ fontSize: 15 }} />
+              </IconButton>
+              <Stack direction="row" alignItems="center" spacing={0.8} sx={{ mb: 1 }}>
+                <Typography sx={{ fontSize: 15, fontWeight: 700 }}>{t.name}</Typography>
+                <Chip
+                  size="small"
+                  label={t.category}
+                  sx={{ fontSize: 10.5, height: 18, bgcolor: 'rgba(255,122,0,0.08)', color: '#CC6200' }}
+                />
+              </Stack>
+              <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mb: 1.5, lineHeight: 1.5 }}>
+                {t.description}
+              </Typography>
+              <Box
+                sx={{
+                  p: 1.5,
+                  bgcolor: 'rgba(0,0,0,0.02)',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 2,
+                  whiteSpace: 'pre-wrap',
+                  fontSize: 11.5,
+                  color: 'text.secondary',
+                  maxHeight: 140,
+                  overflow: 'hidden',
+                  lineHeight: 1.6,
+                  fontFamily: '"JetBrains Mono", ui-monospace, Menlo, monospace',
+                  position: 'relative',
+                  '&::after': {
+                    content: '""',
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 40,
+                    background: 'linear-gradient(transparent, var(--bg, rgba(248,248,246,1)))',
+                    pointerEvents: 'none',
+                  },
+                }}
+              >
+                {t.body}
+              </Box>
+              {(t.tags || []).length > 0 && (
+                <Stack direction="row" spacing={0.4} sx={{ mt: 1.2, flexWrap: 'wrap', gap: 0.4 }}>
+                  {(t.tags || []).slice(0, 4).map(x => (
+                    <Chip key={x} label={x} size="small" sx={{ fontSize: 10, height: 18 }} />
+                  ))}
+                </Stack>
+              )}
+            </Box>
+          ))}
+        </Box>
+      )}
+
+      {/* Delete confirmation */}
       <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)}>
-        <DialogTitle>确认删除</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>确认删除</DialogTitle>
         <DialogContent>
           <DialogContentText>删除后无法恢复，确定要删除这个模板吗？</DialogContentText>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={() => setDeleteTarget(null)}>取消</Button>
           <Button onClick={confirmDelete} color="error" variant="contained">删除</Button>
         </DialogActions>
@@ -201,7 +231,7 @@ export default function TemplatesPage() {
 
       {/* Apply dialog */}
       <Dialog open={!!active} onClose={() => !busy && setActive(null)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontSize: 17, fontWeight: 600 }}>
+        <DialogTitle sx={{ fontWeight: 700, fontSize: 16 }}>
           按模板生成：{active?.name}
         </DialogTitle>
         <DialogContent>
@@ -218,7 +248,7 @@ export default function TemplatesPage() {
             />
           </Stack>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={() => setActive(null)} disabled={busy}>
             取消
           </Button>
@@ -227,7 +257,7 @@ export default function TemplatesPage() {
             onClick={apply}
             disabled={!topic || busy}
             startIcon={busy ? <CircularProgress size={14} /> : null}
-            sx={{ bgcolor: '#FF2741', '&:hover': { bgcolor: '#D61030' } }}
+            sx={{ background: 'linear-gradient(135deg,#FF2442,#FF7A00)', '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' } }}
           >
             {busy ? '生成中…' : '生成并打开'}
           </Button>
@@ -236,7 +266,7 @@ export default function TemplatesPage() {
 
       {/* Create template dialog */}
       <Dialog open={showCreate} onClose={() => !busy && setShowCreate(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontSize: 17, fontWeight: 600 }}>
+        <DialogTitle sx={{ fontWeight: 700, fontSize: 16 }}>
           创建自定义模板
         </DialogTitle>
         <DialogContent>
@@ -279,7 +309,7 @@ export default function TemplatesPage() {
             />
           </Stack>
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={() => setShowCreate(false)} disabled={busy}>
             取消
           </Button>
@@ -288,7 +318,7 @@ export default function TemplatesPage() {
             onClick={handleCreate}
             disabled={!form.name || !form.body || busy}
             startIcon={busy ? <CircularProgress size={14} /> : null}
-            sx={{ bgcolor: '#FF2741', '&:hover': { bgcolor: '#D61030' } }}
+            sx={{ background: 'linear-gradient(135deg,#FF2442,#FF7A00)', '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' } }}
           >
             {busy ? '创建中…' : '创建模板'}
           </Button>

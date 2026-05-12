@@ -11,4 +11,15 @@ export default defineConfig({
       '/static': 'http://127.0.0.1:8787',
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-mui': ['@mui/material', '@mui/icons-material'],
+          'vendor-echarts': ['echarts', 'echarts-for-react'],
+        },
+      },
+    },
+  },
 })

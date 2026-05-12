@@ -29,6 +29,12 @@ import ConfirmDialog from '../components/ConfirmDialog'
 
 type SortKey = 'updated' | 'score' | 'title'
 
+const statusColors: Record<string, { bg: string; color: string }> = {
+  draft: { bg: 'rgba(107,114,128,0.08)', color: '#6B7280' },
+  published: { bg: 'rgba(22,163,74,0.08)', color: '#16A34A' },
+  scheduled: { bg: 'rgba(217,119,6,0.08)', color: '#D97706' },
+}
+
 export default function ArticlesPage() {
   const [items, setItems] = useState<Article[]>([])
   const [loading, setLoading] = useState(true)
@@ -68,30 +74,50 @@ export default function ArticlesPage() {
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1100, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
-        <Typography sx={{ fontSize: 26, fontWeight: 600, letterSpacing: -0.3 }}>
-          我的笔记
-        </Typography>
-        <Typography sx={{ fontSize: 13, color: '#B8B4AB' }}>{items.length} 篇</Typography>
+      {/* Header */}
+      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3.5 }}>
+        <Stack spacing={0.2}>
+          <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
+            我的笔记
+          </Typography>
+          <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+            {items.length} 篇笔记
+          </Typography>
+        </Stack>
         <Box sx={{ flex: 1 }} />
         <ToggleButtonGroup
           size="small"
           exclusive
           value={statusFilter}
           onChange={(_, v) => v && setStatusFilter(v)}
-          sx={{ '& .MuiToggleButton-root': { fontSize: 12, px: 1.2, py: 0.4, textTransform: 'none' } }}
+          sx={{
+            '& .MuiToggleButton-root': {
+              fontSize: 12,
+              px: 1.4,
+              py: 0.5,
+              textTransform: 'none',
+              borderRadius: '8px !important',
+              border: '1px solid',
+              borderColor: 'divider',
+              '&.Mui-selected': {
+                bgcolor: 'rgba(255,36,66,0.06)',
+                color: '#FF2442',
+                borderColor: 'rgba(255,36,66,0.2)',
+              },
+            },
+          }}
         >
           <ToggleButton value="all">全部</ToggleButton>
           {statuses.map(s => (
-            <ToggleButton key={s} value={s}>{s}</ToggleButton>
+            <ToggleButton key={s} value={s}>{s === 'draft' ? '草稿' : s === 'published' ? '已发布' : s}</ToggleButton>
           ))}
         </ToggleButtonGroup>
         <FormControl size="small" sx={{ minWidth: 100 }}>
           <Select
             value={sortBy}
             onChange={e => setSortBy(e.target.value as SortKey)}
-            startAdornment={<SortIcon sx={{ fontSize: 16, mr: 0.5, color: 'text.secondary' }} />}
-            sx={{ fontSize: 12, height: 32 }}
+            startAdornment={<SortIcon sx={{ fontSize: 14, mr: 0.5, color: 'text.secondary' }} />}
+            sx={{ fontSize: 12, height: 32, borderRadius: 2 }}
           >
             <MenuItem value="updated">最近更新</MenuItem>
             <MenuItem value="score">评分最高</MenuItem>
@@ -100,51 +126,51 @@ export default function ArticlesPage() {
         </FormControl>
         <TextField
           size="small"
-          placeholder="搜索标题/正文/标签"
+          placeholder="搜索…"
           value={query}
           onChange={e => setQuery(e.target.value)}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
-                <SearchIcon sx={{ fontSize: 18, color: '#B8B4AB' }} />
+                <SearchIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
               </InputAdornment>
             ),
           }}
-          sx={{ width: 200 }}
+          sx={{ width: 180 }}
         />
         <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => nav('/')}
-          sx={{ bgcolor: '#FF2741', '&:hover': { bgcolor: '#D61030' } }}
+          sx={{
+            background: 'linear-gradient(135deg,#FF2442,#FF7A00)',
+            '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' },
+          }}
         >
           去创作
         </Button>
       </Stack>
 
       {loading && (
-        <Box sx={{ display: 'grid', placeItems: 'center', py: 8 }}>
+        <Box sx={{ display: 'grid', placeItems: 'center', py: 10 }}>
           <CircularProgress size={28} />
         </Box>
       )}
 
       {!loading && filtered.length === 0 && (
-        <Box
-          sx={{
-            textAlign: 'center',
-            py: 8,
-            color: '#B8B4AB',
-          }}
-        >
-          <Typography sx={{ fontSize: 14 }}>
+        <Box sx={{ textAlign: 'center', py: 10 }}>
+          <Typography sx={{ fontSize: 48, mb: 1.5 }}>
+            {items.length === 0 ? '📝' : '🔍'}
+          </Typography>
+          <Typography sx={{ fontSize: 14, color: 'text.secondary' }}>
             {items.length === 0
-              ? '还没有笔记，去「对话」里让助手帮你写一篇。'
+              ? '还没有笔记，去创作页让助手帮你写一篇'
               : '没有匹配的笔记'}
           </Typography>
         </Box>
       )}
 
-      <Stack spacing={1.2}>
+      <Stack spacing={1.5}>
         {filtered.map(a => (
           <Box
             key={a.id}
@@ -152,59 +178,66 @@ export default function ArticlesPage() {
             sx={{
               display: 'flex',
               gap: 2,
-              p: 1.6,
-              border: '1px solid', borderColor: 'divider',
-              borderRadius: 2.5,
+              p: 2,
+              bgcolor: 'background.paper',
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 3,
               cursor: 'pointer',
-              transition: 'all .15s',
+              transition: 'all .2s cubic-bezier(0.4,0,0.2,1)',
               '&:hover': {
-                borderColor: '#B8B4AB',
-                bgcolor: 'background.default',
+                borderColor: 'rgba(255,36,66,0.15)',
+                boxShadow: '0 4px 16px rgba(255,36,66,0.06), 0 2px 6px rgba(0,0,0,0.03)',
+                transform: 'translateY(-1px)',
                 '& .row-actions': { opacity: 1 },
               },
             }}
           >
+            {/* Thumbnail */}
             <Box
               sx={{
-                width: 84,
-                height: 84,
-                borderRadius: 2,
-                bgcolor: 'action.hover',
+                width: 80,
+                height: 80,
+                borderRadius: 2.5,
+                bgcolor: 'rgba(0,0,0,0.03)',
                 backgroundImage: a.cover_image ? `url(${a.cover_image})` : undefined,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 display: 'grid',
                 placeItems: 'center',
-                color: '#B8B4AB',
-                fontSize: 22,
+                color: 'text.secondary',
+                fontSize: 20,
                 fontWeight: 700,
                 flexShrink: 0,
+                overflow: 'hidden',
               }}
             >
               {!a.cover_image && (a.title.slice(0, 1) || '红')}
             </Box>
+
+            {/* Content */}
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <Typography sx={{ fontSize: 15.5, fontWeight: 600 }} noWrap>
+              <Stack direction="row" alignItems="center" spacing={0.8} sx={{ mb: 0.5 }}>
+                <Typography sx={{ fontSize: 15, fontWeight: 600 }} noWrap>
                   {a.title || '无标题'}
                 </Typography>
                 <Chip
                   size="small"
-                  label={a.status}
-                  sx={{ bgcolor: 'action.hover', fontSize: 11, height: 20 }}
+                  label={a.status === 'draft' ? '草稿' : a.status === 'published' ? '已发布' : a.status}
+                  sx={{
+                    ...(statusColors[a.status] || { bg: 'rgba(0,0,0,0.04)', color: 'text.secondary' }),
+                    bgcolor: statusColors[a.status]?.bg || 'rgba(0,0,0,0.04)',
+                    color: statusColors[a.status]?.color || undefined,
+                    fontSize: 11,
+                    height: 20,
+                    fontWeight: 500,
+                  }}
                 />
                 {typeof a.score?.overall === 'number' && (
                   <Chip
                     size="small"
-                    label={`评分 ${a.score.overall}`}
-                    sx={{ bgcolor: '#E6F7EC', color: '#0F8C3D', fontSize: 11, height: 20 }}
-                  />
-                )}
-                {a.images && a.images.length > 0 && (
-                  <Chip
-                    size="small"
-                    label={`${a.images.length} 图`}
-                    sx={{ bgcolor: '#FFF2E0', color: '#B45309', fontSize: 11, height: 20 }}
+                    label={`${a.score.overall}分`}
+                    sx={{ bgcolor: 'rgba(22,163,74,0.08)', color: '#16A34A', fontSize: 11, height: 20, fontWeight: 600 }}
                   />
                 )}
               </Stack>
@@ -212,42 +245,45 @@ export default function ArticlesPage() {
                 sx={{
                   fontSize: 13,
                   color: 'text.secondary',
-                  mt: 0.5,
                   display: '-webkit-box',
                   WebkitLineClamp: 2,
                   WebkitBoxOrient: 'vertical',
                   overflow: 'hidden',
+                  lineHeight: 1.6,
                 }}
               >
                 {a.body}
               </Typography>
-              <Stack direction="row" spacing={0.5} sx={{ mt: 0.8, flexWrap: 'wrap', gap: 0.5 }}>
-                {(a.tags || []).slice(0, 6).map(t => (
+              <Stack direction="row" spacing={0.5} sx={{ mt: 0.8, flexWrap: 'wrap', gap: 0.4 }}>
+                {(a.tags || []).slice(0, 5).map(t => (
                   <Chip
                     key={t}
                     label={t}
                     size="small"
                     sx={{
-                      bgcolor: 'background.paper',
-                      border: '1px solid', borderColor: 'divider',
-                      fontSize: 11,
-                      height: 20,
+                      fontSize: 10.5,
+                      height: 18,
+                      bgcolor: 'rgba(0,0,0,0.03)',
+                      border: '1px solid',
+                      borderColor: 'divider',
                     }}
                   />
                 ))}
               </Stack>
             </Box>
-            <Stack sx={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
-              <Typography sx={{ fontSize: 11, color: '#B8B4AB', whiteSpace: 'nowrap' }}>
+
+            {/* Actions */}
+            <Stack sx={{ alignItems: 'flex-end', justifyContent: 'space-between', py: 0.3 }}>
+              <Typography sx={{ fontSize: 11, color: 'text.secondary', whiteSpace: 'nowrap' }}>
                 {new Date(a.updated_at).toLocaleDateString()}
               </Typography>
               <Stack
                 direction="row"
-                spacing={0.4}
+                spacing={0.3}
                 className="row-actions"
-                sx={{ opacity: { xs: 1, md: 0 }, transition: 'opacity .15s' }}
+                sx={{ opacity: { xs: 1, md: 0 }, transition: 'opacity .2s' }}
               >
-                <Tooltip title="在对话中继续优化">
+                <Tooltip title="对话优化">
                   <IconButton
                     size="small"
                     onClick={e => {
@@ -255,7 +291,7 @@ export default function ArticlesPage() {
                       nav(`/?article=${a.id}`)
                     }}
                   >
-                    <ChatBubbleOutlineIcon fontSize="small" />
+                    <ChatBubbleOutlineIcon sx={{ fontSize: 15 }} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip title="编辑">
@@ -266,7 +302,7 @@ export default function ArticlesPage() {
                       nav(`/articles/${a.id}`)
                     }}
                   >
-                    <EditNoteIcon fontSize="small" />
+                    <EditNoteIcon sx={{ fontSize: 15 }} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip title="删除">
@@ -277,7 +313,7 @@ export default function ArticlesPage() {
                       setDeleteTarget(a.id)
                     }}
                   >
-                    <DeleteOutlineIcon fontSize="small" />
+                    <DeleteOutlineIcon sx={{ fontSize: 15 }} />
                   </IconButton>
                 </Tooltip>
               </Stack>

@@ -6,10 +6,10 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
 
 from .config import DATA_DIR, get_settings, _load_overlay, OVERLAY_PATH
@@ -20,7 +20,6 @@ import json
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_DAYS = 7
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
 _secret_lock = threading.Lock()
@@ -51,11 +50,11 @@ def _get_secret() -> str:
 
 
 def hash_password(plain: str) -> str:
-    return pwd_context.hash(plain)
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -72,15 +71,24 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
     token = credentials.credentials
     try:
-        payload = jwt.decode(token, _get_secret(), algorithms=[ALGORITHM])
-        user_id: int = payload.get("sub")
-        if user_id is None:
+        payload = jwt.decode(token, _get_secret(), algorithms=[ALGORITHM], options={"verify_sub": False})
+        raw_sub = payload.get("sub")
+        if raw_sub is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效 token")
-    except JWTError:
+        user_id = int(raw_sub)
+    except (JWTError, ValueError, TypeError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效 token")
 
     async with SessionLocal() as s:
         user = await s.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
+    return user
+
+
+async def require_admin(
+    user: User = Depends(get_current_user),
+) -> User:
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
     return user

@@ -63,12 +63,13 @@ _running: Dict[str, bool] = {}
 async def spawn_agent_task(
     messages: List[Dict[str, Any]],
     conversation_id: Optional[int] = None,
+    user_id: Optional[int] = None,
 ) -> str:
     """Create a Task row and spawn the agent loop in the background. Returns task_id."""
     task_id = uuid.uuid4().hex[:16]
 
     async with SessionLocal() as s:
-        t = Task(id=task_id, conversation_id=conversation_id, status="running")
+        t = Task(id=task_id, user_id=user_id, conversation_id=conversation_id, status="running")
         s.add(t)
         if conversation_id:
             conv = await s.get(Conversation, conversation_id)
@@ -80,7 +81,7 @@ async def spawn_agent_task(
     _streams[task_id] = stream
     _running[task_id] = True
 
-    asyncio.create_task(_run_loop(task_id, messages, conversation_id, stream))
+    asyncio.create_task(_run_loop(task_id, messages, conversation_id, user_id, stream))
     return task_id
 
 
@@ -88,15 +89,25 @@ async def _run_loop(
     task_id: str,
     messages: List[Dict[str, Any]],
     conversation_id: Optional[int],
+    user_id: Optional[int],
     stream: TaskStream,
 ):
     """Execute the agent stream, pushing events to the broadcast stream."""
+    from ..config import get_effective_settings
+    from .tools import set_tool_user_id
+
+    set_tool_user_id(user_id)
+
+    settings = None
+    if user_id:
+        settings = await get_effective_settings(user_id)
+
     result_text = ""
     last_flush = time.time()
     status = "completed"
 
     try:
-        async for ev in run_agent_stream(messages):
+        async for ev in run_agent_stream(messages, settings=settings):
             stream.push(ev)
 
             if ev.get("type") == "token":
@@ -111,15 +122,18 @@ async def _run_loop(
     except Exception as e:
         stream.push({"type": "error", "message": str(e)})
         status = "failed"
+    finally:
+        if not stream.done:
+            stream.push({"type": "done", "text": result_text})
 
-    if not stream.done:
-        stream.push({"type": "done", "text": result_text})
+        try:
+            await _finalize_task(task_id, conversation_id, stream.events, result_text, status)
+        except Exception:
+            pass
 
-    await _finalize_task(task_id, conversation_id, stream.events, result_text, status)
-
-    _running.pop(task_id, None)
-    await asyncio.sleep(60)
-    _streams.pop(task_id, None)
+        _running.pop(task_id, None)
+        await asyncio.sleep(60)
+        _streams.pop(task_id, None)
 
 
 async def _flush_events(task_id: str, events: List[Dict[str, Any]], result_text: str):

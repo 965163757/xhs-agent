@@ -146,7 +146,7 @@ wait_port() {
 }
 
 echo "⏳ 等待服务就绪（首次启动会装依赖，最多 2 分钟）..."
-wait_port "$BACKEND_PORT"  "$BACKEND_URL/api/meta" "backend"  120 || exit 1
+wait_port "$BACKEND_PORT"  "$BACKEND_URL/healthz" "backend"  120 || exit 1
 wait_port "$FRONTEND_PORT" "$FRONTEND_URL"         "frontend" 120 || exit 1
 
 banner "全部就绪 ✅"

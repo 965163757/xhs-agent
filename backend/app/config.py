@@ -104,3 +104,31 @@ def update_settings(patch: Dict[str, Any]) -> Settings:
     from .services import llm as _llm
     _llm.reset_client()
     return get_settings()
+
+
+async def get_effective_settings(user_id: int) -> Settings:
+    """Return settings with user overrides applied if they opted in."""
+    from .database import SessionLocal, UserSettings
+    from sqlalchemy import select
+
+    base = get_settings()
+    async with SessionLocal() as s:
+        result = await s.execute(
+            select(UserSettings).where(UserSettings.user_id == user_id)
+        )
+        us = result.scalars().first()
+
+    if not us or not us.use_own_key or not us.openai_api_key:
+        return base
+
+    # Build a copy with user overrides
+    effective = Settings()
+    _apply_overlay(effective, _load_overlay())
+    effective.openai_api_key = us.openai_api_key
+    if us.openai_base_url:
+        effective.openai_base_url = us.openai_base_url
+    if us.chat_model:
+        effective.chat_model = us.chat_model
+    if us.image_model:
+        effective.image_model = us.image_model
+    return effective

@@ -50,7 +50,7 @@ class ChatRequest(BaseModel):
 class ImageGenRequest(BaseModel):
     prompt: str
     size: str = "1024x1536"
-    n: int = 1
+    n: int = Field(default=1, ge=1, le=4)
     reference_images: List[str] = Field(default_factory=list)
 
 

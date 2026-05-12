@@ -5,11 +5,12 @@ import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..database import Article, SessionLocal
+from ..auth import get_current_user
+from ..database import Article, SessionLocal, User
 from ..agents.diagnosis import run_diagnosis
 
 router = APIRouter()
@@ -25,7 +26,7 @@ class DiagnoseStreamRequest(BaseModel):
 
 
 @router.post("/diagnose/stream")
-async def diagnose_stream(req: DiagnoseStreamRequest):
+async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_current_user)):
     title = req.title
     content = req.content
     tags = req.tags
@@ -37,6 +38,8 @@ async def diagnose_stream(req: DiagnoseStreamRequest):
             article = await s.get(Article, req.article_id)
             if not article:
                 raise HTTPException(404, "笔记不存在")
+            if article.user_id != user.id:
+                raise HTTPException(403, "无权访问该笔记")
             title = article.title or ""
             content = article.body or ""
             tags = [t for t in (article.tags or "").split(",") if t.strip()]

@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..auth import create_access_token, get_current_user, hash_password, verify_password
-from ..database import SessionLocal, User
+from ..database import SessionLocal, SystemConfig, User
 
 router = APIRouter()
 
@@ -24,11 +24,29 @@ class TokenResponse(BaseModel):
 @router.post("/register")
 async def register(req: AuthRequest):
     async with SessionLocal() as s:
+        user_count = await s.scalar(select(func.count()).select_from(User))
+        is_first = user_count == 0
+
+        if not is_first:
+            reg_cfg = await s.get(SystemConfig, "registration_open")
+            if reg_cfg and reg_cfg.value == "false":
+                raise HTTPException(403, "管理员已关闭注册")
+
         existing = await s.execute(select(User).where(User.username == req.username))
         if existing.scalars().first():
             raise HTTPException(400, "用户名已存在")
-        user = User(username=req.username, hashed_password=hash_password(req.password))
+
+        role = "admin" if is_first else "user"
+        user = User(
+            username=req.username,
+            hashed_password=hash_password(req.password),
+            role=role,
+        )
         s.add(user)
+
+        if is_first:
+            s.add(SystemConfig(key="registration_open", value="true"))
+
         await s.commit()
         await s.refresh(user)
     token = create_access_token({"sub": user.id})

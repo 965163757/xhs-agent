@@ -20,7 +20,7 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401 && !err.config?.url?.includes('/auth/')) {
       localStorage.removeItem(TOKEN_KEY)
-      window.location.href = '/login'
+      window.dispatchEvent(new Event('auth:logout'))
     }
     return Promise.reject(err)
   }
@@ -140,7 +140,7 @@ export interface DiagnosisReport {
 function handleStreamAuth(res: Response, url: string) {
   if (res.status === 401 && !url.includes('/auth/')) {
     localStorage.removeItem(TOKEN_KEY)
-    window.location.href = '/login'
+    window.dispatchEvent(new Event('auth:logout'))
     throw new Error('未登录')
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
@@ -429,6 +429,62 @@ export async function getCalendar(): Promise<Record<string, Array<{ id: number; 
 export async function getMcpTools() {
   const r = await api.get('/mcp/tools')
   return r.data.tools as Array<{ name: string; description: string; inputSchema: any }>
+}
+
+// ---------- per-user settings ----------
+
+export interface MySettings {
+  use_own_key: boolean
+  openai_api_key_mask: string
+  openai_api_key_set: boolean
+  openai_base_url: string
+  chat_model: string
+  image_model: string
+}
+
+export async function getMySettings(): Promise<MySettings> {
+  const r = await api.get('/my-settings')
+  return r.data
+}
+
+export async function updateMySettings(payload: {
+  use_own_key?: boolean
+  openai_api_key?: string
+  openai_base_url?: string
+  chat_model?: string
+  image_model?: string
+}): Promise<MySettings> {
+  const r = await api.put('/my-settings', payload)
+  return r.data
+}
+
+// ---------- admin ----------
+
+export interface AdminUser {
+  id: number
+  username: string
+  role: 'admin' | 'user'
+  created_at: string
+}
+
+export async function listUsers(): Promise<AdminUser[]> {
+  const r = await api.get('/admin/users')
+  return r.data.items
+}
+
+export async function setUserRole(uid: number, role: 'admin' | 'user'): Promise<AdminUser> {
+  const r = await api.patch(`/admin/users/${uid}/role`, { role })
+  return r.data
+}
+
+export async function getSystemConfig(): Promise<Record<string, string>> {
+  const r = await api.get('/admin/config')
+  return r.data
+}
+
+export async function updateSystemConfig(payload: { registration_open?: string }): Promise<Record<string, string>> {
+  const r = await api.put('/admin/config', payload)
+  return r.data
 }
 
 export type StreamEvent =

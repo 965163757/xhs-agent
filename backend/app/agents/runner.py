@@ -12,6 +12,7 @@ import uuid
 from typing import Any, AsyncIterator, Dict, List
 
 from ..services.llm import chat_completion_stream
+from ..config import Settings
 from .tools import call_tool, openai_tool_schemas
 
 
@@ -81,6 +82,7 @@ def _ensure_tool_id(cand: str | None, idx: int) -> str:
 async def run_agent_stream(
     messages: List[Dict[str, Any]],
     max_tool_rounds: int = 8,
+    settings: Settings | None = None,
 ) -> AsyncIterator[Dict[str, Any]]:
     """Yield SSE event dicts. Types: token | tool_call | tool_result | done | error"""
     working: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
@@ -91,7 +93,7 @@ async def run_agent_stream(
         tool_calls_acc: Dict[int, Dict[str, Any]] = {}
 
         try:
-            async for chunk in chat_completion_stream(messages=working, tools=tools):
+            async for chunk in chat_completion_stream(messages=working, tools=tools, settings=settings):
                 if not chunk.choices:
                     continue
                 choice = chunk.choices[0]

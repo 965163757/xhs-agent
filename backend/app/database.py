@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import AsyncIterator
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text, func, select
+from sqlalchemy import Boolean, JSON, DateTime, Integer, String, Text, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -22,6 +22,7 @@ class Article(Base):
     __tablename__ = "articles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), default="")
     body: Mapped[str] = mapped_column(Text, default="")
     tags: Mapped[str] = mapped_column(String(512), default="")
@@ -55,6 +56,7 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), default="新对话")
     article_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     messages: Mapped[list] = mapped_column(JSON, default=list)
@@ -80,6 +82,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="running")
     events: Mapped[list] = mapped_column(JSON, default=list)
@@ -106,6 +109,7 @@ class ArticleVersion(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     article_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     title: Mapped[str] = mapped_column(String(255), default="")
     body: Mapped[str] = mapped_column(Text, default="")
@@ -134,6 +138,7 @@ class Template(Base):
     __tablename__ = "templates"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    creator_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     name: Mapped[str] = mapped_column(String(128), default="")
     category: Mapped[str] = mapped_column(String(64), default="")
     description: Mapped[str] = mapped_column(Text, default="")
@@ -159,14 +164,47 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(256), default="")
+    role: Mapped[str] = mapped_column(String(16), default="user")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "username": self.username,
+            "role": self.role,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class UserSettings(Base):
+    __tablename__ = "user_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    use_own_key: Mapped[bool] = mapped_column(Boolean, default=False)
+    openai_api_key: Mapped[str] = mapped_column(String(256), default="")
+    openai_base_url: Mapped[str] = mapped_column(String(512), default="")
+    chat_model: Mapped[str] = mapped_column(String(64), default="")
+    image_model: Mapped[str] = mapped_column(String(64), default="")
+
+    def to_dict(self) -> dict:
+        k = self.openai_api_key or ""
+        masked = (k[:6] + "…" + k[-4:]) if len(k) > 12 else ("已设置" if k else "")
+        return {
+            "use_own_key": self.use_own_key,
+            "openai_api_key_mask": masked,
+            "openai_api_key_set": bool(k),
+            "openai_base_url": self.openai_base_url,
+            "chat_model": self.chat_model,
+            "image_model": self.image_model,
+        }
+
+
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(256), default="")
 
 
 _SEED_TEMPLATES = [
@@ -240,9 +278,42 @@ async def _seed_templates() -> None:
         await s.commit()
 
 
+async def _migrate_columns(conn) -> None:
+    """Add new columns to existing tables (idempotent)."""
+    migrations = [
+        ("articles", "user_id", "INTEGER"),
+        ("conversations", "user_id", "INTEGER"),
+        ("tasks", "user_id", "INTEGER"),
+        ("article_versions", "user_id", "INTEGER"),
+        ("templates", "creator_id", "INTEGER"),
+        ("users", "role", "VARCHAR(16) DEFAULT 'user'"),
+    ]
+    for table, col, col_type in migrations:
+        try:
+            await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+        except Exception:
+            pass
+
+
+async def _backfill_ownership(conn) -> None:
+    """Assign orphan records to the first user and make them admin."""
+    result = await conn.execute(text("SELECT id FROM users ORDER BY id LIMIT 1"))
+    row = result.fetchone()
+    if not row:
+        return
+    first_id = row[0]
+    await conn.execute(text(f"UPDATE users SET role='admin' WHERE id={first_id}"))
+    for table in ("articles", "conversations", "tasks", "article_versions"):
+        await conn.execute(
+            text(f"UPDATE {table} SET user_id={first_id} WHERE user_id IS NULL")
+        )
+
+
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _migrate_columns(conn)
+        await _backfill_ownership(conn)
     await _seed_templates()
 
 

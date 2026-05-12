@@ -3,6 +3,7 @@ and an MCP-compatible callable. The backend API and the embedded MCP endpoints
 share this registry."""
 from __future__ import annotations
 
+import contextvars
 import json
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -14,6 +15,18 @@ from ..services.llm import chat_completion, crop_image, edit_image, generate_ima
 
 
 ToolFn = Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
+
+_current_user_id: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
+    "_current_user_id", default=None
+)
+
+
+def get_tool_user_id() -> Optional[int]:
+    return _current_user_id.get()
+
+
+def set_tool_user_id(uid: Optional[int]) -> contextvars.Token:
+    return _current_user_id.set(uid)
 
 
 # ---------- helpers ----------
@@ -110,8 +123,9 @@ async def tool_create_article(args: Dict[str, Any]) -> Dict[str, Any]:
     title = args.get("title", "")
     body = args.get("body", "")
     tags = args.get("tags", []) or []
+    uid = get_tool_user_id()
     async with SessionLocal() as s:
-        art = Article(title=title, body=body, tags=",".join(tags), status="draft")
+        art = Article(title=title, body=body, tags=",".join(tags), status="draft", user_id=uid)
         s.add(art)
         await s.commit()
         await s.refresh(art)
@@ -120,10 +134,13 @@ async def tool_create_article(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def tool_update_article(args: Dict[str, Any]) -> Dict[str, Any]:
     aid = int(args["article_id"])
+    uid = get_tool_user_id()
     async with SessionLocal() as s:
         art = await s.get(Article, aid)
         if not art:
             return {"ok": False, "error": f"article {aid} not found"}
+        if uid and art.user_id != uid:
+            return {"ok": False, "error": "无权操作该笔记"}
         for key in ("title", "body", "cover_image", "status"):
             if key in args and args[key] is not None:
                 setattr(art, key, args[key])
@@ -138,28 +155,36 @@ async def tool_update_article(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def tool_read_article(args: Dict[str, Any]) -> Dict[str, Any]:
     aid = int(args["article_id"])
+    uid = get_tool_user_id()
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
+    if uid and art.user_id != uid:
+        return {"ok": False, "error": "无权访问该笔记"}
     return {"ok": True, "article": art.to_dict()}
 
 
 async def tool_list_articles(args: Dict[str, Any]) -> Dict[str, Any]:
     limit = int(args.get("limit", 20))
+    uid = get_tool_user_id()
     async with SessionLocal() as s:
-        res = await s.execute(
-            select(Article).order_by(Article.updated_at.desc()).limit(limit)
-        )
+        q = select(Article).order_by(Article.updated_at.desc()).limit(limit)
+        if uid:
+            q = q.where(Article.user_id == uid)
+        res = await s.execute(q)
         items = [a.to_dict() for a in res.scalars().all()]
         return {"ok": True, "items": items}
 
 
 async def tool_delete_article(args: Dict[str, Any]) -> Dict[str, Any]:
     aid = int(args["article_id"])
+    uid = get_tool_user_id()
     async with SessionLocal() as s:
         art = await s.get(Article, aid)
         if not art:
             return {"ok": False, "error": f"article {aid} not found"}
+        if uid and art.user_id != uid:
+            return {"ok": False, "error": "无权删除该笔记"}
         await s.delete(art)
         await s.commit()
         return {"ok": True}
@@ -193,8 +218,9 @@ async def tool_generate_article(args: Dict[str, Any]) -> Dict[str, Any]:
     body = data.get("body") or content
     tags = data.get("tags") or []
 
+    uid = get_tool_user_id()
     async with SessionLocal() as s:
-        art = Article(title=title, body=body, tags=",".join(tags), status="draft")
+        art = Article(title=title, body=body, tags=",".join(tags), status="draft", user_id=uid)
         s.add(art)
         await s.commit()
         await s.refresh(art)
@@ -205,10 +231,13 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
     aid = int(args["article_id"])
     style = args.get("style", "更有网感、更口语化")
     instruction = args.get("instruction", "")
+    uid = get_tool_user_id()
 
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
+    if uid and art.user_id != uid:
+        return {"ok": False, "error": "无权操作该笔记"}
 
     await _snapshot_article(aid, "rewrite")
 
@@ -243,9 +272,12 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
 async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
     aid = int(args["article_id"])
     focus = args.get("focus", "标题吸引力、开头钩子、情绪价值、标签")
+    uid = get_tool_user_id()
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
+    if uid and art.user_id != uid:
+        return {"ok": False, "error": "无权操作该笔记"}
 
     await _snapshot_article(aid, "optimize")
 
@@ -309,9 +341,12 @@ async def tool_polish_paragraph(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def tool_score_article(args: Dict[str, Any]) -> Dict[str, Any]:
     aid = int(args["article_id"])
+    uid = get_tool_user_id()
     art = await _get_article(aid)
     if not art:
         return {"ok": False, "error": f"article {aid} not found"}
+    if uid and art.user_id != uid:
+        return {"ok": False, "error": "无权操作该笔记"}
     resp = await chat_completion(
         messages=[
             {
@@ -722,8 +757,9 @@ async def tool_apply_template(args: Dict[str, Any]) -> Dict[str, Any]:
     title = data.get("title") or topic
     body = data.get("body") or ""
     tags = data.get("tags") or []
+    uid = get_tool_user_id()
     async with SessionLocal() as s:
-        art = Article(title=title, body=body, tags=",".join(tags), status="draft")
+        art = Article(title=title, body=body, tags=",".join(tags), status="draft", user_id=uid)
         s.add(art)
         await s.commit()
         await s.refresh(art)
@@ -738,9 +774,12 @@ async def tool_search_articles(args: Dict[str, Any]) -> Dict[str, Any]:
     status_filter = args.get("status")
     tag_filter = args.get("tag")
     limit = int(args.get("limit", 20))
+    uid = get_tool_user_id()
 
     async with SessionLocal() as s:
         q = select(Article).order_by(Article.updated_at.desc())
+        if uid:
+            q = q.where(Article.user_id == uid)
         if status_filter:
             q = q.where(Article.status == status_filter)
         if tag_filter:
@@ -794,9 +833,12 @@ async def tool_export_articles(args: Dict[str, Any]) -> Dict[str, Any]:
     status_filter = args.get("status")
     tag_filter = args.get("tag")
     limit = int(args.get("limit", 50))
+    uid = get_tool_user_id()
 
     async with SessionLocal() as s:
         q = select(Article).order_by(Article.updated_at.desc())
+        if uid:
+            q = q.where(Article.user_id == uid)
         if status_filter:
             q = q.where(Article.status == status_filter)
         if tag_filter:
@@ -809,8 +851,12 @@ async def tool_export_articles(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def tool_article_stats(args: Dict[str, Any]) -> Dict[str, Any]:
     """Return aggregate stats: counts by status, average scores, tag distribution."""
+    uid = get_tool_user_id()
     async with SessionLocal() as s:
-        res = await s.execute(select(Article))
+        q = select(Article)
+        if uid:
+            q = q.where(Article.user_id == uid)
+        res = await s.execute(q)
         articles = res.scalars().all()
 
     total = len(articles)
