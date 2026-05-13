@@ -71,7 +71,9 @@ cp backend/.env.example backend/.env
 
 默认端口：后端 `8787`，前端 `5173`。
 
-也可以不编辑 `.env`，直接进「设置」页在浏览器里填 key，保存后即刻生效，配置会持久化到 `backend/data/settings.json`。
+也可以不编辑 `.env`，直接进「设置」页在浏览器里填 key，保存后即刻生效，配置会持久化到数据目录的 `settings.json`。
+
+> 服务器部署建议：不要把运行数据放在代码目录里。`start_backend.sh` 默认会把数据库、设置和图片保存到 `~/.local/share/xhs-agent`；也可以显式设置 `XHS_DATA_DIR=/srv/xhs-agent-data`。这样 `git pull`、`git clean`、容器重建或重新 clone 都不会清空业务数据。
 
 ## 配置
 
@@ -82,6 +84,7 @@ OPENAI_API_KEY=sk-YOUR_KEY_HERE
 OPENAI_BASE_URL=https://api.openai.com/v1   # 也可换成任何 OpenAI 兼容网关
 CHAT_MODEL=gpt-4o
 IMAGE_MODEL=gpt-image-1
+XHS_DATA_DIR=/srv/xhs-agent-data            # 服务器建议：代码目录外的持久化数据目录
 ```
 
 支持所有 OpenAI 兼容 API（官方 OpenAI / 第三方中转网关 / 自部署 OSS 模型）。对话模型走 `chat.completions` + function calling，图片模型走 `images.generate` / `images.edit`。
@@ -165,10 +168,41 @@ curl -X POST http://127.0.0.1:8787/api/mcp/call \
 ## 技术要点
 
 - Agent 采用 OpenAI 标准 function calling，保证每次 `tool_call.id` 非空，`assistant` 消息 `content=null`，`tool` 消息携带 `tool_call_id` + `name`，兼容非官方 OpenAI 网关
-- 图片生成/编辑都落盘到 `backend/data/images/`，通过 `/static/images/*` 对外暴露
+- 图片生成/编辑都落盘到数据目录的 `images/`，通过 `/static/images/*` 对外暴露
 - 图片编辑器纯前端 Canvas 实现：用户涂抹作为可视预览，提交时合成"白底 + 透明圆"的 RGBA PNG mask 上传
 - SQLite + SQLAlchemy 2.0 async；笔记与对话自动持久化
-- 配置支持 `.env` 默认值 + `data/settings.json` 运行时覆盖，浏览器改完即时热更新客户端
+- 配置支持 `.env` 默认值 + 数据目录 `settings.json` 运行时覆盖，浏览器改完即时热更新客户端
+
+## 服务器数据持久化
+
+系统运行数据包括：
+
+- SQLite 数据库：`xhs_agent.db`
+- 设置页热更新配置：`settings.json`
+- 用户上传图、生成图、编辑图：`images/`
+
+历史版本默认放在 `backend/data/`。这个目录虽然被 Git 忽略，但如果服务器发布脚本执行 `git clean -fdx`、重新 clone、容器重建或整体覆盖代码目录，数据仍可能被删除。
+
+推荐部署方式：
+
+```bash
+export XHS_DATA_DIR=/srv/xhs-agent-data
+./start_backend.sh
+```
+
+如果不设置，`start_backend.sh` 会默认使用：
+
+```bash
+~/.local/share/xhs-agent
+```
+
+首次启动时，如果检测到旧的 `backend/data/` 且新的持久化目录为空，会自动复制旧数据到新目录；之后不会覆盖已有持久化数据。
+
+如果你不用 `start_backend.sh`，而是 systemd / pm2 / supervisor / Docker 直接运行 uvicorn，也请在服务环境变量里配置：
+
+```bash
+XHS_DATA_DIR=/srv/xhs-agent-data
+```
 
 ## 参考
 

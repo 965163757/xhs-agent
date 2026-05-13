@@ -27,3 +27,10 @@ Thumbs.db
 
 # Local reference material (not part of the project)
 小红书创作中后台/
+
+# Local AI/agent tooling artifacts
+.agents/
+.claude/
+frontend/.agents/
+frontend/_prototype/
+skills-lock.json

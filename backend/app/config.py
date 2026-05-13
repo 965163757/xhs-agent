@@ -6,6 +6,7 @@ settings.json, reload, and let services/llm rebuild its client.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any, Dict, List
@@ -14,7 +15,63 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
+
+
+def _strip_env_quotes(value: str) -> str:
+    v = (value or "").strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in {"'", '"'}:
+        return v[1:-1]
+    return v
+
+
+def _read_dotenv_value(*keys: str) -> str:
+    """Read the data-dir knob before pydantic settings are built.
+
+    The runtime overlay path itself depends on the data directory, so we need a
+    tiny reader for XHS_DATA_DIR / DATA_DIR before BaseSettings loads the full
+    config. OS environment still wins in _configured_data_dir().
+    """
+    env_path = BASE_DIR / ".env"
+    if not env_path.exists():
+        return ""
+    wanted = set(keys)
+    try:
+        for raw_line in env_path.read_text("utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() in wanted:
+                return _strip_env_quotes(value)
+    except Exception:
+        return ""
+    return ""
+
+
+def _resolve_data_dir(value: str | None = None) -> Path:
+    raw = _strip_env_quotes(value or "")
+    if not raw:
+        return (BASE_DIR / "data").resolve()
+    expanded = os.path.expandvars(os.path.expanduser(raw))
+    p = Path(expanded)
+    if not p.is_absolute():
+        p = BASE_DIR / p
+    return p.resolve()
+
+
+def _configured_data_dir() -> Path:
+    # Preferred for production. Aliases keep hand-written deployment configs
+    # working and let operators avoid storing runtime data under the git tree.
+    for key in ("XHS_DATA_DIR", "XHS_AGENT_DATA_DIR", "DATA_DIR"):
+        value = os.environ.get(key)
+        if value:
+            return _resolve_data_dir(value)
+    return _resolve_data_dir(
+        _read_dotenv_value("XHS_DATA_DIR", "XHS_AGENT_DATA_DIR", "DATA_DIR")
+    )
+
+
+DATA_DIR = _configured_data_dir()
 OVERLAY_PATH = DATA_DIR / "settings.json"
 
 _MUTABLE_KEYS = (
@@ -110,8 +167,22 @@ _lock = threading.Lock()
 _cached: Settings | None = None
 
 
+def _is_legacy_data_path(value: str, tail: str) -> bool:
+    raw = (value or "").strip().replace("\\", "/")
+    if raw.startswith("./"):
+        raw = raw[2:]
+    return raw == f"data/{tail}"
+
+
 def _normalize_sqlite_database_url(url: str) -> str:
-    """Anchor relative sqlite URLs to backend/ so cwd changes don't create a new DB."""
+    """Normalize sqlite URLs without letting cwd changes create a new DB.
+
+    The historical default was sqlite+aiosqlite:///./data/xhs_agent.db. When a
+    production data dir is configured, keep that familiar .env value working but
+    redirect it to XHS_DATA_DIR so deploys can update code without touching data.
+    Other custom relative sqlite paths remain anchored to backend/ for backward
+    compatibility.
+    """
     value = (url or "").strip()
     for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
         if not value.startswith(prefix):
@@ -119,6 +190,8 @@ def _normalize_sqlite_database_url(url: str) -> str:
         path_part = value[len(prefix):]
         if not path_part or path_part == ":memory:":
             return value
+        if _is_legacy_data_path(path_part, "xhs_agent.db"):
+            return prefix + str((DATA_DIR / "xhs_agent.db").resolve())
         p = Path(path_part)
         if p.is_absolute():
             return value
@@ -128,8 +201,11 @@ def _normalize_sqlite_database_url(url: str) -> str:
 
 def _normalize_runtime_paths(settings: Settings) -> Settings:
     settings.database_url = _normalize_sqlite_database_url(settings.database_url)
-    if settings.image_dir and not Path(settings.image_dir).is_absolute():
-        settings.image_dir = str((BASE_DIR / settings.image_dir).resolve())
+    if settings.image_dir:
+        if _is_legacy_data_path(settings.image_dir, "images"):
+            settings.image_dir = str((DATA_DIR / "images").resolve())
+        elif not Path(settings.image_dir).is_absolute():
+            settings.image_dir = str((BASE_DIR / settings.image_dir).resolve())
     return settings
 
 
