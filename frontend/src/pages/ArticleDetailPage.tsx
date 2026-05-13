@@ -50,6 +50,7 @@ import ImageEditor from '../components/ImageEditor'
 import PhonePreview from '../components/PhonePreview'
 import TagInput from '../components/TagInput'
 import { getSession, loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor } from '../chatStore'
+import { formatBeijingDateTime } from '../utils/time'
 
 function ImageFrame({
   src,
@@ -919,7 +920,7 @@ export default function ArticleDetailPage() {
                         {v.title || '(无标题)'} · {v.trigger}
                       </Typography>
                       <Typography sx={{ fontSize: 10, color: 'text.secondary' }}>
-                        {new Date(v.created_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        {formatBeijingDateTime(v.created_at, { year: undefined, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: undefined })}
                       </Typography>
                       <Button size="small" onClick={() => handleRollback(v.id)} sx={{ fontSize: 11, minWidth: 0, px: 1 }}>
                         回滚
@@ -1053,7 +1054,7 @@ export default function ArticleDetailPage() {
                 />
                 <ListItemText
                   primary={c.title || '新对话'}
-                  secondary={new Date(c.updated_at).toLocaleString()}
+                  secondary={formatBeijingDateTime(c.updated_at)}
                   primaryTypographyProps={{ fontSize: 14, noWrap: true }}
                   secondaryTypographyProps={{ fontSize: 11 }}
                 />

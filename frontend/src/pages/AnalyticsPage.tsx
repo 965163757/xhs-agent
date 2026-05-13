@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Box, Chip, Paper, Stack, Typography } from '@mui/material'
 import { getCalendar, getStats } from '../api/client'
+import { getBeijingTodayParts } from '../utils/time'
 
 interface Stats {
   total: number
@@ -148,10 +149,10 @@ export default function AnalyticsPage() {
     scheduled: '定时发布',
   }
 
-  const today = new Date()
-  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
-  const firstDayOfWeek = new Date(today.getFullYear(), today.getMonth(), 1).getDay()
-  const monthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+  const today = getBeijingTodayParts()
+  const daysInMonth = new Date(today.year, today.month, 0).getDate()
+  const firstDayOfWeek = new Date(today.year, today.month - 1, 1).getDay()
+  const monthStr = `${today.year}-${String(today.month).padStart(2, '0')}`
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1100, mx: 'auto' }}>
@@ -195,7 +196,7 @@ export default function AnalyticsPage() {
       {/* Content calendar */}
       <Paper sx={{ p: 2.5 }}>
         <Typography sx={{ fontSize: 14, fontWeight: 600, mb: 2 }}>
-          内容日历 · {today.getFullYear()}年{today.getMonth() + 1}月
+          内容日历 · {today.year}年{today.month}月
         </Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0.5 }}>
           {['日', '一', '二', '三', '四', '五', '六'].map(d => (
@@ -210,7 +211,7 @@ export default function AnalyticsPage() {
             const day = i + 1
             const dateStr = `${monthStr}-${String(day).padStart(2, '0')}`
             const articles = calendar[dateStr] || []
-            const isToday = day === today.getDate()
+            const isToday = day === today.day
             return (
               <Box
                 key={day}

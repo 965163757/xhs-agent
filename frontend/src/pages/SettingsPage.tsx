@@ -40,6 +40,7 @@ import {
   type AdminUser,
 } from '../api/client'
 import { useAuth } from '../AuthContext'
+import { formatBeijingDate } from '../utils/time'
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: any }) {
   return (
@@ -569,7 +570,7 @@ export default function SettingsPage() {
                         )}
                       </TableCell>
                       <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}
+                        {formatBeijingDate(u.created_at)}
                       </TableCell>
                     </TableRow>
                   ))}

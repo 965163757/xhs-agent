@@ -2,11 +2,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import AsyncIterator
 
-from sqlalchemy import Boolean, JSON, DateTime, Integer, String, Text, func, select, text
+from sqlalchemy import Boolean, JSON, DateTime, Integer, String, Text, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .config import get_settings
+from .time_utils import beijing_iso, beijing_now_naive
 
 settings = get_settings()
 
@@ -36,9 +37,9 @@ class Article(Base):
     status: Mapped[str] = mapped_column(String(32), default="draft")
     score: Mapped[dict] = mapped_column(JSON, default=dict)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime, default=beijing_now_naive, onupdate=beijing_now_naive
     )
 
     def to_dict(self) -> dict:
@@ -51,9 +52,9 @@ class Article(Base):
             "images": self.images or [],
             "status": self.status,
             "score": self.score or {},
-            "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "scheduled_at": beijing_iso(self.scheduled_at),
+            "created_at": beijing_iso(self.created_at),
+            "updated_at": beijing_iso(self.updated_at),
         }
 
 
@@ -66,9 +67,9 @@ class Conversation(Base):
     article_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     messages: Mapped[list] = mapped_column(JSON, default=list)
     active_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime, default=beijing_now_naive, onupdate=beijing_now_naive
     )
 
     def to_dict(self) -> dict:
@@ -78,8 +79,8 @@ class Conversation(Base):
             "article_id": self.article_id,
             "messages": self.messages or [],
             "active_task_id": self.active_task_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": beijing_iso(self.created_at),
+            "updated_at": beijing_iso(self.updated_at),
         }
 
 
@@ -94,9 +95,9 @@ class Task(Base):
     trace: Mapped[dict] = mapped_column(JSON, default=dict)
     events: Mapped[list] = mapped_column(JSON, default=list)
     result_text: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime, default=beijing_now_naive, onupdate=beijing_now_naive
     )
 
     def to_dict(self) -> dict:
@@ -108,8 +109,8 @@ class Task(Base):
             "trace": self.trace or {},
             "events": self.events or [],
             "result_text": self.result_text or "",
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": beijing_iso(self.created_at),
+            "updated_at": beijing_iso(self.updated_at),
         }
 
 
@@ -126,7 +127,7 @@ class ArticleVersion(Base):
     cover_image: Mapped[str] = mapped_column(String(1024), default="")
     images: Mapped[list] = mapped_column(JSON, default=list)
     trigger: Mapped[str] = mapped_column(String(64), default="manual")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
 
     def to_dict(self) -> dict:
         return {
@@ -139,7 +140,7 @@ class ArticleVersion(Base):
             "cover_image": self.cover_image,
             "images": self.images or [],
             "trigger": self.trigger,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": beijing_iso(self.created_at),
         }
 
 
@@ -151,7 +152,7 @@ class ArticleDiagnosis(Base):
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     report: Mapped[dict] = mapped_column(JSON, default=dict)
     applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
 
     def to_dict(self) -> dict:
         data = dict(self.report or {})
@@ -160,8 +161,8 @@ class ArticleDiagnosis(Base):
                 "id": self.id,
                 "diagnosis_id": self.id,
                 "article_id": self.article_id,
-                "applied_at": self.applied_at.isoformat() if self.applied_at else None,
-                "created_at": self.created_at.isoformat() if self.created_at else None,
+                "applied_at": beijing_iso(self.applied_at),
+                "created_at": beijing_iso(self.created_at),
             }
         )
         return data
@@ -177,7 +178,7 @@ class Template(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     body: Mapped[str] = mapped_column(Text, default="")
     tags: Mapped[list] = mapped_column(JSON, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
 
     def to_dict(self) -> dict:
         return {
@@ -187,7 +188,7 @@ class Template(Base):
             "description": self.description,
             "body": self.body,
             "tags": self.tags or [],
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": beijing_iso(self.created_at),
         }
 
 
@@ -198,14 +199,14 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(256), default="")
     role: Mapped[str] = mapped_column(String(16), default="user")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=beijing_now_naive)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "username": self.username,
             "role": self.role,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": beijing_iso(self.created_at),
         }
 
 
@@ -254,7 +255,7 @@ class UserMemory(Base):
     profile: Mapped[dict] = mapped_column(JSON, default=dict)
     recent_briefs: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime, default=beijing_now_naive, onupdate=beijing_now_naive
     )
 
     def to_dict(self) -> dict:
@@ -263,7 +264,7 @@ class UserMemory(Base):
             "summary": self.summary or "",
             "profile": self.profile or {},
             "recent_briefs": self.recent_briefs or [],
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "updated_at": beijing_iso(self.updated_at),
         }
 
 
@@ -368,6 +369,60 @@ async def _migrate_columns(conn) -> None:
             pass
 
 
+async def _migrate_sqlite_utc_timestamps_to_beijing(conn) -> None:
+    """One-time fix for rows created by SQLite CURRENT_TIMESTAMP.
+
+    SQLite's CURRENT_TIMESTAMP/func.now() writes UTC.  Older versions of this
+    app exposed those naive UTC values directly, so the UI showed times 8 hours
+    behind Beijing.  New ORM defaults write Beijing local time; this migration
+    brings existing rows to the same convention.
+    """
+    if not settings.database_url.startswith(("sqlite+aiosqlite://", "sqlite://")):
+        return
+
+    flag_key = "timezone_beijing_migrated_v1"
+    result = await conn.execute(
+        text("SELECT value FROM system_config WHERE key=:key"),
+        {"key": flag_key},
+    )
+    if result.fetchone():
+        return
+
+    columns = [
+        ("articles", "created_at"),
+        ("articles", "updated_at"),
+        ("conversations", "created_at"),
+        ("conversations", "updated_at"),
+        ("tasks", "created_at"),
+        ("tasks", "updated_at"),
+        ("article_versions", "created_at"),
+        ("article_diagnoses", "created_at"),
+        ("templates", "created_at"),
+        ("users", "created_at"),
+        ("user_memories", "updated_at"),
+    ]
+    for table, col in columns:
+        try:
+            await conn.execute(
+                text(
+                    f"UPDATE {table} "
+                    f"SET {col}=datetime({col}, '+8 hours') "
+                    f"WHERE {col} IS NOT NULL AND {col} != ''"
+                )
+            )
+        except Exception:
+            # Some tables may be absent in very old databases.
+            pass
+
+    await conn.execute(
+        text(
+            "INSERT OR REPLACE INTO system_config(key, value) "
+            "VALUES (:key, :value)"
+        ),
+        {"key": flag_key, "value": "1"},
+    )
+
+
 async def _backfill_ownership(conn) -> None:
     """Assign orphan records to the first user and make them admin."""
     result = await conn.execute(text("SELECT id FROM users ORDER BY id LIMIT 1"))
@@ -403,6 +458,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_columns(conn)
+        await _migrate_sqlite_utc_timestamps_to_beijing(conn)
         await _backfill_ownership(conn)
         await _recover_interrupted_tasks(conn)
     await _seed_templates()

@@ -33,6 +33,7 @@ import {
   type DiagnosisReport,
   type DiagnoseEvent,
 } from '../api/client'
+import { formatBeijingDateTime } from '../utils/time'
 
 const STEPS = [
   { key: 'detect', label: '品类检测' },
@@ -137,11 +138,7 @@ function CommentCard({ comment }: { comment: any }) {
 
 function fmtTime(value?: string | null) {
   if (!value) return '-'
-  try {
-    return new Date(value).toLocaleString()
-  } catch {
-    return value
-  }
+  return formatBeijingDateTime(value)
 }
 
 export default function DiagnosePage() {

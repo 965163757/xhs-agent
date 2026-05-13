@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Box, Button, Chip, CircularProgress, Collapse, Paper, Stack, Typography } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { cancelTask, getTask, listTasks, type TaskInfo } from '../api/client'
+import { formatBeijingDateTime } from '../utils/time'
 
 function fmt(ms?: number) {
   if (!ms && ms !== 0) return '—'
@@ -51,7 +52,7 @@ function TaskCard({ task, onRefresh }: { task: TaskInfo; onRefresh: () => void }
             {task.trace_id && <Chip size="small" label={`trace ${task.trace_id}`} sx={{ fontFamily: 'monospace' }} />}
           </Stack>
           <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
-            更新时间：{task.updated_at ? new Date(task.updated_at).toLocaleString() : '—'} · 事件 {task.event_count ?? task.events?.length ?? 0} · 耗时 {fmt(timings.elapsed)}
+            更新时间：{formatBeijingDateTime(task.updated_at)} · 事件 {task.event_count ?? task.events?.length ?? 0} · 耗时 {fmt(timings.elapsed)}
           </Typography>
           {task.result_preview && <Typography sx={{ mt: 0.8, fontSize: 13, color: 'text.secondary', whiteSpace: 'pre-wrap' }}>{task.result_preview}</Typography>}
         </Box>

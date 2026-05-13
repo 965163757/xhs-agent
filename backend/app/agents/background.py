@@ -9,12 +9,12 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from sqlalchemy import select
 
 from ..database import Conversation, SessionLocal, Task, UserMemory
+from ..time_utils import beijing_now_iso
 from .runner import run_agent_stream
 
 
@@ -74,8 +74,8 @@ _task_users: Dict[str, Optional[int]] = {}
 _cancelled: set[str] = set()
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _now_iso() -> str:
+    return beijing_now_iso()
 
 
 def _truncate(text: Any, limit: int = 800) -> str:
@@ -96,7 +96,7 @@ def _new_trace(
         "user_id": user_id,
         "conversation_id": conversation_id,
         "status": "running",
-        "created_at": _utc_now_iso(),
+        "created_at": _now_iso(),
         "model": {},
         "timings_ms": {},
         "event_counts": {},
@@ -272,7 +272,7 @@ async def _run_loop(
         reset_tool_user_id(user_token)
 
         trace["status"] = status
-        trace["completed_at"] = _utc_now_iso()
+        trace["completed_at"] = _now_iso()
         trace.setdefault("timings_ms", {})["elapsed"] = int((time.perf_counter() - started) * 1000)
 
         if status == "cancelled" and not stream.done:
@@ -468,7 +468,7 @@ async def _update_user_memory(
                 {
                     "content": content,
                     "result_preview": _truncate(result_text, 160),
-                    "at": _utc_now_iso(),
+                    "at": _now_iso(),
                 }
             )
             recent = recent[-MAX_MEMORY_BRIEFS:]

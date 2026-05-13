@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-from datetime import datetime
 from pathlib import Path
 import time
 import uuid
@@ -59,6 +58,7 @@ from ..schemas import (
     TemplateCreate,
 )
 from ..services.llm import generate_image
+from ..time_utils import beijing_date_key, beijing_iso, beijing_now_naive
 
 router = APIRouter()
 
@@ -375,7 +375,7 @@ async def apply_article_diagnosis(
         if not changed:
             raise HTTPException(400, "诊断报告里没有可应用的优化标题、正文或标签")
         a.score = _score_for_article(a)
-        d.applied_at = datetime.now()
+        d.applied_at = beijing_now_naive()
         await s.commit()
         await s.refresh(a)
         await s.refresh(d)
@@ -795,8 +795,8 @@ async def list_tasks(limit: int = 50, user: User = Depends(get_current_user)):
                     "trace": trace,
                     "event_count": len(events),
                     "result_preview": (t.result_text or "")[:240],
-                    "created_at": t.created_at.isoformat() if t.created_at else None,
-                    "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+                    "created_at": beijing_iso(t.created_at),
+                    "updated_at": beijing_iso(t.updated_at),
                 }
             )
         return {"items": items}
@@ -1010,7 +1010,7 @@ async def api_calendar(user: User = Depends(get_current_user)):
         articles = res.scalars().all()
     calendar: Dict[str, List[Dict[str, Any]]] = {}
     for a in articles:
-        day = a.created_at.strftime("%Y-%m-%d") if a.created_at else "unknown"
+        day = beijing_date_key(a.created_at)
         if day not in calendar:
             calendar[day] = []
         calendar[day].append({"id": a.id, "title": a.title, "status": a.status})

@@ -28,6 +28,7 @@ import {
 import ChatPanel from '../components/ChatPanel'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor, getSession } from '../chatStore'
+import { formatBeijingDateTime } from '../utils/time'
 
 const suggestions = [
   { icon: '✍️', title: '一键完整成稿', prompt: '帮我完整做一篇关于「早C晚A护肤」的小红书笔记，目标受众是20-25岁学生党，包含标题候选、标签、封面方向和发布前自检' },
@@ -283,7 +284,7 @@ export default function ChatPage() {
                 />
                 <ListItemText
                   primary={c.title || '新对话'}
-                  secondary={new Date(c.updated_at).toLocaleString()}
+                  secondary={formatBeijingDateTime(c.updated_at)}
                   primaryTypographyProps={{ fontSize: 13.5, noWrap: true, fontWeight: 500 }}
                   secondaryTypographyProps={{ fontSize: 11 }}
                 />

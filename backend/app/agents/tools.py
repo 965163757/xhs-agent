@@ -2388,7 +2388,7 @@ async def tool_article_stats(args: Dict[str, Any]) -> Dict[str, Any]:
 
 async def tool_schedule_publish(args: Dict[str, Any]) -> Dict[str, Any]:
     """Mark an article for scheduled publish at a given datetime."""
-    from datetime import datetime as dt
+    from ..time_utils import parse_beijing_datetime_to_naive
 
     aid = int(args["article_id"])
     scheduled_at_str = args.get("scheduled_at", "")
@@ -2403,7 +2403,7 @@ async def tool_schedule_publish(args: Dict[str, Any]) -> Dict[str, Any]:
         art.status = "scheduled"
         if scheduled_at_str:
             try:
-                art.scheduled_at = dt.fromisoformat(scheduled_at_str)
+                art.scheduled_at = parse_beijing_datetime_to_naive(scheduled_at_str)
             except ValueError:
                 return {"ok": False, "error": f"invalid datetime: {scheduled_at_str}"}
         await s.commit()

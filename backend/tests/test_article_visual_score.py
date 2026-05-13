@@ -1,7 +1,9 @@
 import unittest
+from datetime import datetime, timezone
 
 from app.agents.tools import _article_image_context, _article_payload, _normalize_score_payload, _score_for_article
 from app.database import Article, ArticleDiagnosis
+from app.time_utils import beijing_iso, parse_beijing_datetime_to_naive
 
 
 class ArticleVisualAndScoreTests(unittest.TestCase):
@@ -56,6 +58,7 @@ class ArticleVisualAndScoreTests(unittest.TestCase):
             article_id=34,
             user_id=1,
             report={"overall_score": 88, "grade": "A", "optimized_title": "新标题"},
+            created_at=datetime(2026, 5, 13, 16, 30, 0),
         )
 
         data = diag.to_dict()
@@ -65,6 +68,21 @@ class ArticleVisualAndScoreTests(unittest.TestCase):
         self.assertEqual(data["article_id"], 34)
         self.assertEqual(data["overall_score"], 88)
         self.assertEqual(data["optimized_title"], "新标题")
+        self.assertEqual(data["created_at"], "2026-05-13T16:30:00+08:00")
+
+    def test_time_helpers_use_beijing_timezone(self):
+        self.assertEqual(
+            beijing_iso(datetime(2026, 5, 13, 16, 30, 0)),
+            "2026-05-13T16:30:00+08:00",
+        )
+        self.assertEqual(
+            beijing_iso(datetime(2026, 5, 13, 8, 30, 0, tzinfo=timezone.utc)),
+            "2026-05-13T16:30:00+08:00",
+        )
+        self.assertEqual(
+            parse_beijing_datetime_to_naive("2026-05-13T16:30:00+08:00"),
+            datetime(2026, 5, 13, 16, 30, 0),
+        )
 
 
 if __name__ == "__main__":

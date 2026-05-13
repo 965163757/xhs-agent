@@ -14,6 +14,7 @@ from .api.auth_routes import router as auth_router
 from .api.admin_routes import router as admin_router
 from .config import get_settings
 from .database import init_db
+from .time_utils import APP_TIME_ZONE, beijing_now_iso, utc_now_iso
 
 
 @asynccontextmanager
@@ -77,4 +78,9 @@ app.include_router(diagnose_router, prefix="/api")
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True}
+    return {
+        "ok": True,
+        "timezone": APP_TIME_ZONE,
+        "now": beijing_now_iso(),
+        "utc_now": utc_now_iso(),
+    }

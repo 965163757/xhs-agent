@@ -26,6 +26,7 @@ import SortIcon from '@mui/icons-material/Sort'
 import { deleteArticle, listArticles, type Article } from '../api/client'
 import { toast } from 'sonner'
 import ConfirmDialog from '../components/ConfirmDialog'
+import { formatBeijingDate } from '../utils/time'
 
 type SortKey = 'updated' | 'score' | 'title'
 
@@ -282,7 +283,7 @@ export default function ArticlesPage() {
             {/* Actions */}
             <Stack sx={{ alignItems: 'flex-end', justifyContent: 'space-between', py: 0.3 }}>
               <Typography sx={{ fontSize: 11, color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                {new Date(a.updated_at).toLocaleDateString()}
+                {formatBeijingDate(a.updated_at)}
               </Typography>
               <Stack
                 direction="row"
