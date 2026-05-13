@@ -21,6 +21,7 @@ type QuickAction = { label: string; icon: React.ReactNode; path: string }
 const staticActions: QuickAction[] = [
   { label: '新建对话', icon: <ChatBubbleOutlineIcon sx={{ fontSize: 18 }} />, path: '/' },
   { label: '笔记列表', icon: <DescriptionOutlinedIcon sx={{ fontSize: 18 }} />, path: '/articles' },
+  { label: '任务中心', icon: <DescriptionOutlinedIcon sx={{ fontSize: 18 }} />, path: '/tasks' },
   { label: '模板库', icon: <DescriptionOutlinedIcon sx={{ fontSize: 18 }} />, path: '/templates' },
   { label: '设置', icon: <SettingsOutlinedIcon sx={{ fontSize: 18 }} />, path: '/settings' },
 ]

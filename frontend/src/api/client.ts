@@ -2,7 +2,9 @@ import axios from 'axios'
 
 export const api = axios.create({
   baseURL: '/api',
-  timeout: 180000,
+  // Image generation can legitimately take several minutes on compatible
+  // gateways, especially for high quality / 2K requests.
+  timeout: 480000,
 })
 
 const TOKEN_KEY = 'xhs_token'
@@ -35,8 +37,37 @@ export interface Article {
   images: string[]
   status: string
   score: Record<string, any>
+  image_context?: ArticleImageContext
+  content_stats?: {
+    title_chars: number
+    body_chars: number
+    tag_count: number
+    image_count: number
+  }
   created_at: string
   updated_at: string
+}
+
+export interface ArticleImageAsset {
+  role: 'cover' | 'content' | string
+  url: string
+  index?: number
+  exists?: boolean
+  bytes?: number
+  width?: number
+  height?: number
+  format?: string
+}
+
+export interface ArticleImageContext {
+  has_cover: boolean
+  cover_image: string
+  content_images: Array<{ index: number; url: string }>
+  visual_images?: Array<{ position: number; role: string; url: string; index?: number }>
+  all_images: ArticleImageAsset[]
+  image_count: number
+  content_image_count: number
+  notes?: string
 }
 
 export interface Template {
@@ -68,11 +99,19 @@ export interface ChatMessage {
 }
 
 export interface PublicSettings {
+  // Legacy aliases map to text/chat settings.
   openai_api_key_mask: string
   openai_api_key_set: boolean
   openai_base_url: string
+  chat_api_key_mask: string
+  chat_api_key_set: boolean
+  chat_base_url: string
+  image_api_key_mask: string
+  image_api_key_set: boolean
+  image_base_url: string
   chat_model: string
   image_model: string
+  public_base_url: string
 }
 
 export async function listArticles(): Promise<Article[]> {
@@ -217,6 +256,19 @@ export async function removeArticleImage(
   return r.data
 }
 
+export async function arrangeArticleImages(payload: {
+  article_id: number
+  action: 'set_order' | 'move' | 'set_cover' | 'insert' | 'replace' | 'remove' | 'clear'
+  order?: string[]
+  image_url?: string
+  from_position?: number
+  to_position?: number
+  position?: number
+}) {
+  const r = await api.post('/articles/arrange_images', payload)
+  return r.data as { ok: boolean; article?: Article; visual_queue?: string[]; error?: string }
+}
+
 export interface EditBinding {
   article_id?: number
   role?: 'cover' | 'content'
@@ -239,6 +291,7 @@ export async function inpaintImage(payload: {
   mask_url: string
   prompt: string
   size?: string
+  quality?: 'high' | 'medium' | 'low' | 'auto'
 } & EditBinding) {
   const r = await api.post('/images/inpaint', payload)
   return r.data as { ok: boolean; image: string }
@@ -249,6 +302,7 @@ export async function removeObject(payload: {
   mask_url: string
   prompt?: string
   size?: string
+  quality?: 'high' | 'medium' | 'low' | 'auto'
 } & EditBinding) {
   const r = await api.post('/images/remove_object', payload)
   return r.data as { ok: boolean; image: string }
@@ -258,6 +312,7 @@ export async function editImage(payload: {
   image_url: string
   prompt: string
   size?: string
+  quality?: 'high' | 'medium' | 'low' | 'auto'
 } & EditBinding) {
   const r = await api.post('/images/edit', payload)
   return r.data as { ok: boolean; image: string }
@@ -274,6 +329,7 @@ export async function uploadMask(blob: Blob): Promise<string> {
 export async function generateImageForArticle(payload: {
   prompt: string
   size?: string
+  quality?: 'high' | 'medium' | 'low' | 'auto'
   n?: number
   article_id: number
   role: 'cover' | 'content'
@@ -285,9 +341,16 @@ export async function generateImageForArticle(payload: {
   })
   return r.data.result as { ok: boolean; images: string[] }
 }
-export async function generateImage(prompt: string, size = '1024x1536', n = 1): Promise<string[]> {
-  const r = await api.post('/images/generate', { prompt, size, n })
-  return r.data.images
+export async function generateImage(
+  prompt: string,
+  size = '1024x1536',
+  n = 1,
+  quality: 'high' | 'medium' | 'low' | 'auto' = 'high',
+  referenceImages: string[] = []
+): Promise<string[]> {
+  const r = await api.post('/images/generate', { prompt, size, n, quality, reference_images: referenceImages })
+  if (r.data?.ok === false) throw new Error(r.data.error || '图片生成失败')
+  return r.data.images || []
 }
 export async function uploadImage(file: File): Promise<string> {
   const fd = new FormData()
@@ -370,6 +433,10 @@ export async function updateConversation(id: number, payload: Partial<Conversati
 export async function deleteConversation(id: number) {
   await api.delete(`/conversations/${id}`)
 }
+export async function deleteConversations(ids: number[]): Promise<{ ok: boolean; deleted: number; requested: number }> {
+  const r = await api.post('/conversations/batch_delete', { ids })
+  return r.data
+}
 
 export interface ArticleVersion {
   id: number
@@ -401,13 +468,27 @@ export async function getSettings(): Promise<PublicSettings> {
   const r = await api.get('/settings')
   return r.data
 }
-export async function updateSettings(payload: Partial<PublicSettings> & { openai_api_key?: string }) {
+export async function updateSettings(payload: Partial<PublicSettings> & {
+  openai_api_key?: string
+  chat_api_key?: string
+  image_api_key?: string
+}) {
   const r = await api.put('/settings', payload)
   return r.data as PublicSettings
 }
 export async function testSettings() {
   const r = await api.post('/settings/test')
-  return r.data as { ok: boolean; reply?: string; error?: string }
+  return r.data as {
+    ok: boolean
+    reply?: string
+    error?: string
+    chat_base_url?: string
+    chat_model?: string
+    image_base_url?: string
+    image_model?: string
+    public_base_url?: string
+    image_key_set?: boolean
+  }
 }
 
 export async function getStats(): Promise<{
@@ -435,9 +516,16 @@ export async function getMcpTools() {
 
 export interface MySettings {
   use_own_key: boolean
+  // Legacy aliases map to text/chat settings.
   openai_api_key_mask: string
   openai_api_key_set: boolean
   openai_base_url: string
+  chat_api_key_mask: string
+  chat_api_key_set: boolean
+  chat_base_url: string
+  image_api_key_mask: string
+  image_api_key_set: boolean
+  image_base_url: string
   chat_model: string
   image_model: string
 }
@@ -451,6 +539,10 @@ export async function updateMySettings(payload: {
   use_own_key?: boolean
   openai_api_key?: string
   openai_base_url?: string
+  chat_api_key?: string
+  chat_base_url?: string
+  image_api_key?: string
+  image_base_url?: string
   chat_model?: string
   image_model?: string
 }): Promise<MySettings> {
@@ -491,7 +583,8 @@ export type StreamEvent =
   | { type: 'token'; text: string; seq?: number }
   | { type: 'task_id'; task_id: string; seq?: number }
   | { type: 'tool_call'; name: string; arguments: any; id: string; seq?: number }
-  | { type: 'tool_result'; name: string; result: any; id: string; seq?: number }
+  | { type: 'tool_progress'; name: string; id: string; step?: string; message: string; data?: any; seq?: number }
+  | { type: 'tool_result'; name: string; result: any; id: string; elapsed_ms?: number; ok?: boolean; seq?: number }
   | { type: 'done'; text?: string; seq?: number }
   | { type: 'cancelled'; text?: string; seq?: number }
   | { type: 'error'; message: string; seq?: number }
@@ -537,9 +630,20 @@ export async function chatStream(
 export interface TaskInfo {
   id: string
   conversation_id: number | null
-  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'stale'
+  trace_id?: string
+  trace?: Record<string, any>
   events: StreamEvent[]
   result_text: string
+  event_count?: number
+  result_preview?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export async function listTasks(limit = 50): Promise<TaskInfo[]> {
+  const r = await api.get('/tasks', { params: { limit } })
+  return r.data.items
 }
 
 export async function getTask(taskId: string): Promise<TaskInfo> {

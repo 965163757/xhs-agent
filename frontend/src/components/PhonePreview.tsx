@@ -27,10 +27,10 @@ export default function PhonePreview({
   return (
     <Box
       sx={{
-        width: 375,
-        height: 680,
+        width: 340,
+        height: 660,
         border: '2px solid #E5E5E5',
-        borderRadius: '44px',
+        borderRadius: '38px',
         overflow: 'hidden',
         bgcolor: '#fff',
         display: 'flex',
@@ -42,7 +42,7 @@ export default function PhonePreview({
       {/* Status bar */}
       <Box
         sx={{
-          height: 44,
+          height: 40,
           px: 3,
           display: 'flex',
           alignItems: 'center',

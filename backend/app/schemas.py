@@ -1,5 +1,35 @@
+import re
 from typing import Any, List, Optional
 from pydantic import BaseModel, Field, field_validator
+
+
+IMAGE_SIZE_RE = re.compile(r"^\s*(\d{2,5})\s*x\s*(\d{2,5})\s*$", re.IGNORECASE)
+IMAGE_MIN_SIDE = 64
+IMAGE_MAX_SIDE = 4096
+IMAGE_MAX_PIXELS = IMAGE_MAX_SIDE * IMAGE_MAX_SIDE
+IMAGE_QUALITIES = {"high", "medium", "low", "auto", "hd", "standard"}
+
+
+def _validate_image_size(v: str) -> str:
+    value = str(v or "").strip().lower()
+    m = IMAGE_SIZE_RE.match(value)
+    if not m:
+        raise ValueError("图片尺寸格式应为 宽x高，例如 1024x1536")
+    w, h = int(m.group(1)), int(m.group(2))
+    if w < IMAGE_MIN_SIDE or h < IMAGE_MIN_SIDE:
+        raise ValueError(f"图片尺寸过小，单边不能小于 {IMAGE_MIN_SIDE}")
+    if w > IMAGE_MAX_SIDE or h > IMAGE_MAX_SIDE or w * h > IMAGE_MAX_PIXELS:
+        raise ValueError(f"图片尺寸过大，单边不超过 {IMAGE_MAX_SIDE}，总像素不超过 {IMAGE_MAX_PIXELS}")
+    return f"{w}x{h}"
+
+
+def _validate_image_quality(v: str) -> str:
+    value = str(v or "high").strip().lower()
+    aliases = {"最高": "high", "高清": "high", "高": "high", "中": "medium", "低": "low"}
+    value = aliases.get(value, value)
+    if value not in IMAGE_QUALITIES:
+        raise ValueError(f"不支持的图片质量参数: {v}")
+    return value
 
 
 class ArticleIn(BaseModel):
@@ -48,10 +78,29 @@ class ChatRequest(BaseModel):
 
 
 class ImageGenRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(min_length=1, max_length=8000)
     size: str = "1024x1536"
+    quality: str = "high"
     n: int = Field(default=1, ge=1, le=4)
     reference_images: List[str] = Field(default_factory=list)
+
+    @field_validator("size")
+    @classmethod
+    def image_size_valid(cls, v: str) -> str:
+        return _validate_image_size(v)
+
+    @field_validator("quality")
+    @classmethod
+    def image_quality_valid(cls, v: str) -> str:
+        return _validate_image_quality(v)
+
+    @field_validator("reference_images")
+    @classmethod
+    def reference_images_valid(cls, v: List[str]) -> List[str]:
+        refs = [str(x).strip() for x in (v or []) if str(x or "").strip()]
+        if len(refs) > 8:
+            raise ValueError("参考图最多 8 张")
+        return refs
 
 
 class RewriteRequest(BaseModel):
@@ -122,6 +171,16 @@ class RemoveImageRequest(BaseModel):
     index: Optional[int] = None
 
 
+class ArticleImageArrangeRequest(BaseModel):
+    article_id: int
+    action: str = Field(default="set_order", description="set_order/move/set_cover/insert/replace/remove/clear")
+    order: List[str] = Field(default_factory=list, description="完整展示队列：第 1 张即封面")
+    image_url: str = ""
+    from_position: Optional[int] = None
+    to_position: Optional[int] = None
+    position: Optional[int] = None
+
+
 class CropImageRequest(BaseModel):
     image_url: str
     x: int
@@ -138,9 +197,20 @@ class InpaintRequest(BaseModel):
     mask_url: str
     prompt: str = "match surrounding style"
     size: str = "1024x1024"
+    quality: str = "high"
     article_id: Optional[int] = None
     role: str = "content"
     replace_index: Optional[int] = None
+
+    @field_validator("size")
+    @classmethod
+    def image_size_valid(cls, v: str) -> str:
+        return _validate_image_size(v)
+
+    @field_validator("quality")
+    @classmethod
+    def image_quality_valid(cls, v: str) -> str:
+        return _validate_image_quality(v)
 
 
 class RemoveObjectRequest(BaseModel):
@@ -148,18 +218,40 @@ class RemoveObjectRequest(BaseModel):
     mask_url: str
     prompt: Optional[str] = None
     size: str = "1024x1024"
+    quality: str = "high"
     article_id: Optional[int] = None
     role: str = "content"
     replace_index: Optional[int] = None
+
+    @field_validator("size")
+    @classmethod
+    def image_size_valid(cls, v: str) -> str:
+        return _validate_image_size(v)
+
+    @field_validator("quality")
+    @classmethod
+    def image_quality_valid(cls, v: str) -> str:
+        return _validate_image_quality(v)
 
 
 class EditImageRequest(BaseModel):
     image_url: str
-    prompt: str
+    prompt: str = Field(min_length=1, max_length=8000)
     size: str = "1024x1024"
+    quality: str = "high"
     article_id: Optional[int] = None
     role: str = "content"
     replace_index: Optional[int] = None
+
+    @field_validator("size")
+    @classmethod
+    def image_size_valid(cls, v: str) -> str:
+        return _validate_image_size(v)
+
+    @field_validator("quality")
+    @classmethod
+    def image_quality_valid(cls, v: str) -> str:
+        return _validate_image_quality(v)
 
 
 class ApplyTemplateRequest(BaseModel):
@@ -182,8 +274,25 @@ class ExtractTemplateRequest(BaseModel):
 class SettingsUpdate(BaseModel):
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
+    chat_api_key: Optional[str] = None
+    chat_base_url: Optional[str] = None
+    image_api_key: Optional[str] = None
+    image_base_url: Optional[str] = None
     chat_model: Optional[str] = None
     image_model: Optional[str] = None
+    public_base_url: Optional[str] = None
+
+    @field_validator("public_base_url")
+    @classmethod
+    def public_base_url_valid(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        value = v.strip().rstrip("/")
+        if not value:
+            return ""
+        if not (value.startswith("http://") or value.startswith("https://")):
+            raise ValueError("服务公网地址必须以 http:// 或 https:// 开头")
+        return value
 
 
 class MCPCallRequest(BaseModel):

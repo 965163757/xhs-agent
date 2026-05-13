@@ -3,10 +3,14 @@ from __future__ import annotations
 import base64
 import contextvars
 import io
+import ipaddress
+import json
+import re
 import time
 import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from openai import AsyncOpenAI
@@ -14,12 +18,27 @@ from openai import AsyncOpenAI
 from ..config import Settings, get_settings
 
 
-_client: Optional[AsyncOpenAI] = None
-_client_key: Optional[tuple] = None
-_user_clients: Dict[tuple, AsyncOpenAI] = {}
+_clients: Dict[tuple, AsyncOpenAI] = {}
 _current_settings: contextvars.ContextVar[Optional[Settings]] = contextvars.ContextVar(
     "_current_llm_settings", default=None
 )
+DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
+IMAGE_GENERATION_TIMEOUT_SECONDS = 8 * 60.0
+VISION_IMAGE_DETAIL = "auto"
+VISION_REMOTE_FETCH_TIMEOUT_SECONDS = 20.0
+REMOTE_IMAGE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
+REMOTE_IMAGE_MAX_BYTES = 50 * 1024 * 1024
+IMAGE_MIN_SIDE = 64
+IMAGE_MAX_SIDE = 4096
+IMAGE_MAX_PIXELS = IMAGE_MAX_SIDE * IMAGE_MAX_SIDE
+IMAGE_SIZE_RE = re.compile(r"^\s*(\d{2,5})\s*x\s*(\d{2,5})\s*$", re.IGNORECASE)
+IMAGE_MIME_TO_EXT = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
 
 
 def set_current_settings(settings: Optional[Settings]) -> contextvars.Token:
@@ -41,37 +60,366 @@ def _effective_settings(settings: Optional[Settings] = None) -> Settings:
 
 
 def reset_client() -> None:
-    global _client, _client_key, _user_clients
-    _client = None
-    _client_key = None
-    _user_clients.clear()
+    _clients.clear()
 
 
-def get_client(settings: Optional[Settings] = None) -> AsyncOpenAI:
-    global _client, _client_key
+def _client_credentials(s: Settings, kind: str = "chat") -> Tuple[str, str]:
+    if kind == "image":
+        return s.effective_image_api_key, s.effective_image_base_url
+    return s.effective_chat_api_key, s.effective_chat_base_url
+
+
+def get_client(settings: Optional[Settings] = None, kind: str = "chat") -> AsyncOpenAI:
     s = settings or get_settings()
-    key = (s.openai_api_key, s.openai_base_url)
-
-    if settings is not None:
-        if key not in _user_clients:
-            _user_clients[key] = AsyncOpenAI(
-                api_key=s.openai_api_key,
-                base_url=s.openai_base_url,
-                timeout=180.0,
-            )
-        return _user_clients[key]
-
-    if _client is None or _client_key != key:
-        _client = AsyncOpenAI(
-            api_key=s.openai_api_key,
-            base_url=s.openai_base_url,
-            timeout=180.0,
+    api_key, base_url = _client_credentials(s, kind)
+    key = (kind, api_key, base_url)
+    if key not in _clients:
+        _clients[key] = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=IMAGE_GENERATION_TIMEOUT_SECONDS if kind == "image" else DEFAULT_LLM_TIMEOUT_SECONDS,
         )
-        _client_key = key
-    return _client
+    return _clients[key]
 
 
-def to_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _normalize_image_quality(quality: Optional[str], model: str = "") -> str:
+    """Normalize quality while keeping "highest" as the default.
+
+    GPT image models support high/medium/low/auto. DALL·E models use older
+    quality values, so map the highest setting to each model family's best
+    supported value.
+    """
+    q = (quality or "high").strip().lower()
+    aliases = {
+        "": "high",
+        "best": "high",
+        "highest": "high",
+        "max": "high",
+        "高清": "high",
+        "最高": "high",
+        "高": "high",
+        "中": "medium",
+        "低": "low",
+    }
+    q = aliases.get(q, q)
+    m = (model or "").lower()
+    if m.startswith("dall-e-2"):
+        return "standard"
+    if m.startswith("dall-e-3"):
+        return "hd" if q in {"high", "hd"} else "standard"
+    if q not in {"auto", "high", "medium", "low", "hd", "standard"}:
+        return "high"
+    # GPT image models: highest is high. If a caller passes DALL-E style hd,
+    # treat it as the equivalent high setting.
+    return "high" if q == "hd" else q
+
+
+def _normalize_image_size(size: Optional[str]) -> str:
+    value = str(size or "1024x1536").strip().lower()
+    m = IMAGE_SIZE_RE.match(value)
+    if not m:
+        raise ValueError(f"图片尺寸格式无效：{size!r}，应为 1024x1536 这类 宽x高")
+    w, h = int(m.group(1)), int(m.group(2))
+    if w < IMAGE_MIN_SIDE or h < IMAGE_MIN_SIDE:
+        raise ValueError(f"图片尺寸过小：{w}x{h}，单边不能小于 {IMAGE_MIN_SIDE}")
+    if w > IMAGE_MAX_SIDE or h > IMAGE_MAX_SIDE or w * h > IMAGE_MAX_PIXELS:
+        raise ValueError(
+            f"图片尺寸过大：{w}x{h}，单边不超过 {IMAGE_MAX_SIDE}，总像素不超过 {IMAGE_MAX_PIXELS}"
+        )
+    return f"{w}x{h}"
+
+
+def _normalize_image_count(n: Any) -> int:
+    try:
+        value = int(n)
+    except Exception:
+        value = 1
+    return max(1, min(4, value))
+
+
+def _has_images(messages: List[Dict[str, Any]]) -> bool:
+    for m in messages:
+        if m.get("images"):
+            return True
+    return False
+
+
+def _is_private_or_local_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").strip().lower()
+        if not host:
+            return False
+        if host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".local"):
+            return True
+        try:
+            ip = ipaddress.ip_address(host)
+            return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+        except ValueError:
+            return False
+    except Exception:
+        return False
+
+
+def _is_http_url(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = urlparse(value.strip())
+        return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+    except Exception:
+        return False
+
+
+def _is_public_remote_url(value: str) -> bool:
+    return _is_http_url(value) and not _is_private_or_local_url(value)
+
+
+def _configured_public_base_url(settings: Optional[Settings] = None) -> str:
+    s = settings or get_settings()
+    base = (getattr(s, "public_base_url", "") or "").strip().rstrip("/")
+    if not base:
+        return ""
+    parsed = urlparse(base)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return base
+
+
+def _configured_public_base_parts(settings: Optional[Settings] = None) -> Optional[Tuple[str, str, str]]:
+    """Return normalized (scheme, netloc, path_prefix) for PUBLIC_BASE_URL."""
+    base = _configured_public_base_url(settings)
+    if not base:
+        return None
+    parsed = urlparse(base)
+    return parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/")
+
+
+def _local_static_path_part(url_or_path: str, settings: Optional[Settings] = None) -> Optional[str]:
+    """Return /static/images/... for a local image reference, if safely identifiable."""
+    value = str(url_or_path or "").strip()
+    if not value:
+        return None
+    if value.startswith("/static/images/"):
+        return value
+    if _is_http_url(value):
+        parsed = urlparse(value)
+        if _is_private_or_local_url(value) and parsed.path.startswith("/static/images/"):
+            return parsed.path
+        public_base = _configured_public_base_parts(settings)
+        if public_base:
+            base_scheme, base_netloc, base_path = public_base
+            url_path = parsed.path or ""
+            expected_prefix = f"{base_path}/static/images/" if base_path else "/static/images/"
+            if (
+                parsed.scheme.lower() == base_scheme
+                and parsed.netloc.lower() == base_netloc
+                and url_path.startswith(expected_prefix)
+            ):
+                rel = url_path[len(expected_prefix):].lstrip("/")
+                if rel:
+                    return f"/static/images/{rel}"
+        return None
+    try:
+        s = settings or get_settings()
+        base = Path(s.image_dir).resolve()
+        p = Path(value)
+        candidate = p.resolve() if p.is_absolute() else (base / p.name).resolve()
+        if candidate.is_relative_to(base):
+            rel = candidate.relative_to(base).as_posix()
+            return f"/static/images/{rel}"
+    except Exception:
+        return None
+    return None
+
+
+def _is_app_static_image_reference(url_or_path: str, settings: Optional[Settings] = None) -> bool:
+    """True for this app's local/static image references, including deployed public URLs."""
+    return _local_static_path_part(url_or_path, settings) is not None
+
+
+def _public_url_for_local_image(url_or_path: str, settings: Optional[Settings] = None) -> Optional[str]:
+    """Convert local /static/images/... to deployed public absolute URL when configured."""
+    base = _configured_public_base_url(settings)
+    if not base:
+        return None
+    path = _local_static_path_part(url_or_path, settings)
+    if not path:
+        return None
+    return urljoin(base + "/", path.lstrip("/"))
+
+
+def _provider_image_url(url_or_path: str, settings: Optional[Settings] = None) -> Optional[str]:
+    """URL that an upstream provider can fetch directly, if available."""
+    value = str(url_or_path or "").strip()
+    # App-owned static images should be canonicalized through PUBLIC_BASE_URL
+    # before treating them as arbitrary public remote URLs. This keeps deployed
+    # /static/images references recoverable for local-upload fallback.
+    public_url = _public_url_for_local_image(value, settings)
+    if public_url:
+        return public_url
+    if _is_public_remote_url(value):
+        return value
+    return None
+
+
+def _mime_for_path(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in (".jpg", ".jpeg"):
+        return "image/jpeg"
+    if suffix == ".webp":
+        return "image/webp"
+    if suffix == ".gif":
+        return "image/gif"
+    return "image/png"
+
+
+def _extension_for_mime(mime: str, fallback_path: str = "") -> str:
+    mime = (mime or "").split(";", 1)[0].strip().lower()
+    if mime in IMAGE_MIME_TO_EXT:
+        return IMAGE_MIME_TO_EXT[mime]
+    suffix = Path(urlparse(fallback_path).path or fallback_path).suffix.lower()
+    return suffix if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif"} else ".png"
+
+
+def _original_image_data_url(data: bytes, *, source_name: str = "image", mime: Optional[str] = None) -> str:
+    """Inline original image bytes without resizing/re-encoding.
+
+    The user explicitly prefers no quality loss.  This preserves original
+    pixels/format for vision input; the trade-off is a larger request payload
+    when we cannot pass a public URL directly.
+    """
+    if not mime:
+        mime = _mime_for_path(Path(source_name))
+    b64 = base64.b64encode(data).decode()
+    return f"data:{mime};base64,{b64}"
+
+
+async def _fetch_remote_image_bytes(
+    url: str,
+    *,
+    timeout: float,
+    max_bytes: int = REMOTE_IMAGE_MAX_BYTES,
+) -> Tuple[bytes, Optional[str]]:
+    """Fetch an image URL with type/size validation and no re-encoding."""
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as hc:
+        async with hc.stream("GET", url) as r:
+            r.raise_for_status()
+            content_type = (r.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+            if content_type and not content_type.startswith("image/"):
+                raise ValueError(f"remote URL is not an image: {content_type}")
+            content_length = r.headers.get("content-length")
+            if content_length:
+                try:
+                    if int(content_length) > max_bytes:
+                        raise ValueError(f"remote image too large: {content_length} bytes")
+                except ValueError as e:
+                    if "too large" in str(e):
+                        raise
+            chunks: List[bytes] = []
+            total = 0
+            async for chunk in r.aiter_bytes():
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ValueError(f"remote image too large: >{max_bytes} bytes")
+                chunks.append(chunk)
+    if not chunks:
+        raise ValueError("remote image is empty")
+    return b"".join(chunks), (content_type or None)
+
+
+async def _remote_image_to_data_url(url: str) -> str:
+    data, mime = await _fetch_remote_image_bytes(
+        url,
+        timeout=VISION_REMOTE_FETCH_TIMEOUT_SECONDS,
+        max_bytes=REMOTE_IMAGE_MAX_BYTES,
+    )
+    return _original_image_data_url(
+        data,
+        source_name=urlparse(url).path or "remote.jpg",
+        mime=mime,
+    )
+
+
+async def _download_remote_image_to_local(url: str, settings: Settings, *, suffix: str = "remote") -> Path:
+    """Download a remote image URL into image_dir without changing bytes/quality."""
+    Path(settings.image_dir).mkdir(parents=True, exist_ok=True)
+    data, content_type = await _fetch_remote_image_bytes(
+        url,
+        timeout=REMOTE_IMAGE_DOWNLOAD_TIMEOUT_SECONDS,
+        max_bytes=REMOTE_IMAGE_MAX_BYTES,
+    )
+    ext = _extension_for_mime(content_type or "", url)
+    name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}_{suffix}{ext}"
+    out_path = Path(settings.image_dir) / name
+    out_path.write_bytes(data)
+    return out_path
+
+
+async def _ensure_local_image_path(
+    url_or_path: str,
+    settings: Settings,
+    *,
+    suffix: str = "remote",
+    allow_remote_download: bool = False,
+) -> Path:
+    if _is_http_url(url_or_path):
+        # Local/private static URLs point back to this service; resolve them to
+        # disk instead of asking an upstream image provider to fetch them.
+        static_path = _local_static_path_part(url_or_path, settings)
+        if static_path:
+            return _resolve_local_path(static_path)
+        # Only fetch remote URLs when explicitly requested. Public URLs should
+        # stay as URLs so compatible providers can read them directly without
+        # creating extra local copies.
+        if allow_remote_download:
+            return await _download_remote_image_to_local(url_or_path, settings, suffix=suffix)
+        raise ValueError(f"external image URL should be passed through, not downloaded: {url_or_path}")
+    return _resolve_local_path(url_or_path)
+
+
+async def _to_vision_image_url(
+    url: str,
+    *,
+    inline_remote: bool = False,
+    settings: Optional[Settings] = None,
+) -> str:
+    """Return a provider-ready image_url value.
+
+    Strategy:
+    - public http(s): pass the URL directly first, closest to official clients
+      and avoids huge base64 payloads.
+    - local/private/data/local-file: inline original bytes as data URL so the
+      model provider can actually read pixels without quality loss.
+    - retry path can set inline_remote=True to fetch public images server-side
+      and send original data URL if the provider cannot fetch external URLs.
+    """
+    if not url:
+        return url
+    if url.startswith("data:"):
+        return url
+    if _is_http_url(url):
+        public_url = _public_url_for_local_image(url, settings)
+        if public_url and not inline_remote:
+            return public_url
+        if inline_remote or _is_private_or_local_url(url):
+            return await _remote_image_to_data_url(url)
+        return url
+    public_url = _public_url_for_local_image(url, settings)
+    if public_url and not inline_remote:
+        return public_url
+    path = _resolve_local_path(url)
+    if not path.exists():
+        return url
+    return _original_image_data_url(path.read_bytes(), source_name=path.name, mime=_mime_for_path(path))
+
+
+async def to_openai_messages(
+    messages: List[Dict[str, Any]],
+    *,
+    inline_remote_images: bool = False,
+    settings: Optional[Settings] = None,
+) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for m in messages:
         role = m.get("role", "user")
@@ -104,27 +452,40 @@ def to_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             path_hints = "\n".join(f"[图片路径: {url}]" for url in images)
             parts.append({"type": "text", "text": path_hints})
             for url in images:
-                parts.append({"type": "image_url", "image_url": {"url": _to_data_url(url)}})
+                parts.append(
+                    {
+                        "type": "image_url",
+                            "image_url": {
+                            "url": await _to_vision_image_url(
+                                str(url),
+                                inline_remote=inline_remote_images,
+                                settings=settings,
+                            ),
+                            "detail": VISION_IMAGE_DETAIL,
+                        },
+                    }
+                )
             out.append({"role": role, "content": parts})
         else:
             out.append({"role": role, "content": content})
     return out
 
 
-def _to_data_url(url: str) -> str:
-    """Convert a local /static/images/... path to a base64 data URL for the LLM API.
-    If already a full http(s) or data: URL, return as-is."""
-    if url.startswith("http://") or url.startswith("https://") or url.startswith("data:"):
-        return url
-    # Local path like /static/images/xxx.png
-    path = _resolve_local_path(url)
-    if not path.exists():
-        return url
-    data = path.read_bytes()
-    suffix = path.suffix.lower()
-    mime = "image/png" if suffix == ".png" else "image/jpeg" if suffix in (".jpg", ".jpeg") else "image/webp" if suffix == ".webp" else "image/png"
-    b64 = base64.b64encode(data).decode()
-    return f"data:{mime};base64,{b64}"
+def _should_retry_inline_images(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        needle in text
+        for needle in (
+            "image",
+            "url",
+            "fetch",
+            "download",
+            "unsupported",
+            "invalid",
+            "400",
+            "422",
+        )
+    )
 
 
 async def chat_completion(
@@ -136,16 +497,25 @@ async def chat_completion(
     settings: Optional[Settings] = None,
 ) -> Any:
     s = _effective_settings(settings)
-    client = get_client(s)
+    client = get_client(s, kind="chat")
     kwargs: Dict[str, Any] = {
         "model": model or s.chat_model,
-        "messages": to_openai_messages(messages),
+        "messages": await to_openai_messages(messages, settings=s),
         "temperature": temperature,
     }
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = tool_choice
-    return await client.chat.completions.create(**kwargs)
+    try:
+        return await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        # Public image URLs are optimal when the provider can fetch them.  Some
+        # OpenAI-compatible gateways cannot, so retry once by fetching the image
+        # server-side and sending the original bytes as a data URL instead.
+        if not _has_images(messages) or not _should_retry_inline_images(e):
+            raise
+        kwargs["messages"] = await to_openai_messages(messages, inline_remote_images=True, settings=s)
+        return await client.chat.completions.create(**kwargs)
 
 
 async def chat_completion_stream(
@@ -156,17 +526,23 @@ async def chat_completion_stream(
     settings: Optional[Settings] = None,
 ) -> AsyncIterator[Any]:
     s = _effective_settings(settings)
-    client = get_client(s)
+    client = get_client(s, kind="chat")
     kwargs: Dict[str, Any] = {
         "model": model or s.chat_model,
-        "messages": to_openai_messages(messages),
+        "messages": await to_openai_messages(messages, settings=s),
         "temperature": temperature,
         "stream": True,
     }
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
-    stream = await client.chat.completions.create(**kwargs)
+    try:
+        stream = await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        if not _has_images(messages) or not _should_retry_inline_images(e):
+            raise
+        kwargs["messages"] = await to_openai_messages(messages, inline_remote_images=True, settings=s)
+        stream = await client.chat.completions.create(**kwargs)
     async for chunk in stream:
         yield chunk
 
@@ -175,25 +551,78 @@ async def generate_image(
     prompt: str,
     size: str = "1024x1536",
     n: int = 1,
+    quality: str = "high",
     reference_images: Optional[List[str]] = None,
     settings: Optional[Settings] = None,
 ) -> List[str]:
     s = _effective_settings(settings)
-    # Reference-image requests are routed to image edit/variation. This gives
-    # the UI a practical "参考图生成" behavior even though images.generate itself
-    # does not consume reference images in the current SDK call below.
+    size = _normalize_image_size(size)
+    n = _normalize_image_count(n)
+    quality = _normalize_image_quality(quality, s.image_model)
     if reference_images:
-        return await edit_image(
-            image_url=reference_images[0],
-            mask_url=None,
-            prompt=prompt,
-            size=size,
-            n=n,
-            settings=s,
-        )
-    client = get_client(s)
+        refs = [str(x).strip() for x in reference_images if str(x or "").strip()]
+        if not refs:
+            refs = []
+        provider_refs = [_provider_image_url(ref, s) for ref in refs]
+        if refs and all(provider_refs):
+            # Public external URLs and deployed /static/images URLs are
+            # provider-readable in many compatible gateways. Keep them as URLs
+            # first; do not download/copy them into image_dir.
+            url_refs = [str(x) for x in provider_refs if x]
+            try:
+                return await _generate_image_raw_http(
+                    settings=s,
+                    prompt=prompt,
+                    size=size,
+                    n=n,
+                    quality=quality,
+                    reference_images=url_refs,
+                )
+            except Exception as e:
+                # Some gateways model "reference image" as an edit endpoint
+                # with image_url instead of a generations reference_images
+                # field.  Try that URL-native shape before surfacing the error.
+                try:
+                    return await _edit_image_url_raw_http(
+                        settings=s,
+                        image_url=url_refs[0],
+                        mask_url=None,
+                        prompt=prompt,
+                        size=size,
+                        n=n,
+                        quality=quality,
+                    )
+                except Exception as edit_e:
+                    # For local /static images on a deployed app, URL-native is
+                    # just an optimization. If the provider rejects URL edits,
+                    # fall back to the SDK upload path. For true external URLs,
+                    # keep the user's preference: do not download them.
+                    if _is_app_static_image_reference(refs[0], s):
+                        return await edit_image(
+                            image_url=refs[0],
+                            mask_url=None,
+                            prompt=prompt,
+                            size=size,
+                            n=n,
+                            quality=quality,
+                            settings=s,
+                        )
+                    raise RuntimeError(
+                        "图片生成失败：上游未接受外部参考图 URL；"
+                        f"generations 失败: {e}; edits 失败: {edit_e}"
+                    ) from edit_e
+        if refs:
+            return await edit_image(
+                image_url=refs[0],
+                mask_url=None,
+                prompt=prompt,
+                size=size,
+                n=n,
+                quality=quality,
+                settings=s,
+            )
+    client = get_client(s, kind="image")
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
-    saved: List[str] = []
 
     try:
         resp = await client.images.generate(
@@ -201,24 +630,175 @@ async def generate_image(
             prompt=prompt,
             size=size,
             n=n,
+            quality=quality,
         )
     except Exception as e:
-        raise RuntimeError(f"图片生成失败: {e}") from e
+        # Some OpenAI-compatible image gateways reject the official SDK request
+        # headers/body while accepting a plain HTTP POST to /images/generations.
+        # Keep this fallback so split image_base_url providers remain usable.
+        try:
+            return await _generate_image_raw_http(
+                settings=s,
+                prompt=prompt,
+                size=size,
+                n=n,
+                quality=quality,
+            )
+        except Exception as raw_e:
+            raise RuntimeError(f"图片生成失败: {e}; raw fallback 也失败: {raw_e}") from raw_e
 
-    for item in resp.data:
-        b64 = getattr(item, "b64_json", None)
+    saved = await _save_image_items(list(resp.data), s, n)
+    if not saved:
+        raise RuntimeError("图片生成失败：上游没有返回可保存的图片数据")
+    return saved
+
+
+async def _generate_image_raw_http(
+    *,
+    settings: Settings,
+    prompt: str,
+    size: str,
+    n: int,
+    quality: str,
+    reference_images: Optional[List[str]] = None,
+) -> List[str]:
+    """OpenAI-compatible raw image generation fallback.
+
+    This intentionally avoids the SDK because a few proxy gateways are strict
+    about SDK-specific headers or request shapes while still supporting the
+    standard /images/generations JSON endpoint.
+    """
+    base_url = settings.effective_image_base_url.rstrip("/")
+    url = f"{base_url}/images/generations"
+    payload = {
+        "model": settings.image_model,
+        "prompt": prompt,
+        "size": size,
+        "n": n,
+        "quality": quality,
+    }
+    if reference_images:
+        payload["reference_images"] = reference_images
+    headers = {
+        "Authorization": f"Bearer {settings.effective_image_api_key}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=IMAGE_GENERATION_TIMEOUT_SECONDS) as hc:
+        r = await hc.post(url, headers=headers, json=payload)
+    if r.status_code >= 400:
+        detail = r.text[:1000]
+        try:
+            detail = json.dumps(r.json(), ensure_ascii=False)[:1000]
+        except Exception:
+            pass
+        raise RuntimeError(f"HTTP {r.status_code}: {detail}")
+    try:
+        data = r.json()
+    except Exception as e:
+        raise RuntimeError(f"invalid JSON from /images/generations: {r.text[:500]}") from e
+    if not isinstance(data, dict):
+        raise RuntimeError(f"unexpected JSON from /images/generations: {json.dumps(data, ensure_ascii=False)[:500]}")
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(f"/images/generations error: {json.dumps(data.get('error'), ensure_ascii=False)[:500]}")
+    saved = await _save_image_items(data.get("data") or [], settings, n)
+    if not saved:
+        raise RuntimeError(f"no image data returned by /images/generations: {json.dumps(data, ensure_ascii=False)[:500]}")
+    return saved
+
+
+async def _edit_image_url_raw_http(
+    *,
+    settings: Settings,
+    image_url: str,
+    mask_url: Optional[str],
+    prompt: str,
+    size: str,
+    n: int,
+    quality: str,
+) -> List[str]:
+    """URL-native image edit fallback for providers that can fetch image_url.
+
+    The official OpenAI SDK edit call uploads image bytes.  Some compatible
+    gateways support URL references instead.  Use that shape for public external
+    URLs to avoid unnecessary local downloads/copies.
+    """
+    base_url = settings.effective_image_base_url.rstrip("/")
+    url = f"{base_url}/images/edits"
+    headers = {
+        "Authorization": f"Bearer {settings.effective_image_api_key}",
+        "Content-Type": "application/json",
+    }
+    base_payload = {
+        "model": settings.image_model,
+        "prompt": prompt,
+        "size": size,
+        "n": n,
+        "quality": quality,
+    }
+    # Provider variants seen in OpenAI-compatible image gateways.
+    attempts: List[Dict[str, Any]] = [
+        {**base_payload, "image_url": image_url},
+        {**base_payload, "image": image_url},
+    ]
+    if mask_url:
+        attempts[0]["mask_url"] = mask_url
+        attempts[1]["mask"] = mask_url
+
+    errors: List[str] = []
+    async with httpx.AsyncClient(timeout=IMAGE_GENERATION_TIMEOUT_SECONDS) as hc:
+        for payload in attempts:
+            r = await hc.post(url, headers=headers, json=payload)
+            if r.status_code < 400:
+                try:
+                    data = r.json()
+                except Exception as e:
+                    raise RuntimeError(f"invalid JSON from /images/edits: {r.text[:500]}") from e
+                if not isinstance(data, dict):
+                    raise RuntimeError(f"unexpected JSON from /images/edits: {json.dumps(data, ensure_ascii=False)[:500]}")
+                if isinstance(data, dict) and data.get("error"):
+                    raise RuntimeError(f"/images/edits error: {json.dumps(data.get('error'), ensure_ascii=False)[:500]}")
+                saved = await _save_image_items(data.get("data") or [], settings, n)
+                if not saved:
+                    raise RuntimeError(f"no image data returned by /images/edits: {json.dumps(data, ensure_ascii=False)[:500]}")
+                return saved
+            detail = r.text[:1000]
+            try:
+                detail = json.dumps(r.json(), ensure_ascii=False)[:1000]
+            except Exception:
+                pass
+            errors.append(f"HTTP {r.status_code}: {detail}")
+    raise RuntimeError("; ".join(errors))
+
+
+async def _save_image_items(items: List[Any], settings: Settings, n: int) -> List[str]:
+    Path(settings.image_dir).mkdir(parents=True, exist_ok=True)
+    saved: List[str] = []
+
+    # Some OpenAI-compatible gateways may return more items than requested.
+    # Honor the caller's n so UI state stays predictable.
+    for item in list(items)[:n]:
+        if isinstance(item, dict):
+            b64 = item.get("b64_json")
+            url = item.get("url")
+        else:
+            b64 = getattr(item, "b64_json", None)
+            url = getattr(item, "url", None)
+
         if b64:
             data = base64.b64decode(b64)
+            ext = ".png"
+        elif url:
+            data, mime = await _fetch_remote_image_bytes(
+                url,
+                timeout=IMAGE_GENERATION_TIMEOUT_SECONDS,
+                max_bytes=REMOTE_IMAGE_MAX_BYTES,
+            )
+            ext = _extension_for_mime(mime or "", url)
         else:
-            url = getattr(item, "url", None)
-            if not url:
-                continue
-            async with httpx.AsyncClient(timeout=120) as hc:
-                r = await hc.get(url)
-                r.raise_for_status()
-                data = r.content
-        name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}.png"
-        out_path = Path(s.image_dir) / name
+            continue
+
+        name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}{ext}"
+        out_path = Path(settings.image_dir) / name
         out_path.write_bytes(data)
         saved.append(f"/static/images/{name}")
     return saved
@@ -228,13 +808,16 @@ def _resolve_local_path(url_or_path: str) -> Path:
     """Translate /static/images/foo.png (or absolute path) back to the on-disk file."""
     s = get_settings()
     base = Path(s.image_dir).resolve()
+    static_path = _local_static_path_part(url_or_path, s)
+    if static_path:
+        url_or_path = static_path
     if url_or_path.startswith("/static/images/"):
-        name = url_or_path.rsplit("/", 1)[-1]
-        return base / name
+        rel = url_or_path[len("/static/images/"):].lstrip("/")
+        candidate = (base / rel).resolve()
     p = Path(url_or_path)
-    if p.is_absolute():
+    if not url_or_path.startswith("/static/images/") and p.is_absolute():
         candidate = p.resolve()
-    else:
+    elif not url_or_path.startswith("/static/images/"):
         candidate = (base / p.name).resolve()
     if not candidate.is_relative_to(base):
         raise ValueError(f"image path outside image_dir is not allowed: {url_or_path}")
@@ -247,6 +830,7 @@ async def edit_image(
     prompt: str,
     size: str = "1024x1024",
     n: int = 1,
+    quality: str = "high",
     settings: Optional[Settings] = None,
 ) -> List[str]:
     """Image-to-image edit via OpenAI `images.edit`.
@@ -257,10 +841,40 @@ async def edit_image(
     - prompt:     what to paint in the masked region (for inpaint) or how to edit overall
     """
     s = _effective_settings(settings)
-    client = get_client(s)
+    size = _normalize_image_size(size)
+    n = _normalize_image_count(n)
+    quality = _normalize_image_quality(quality, s.image_model)
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
 
-    img_path = _resolve_local_path(image_url)
+    provider_image_url = _provider_image_url(image_url, s)
+    provider_mask_url = _provider_image_url(mask_url, s) if mask_url else None
+    external_image_url = _is_public_remote_url(image_url) and not _is_app_static_image_reference(image_url, s)
+    external_mask_url = bool(mask_url) and _is_public_remote_url(mask_url) and not _is_app_static_image_reference(mask_url, s)
+    if provider_image_url and (not mask_url or provider_mask_url):
+        try:
+            return await _edit_image_url_raw_http(
+                settings=s,
+                image_url=provider_image_url,
+                mask_url=provider_mask_url,
+                prompt=prompt,
+                size=size,
+                n=n,
+                quality=quality,
+            )
+        except Exception as e:
+            # Public external URLs should remain URL-only; local static images
+            # can safely fall back to SDK upload if the provider rejects URL
+            # edits.
+            if external_image_url or external_mask_url:
+                raise RuntimeError(f"图片编辑失败：上游未接受外部图片 URL: {e}") from e
+    if external_image_url or external_mask_url:
+        raise RuntimeError(
+            "图片编辑失败：公开外部 URL 默认不下载到本地；当前图片/mask 混合了外部 URL 与本地文件，"
+            "上游接口无法一次性读取。请使用全部外部可访问 URL，或先上传/保存为本地图后再编辑。"
+        )
+
+    client = get_client(s, kind="image")
+    img_path = await _ensure_local_image_path(image_url, s, suffix="ref")
     if not img_path.exists():
         raise FileNotFoundError(f"image not found: {image_url}")
 
@@ -269,14 +883,15 @@ async def edit_image(
         "prompt": prompt,
         "size": size,
         "n": n,
+        "quality": quality,
     }
 
     img_bytes = img_path.read_bytes()
-    files_image = (img_path.name, img_bytes, "image/png")
+    files_image = (img_path.name, img_bytes, _mime_for_path(img_path))
 
     mask_bytes: Optional[bytes] = None
     if mask_url:
-        mask_path = _resolve_local_path(mask_url)
+        mask_path = await _ensure_local_image_path(mask_url, s, suffix="mask")
         if not mask_path.exists():
             raise FileNotFoundError(f"mask not found: {mask_url}")
         mask_bytes = mask_path.read_bytes()
@@ -285,7 +900,7 @@ async def edit_image(
         if mask_bytes is not None:
             resp = await client.images.edit(
                 image=files_image,
-                mask=(Path(mask_url).name, mask_bytes, "image/png"),
+                mask=(mask_path.name, mask_bytes, _mime_for_path(mask_path)),
                 **kwargs,
             )
         else:
@@ -296,22 +911,9 @@ async def edit_image(
     except Exception as e:
         raise RuntimeError(f"图片编辑失败: {e}") from e
 
-    saved: List[str] = []
-    for item in resp.data:
-        b64 = getattr(item, "b64_json", None)
-        if b64:
-            data = base64.b64decode(b64)
-        else:
-            url = getattr(item, "url", None)
-            if not url:
-                continue
-            async with httpx.AsyncClient(timeout=120) as hc:
-                r = await hc.get(url)
-                r.raise_for_status()
-                data = r.content
-        name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}.png"
-        (Path(s.image_dir) / name).write_bytes(data)
-        saved.append(f"/static/images/{name}")
+    saved = await _save_image_items(list(resp.data), s, n)
+    if not saved:
+        raise RuntimeError("图片编辑失败：上游没有返回可保存的图片数据")
     return saved
 
 

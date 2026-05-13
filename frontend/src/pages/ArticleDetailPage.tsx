@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Box,
   Button,
+  Checkbox,
   Chip,
   Dialog,
   Divider,
@@ -26,16 +27,17 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import MenuIcon from '@mui/icons-material/Menu'
 import AddIcon from '@mui/icons-material/Add'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
-import ReactECharts from 'echarts-for-react'
 import {
   getArticle,
   updateArticle,
   listConversations,
   deleteConversation,
+  deleteConversations,
   listVersions,
   rollbackVersion,
   checkBannedWords,
   extractTemplate,
+  arrangeArticleImages,
   type Article,
   type ArticleVersion,
   type BannedWordHit,
@@ -57,6 +59,14 @@ function ImageFrame({
   onRemove,
   onOpen,
   label,
+  draggable,
+  dragging,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onSetCover,
+  onMovePrev,
+  onMoveNext,
 }: {
   src?: string
   aspect: string
@@ -65,6 +75,14 @@ function ImageFrame({
   onRemove?: () => void
   onOpen?: () => void
   label?: string
+  draggable?: boolean
+  dragging?: boolean
+  onDragStart?: (e: DragEvent<HTMLDivElement>) => void
+  onDragOver?: (e: DragEvent<HTMLDivElement>) => void
+  onDrop?: (e: DragEvent<HTMLDivElement>) => void
+  onSetCover?: () => void
+  onMovePrev?: () => void
+  onMoveNext?: () => void
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   return (
@@ -75,10 +93,17 @@ function ImageFrame({
         aspectRatio: aspect,
         borderRadius: 2,
         overflow: 'hidden',
-        border: '1px solid', borderColor: 'divider',
+        border: '1px solid',
+        borderColor: dragging ? '#FF2741' : 'divider',
         bgcolor: 'background.default',
+        opacity: dragging ? 0.55 : 1,
+        cursor: draggable ? 'grab' : 'default',
         '&:hover .img-toolbar': { opacity: 1 },
       }}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
     >
       {src ? (
         <Box
@@ -185,6 +210,21 @@ function ImageFrame({
             编辑图片
           </MenuItem>
         )}
+        {onSetCover && src && (
+          <MenuItem onClick={() => { onSetCover(); setAnchor(null) }}>
+            设为首图/封面
+          </MenuItem>
+        )}
+        {onMovePrev && src && (
+          <MenuItem onClick={() => { onMovePrev(); setAnchor(null) }}>
+            前移一位
+          </MenuItem>
+        )}
+        {onMoveNext && src && (
+          <MenuItem onClick={() => { onMoveNext(); setAnchor(null) }}>
+            后移一位
+          </MenuItem>
+        )}
         {onRemove && src && (
           <MenuItem onClick={() => { onRemove(); setAnchor(null) }} sx={{ color: '#D61030' }}>
             <DeleteOutlineIcon fontSize="small" sx={{ mr: 1 }} />
@@ -194,6 +234,61 @@ function ImageFrame({
       </Menu>
     </Box>
   )
+}
+
+function ScoreRadar({ score }: { score: Record<string, any> }) {
+  const metrics = [
+    ['content', '内容'],
+    ['visual', '视觉'],
+    ['growth', '增长'],
+    ['engagement', '互动'],
+    ['overall', '综合'],
+  ] as const
+  const cx = 120
+  const cy = 110
+  const r = 78
+  const n = metrics.length
+
+  const point = (i: number, value = 1) => {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2
+    return [cx + r * value * Math.cos(angle), cy + r * value * Math.sin(angle)]
+  }
+  const polygon = (pts: number[][]) => pts.map(p => p.join(',')).join(' ')
+  const values = metrics.map(([key]) => Math.max(0, Math.min(100, Number(score?.[key] ?? 0))) / 100)
+  const dataPoints = values.map((v, i) => point(i, v))
+
+  return (
+    <Box sx={{ height: 220, display: 'grid', placeItems: 'center' }}>
+      <svg width="260" height="220" viewBox="0 0 260 220">
+        {[0.25, 0.5, 0.75, 1].map(scale => (
+          <polygon key={scale} points={polygon(metrics.map((_, i) => point(i, scale)))} fill="none" stroke="#EEE9E1" strokeWidth="1" />
+        ))}
+        {metrics.map((_, i) => {
+          const p = point(i)
+          return <line key={i} x1={cx} y1={cy} x2={p[0]} y2={p[1]} stroke="#EEE9E1" strokeWidth="1" />
+        })}
+        <polygon points={polygon(dataPoints)} fill="rgba(255,39,65,0.13)" stroke="#FF2741" strokeWidth="2.2" />
+        {dataPoints.map((p, i) => (
+          <circle key={i} cx={p[0]} cy={p[1]} r="3.5" fill="#FF2741" />
+        ))}
+        {metrics.map(([, label], i) => {
+          const p = point(i, 1.18)
+          return (
+            <text key={label} x={p[0]} y={p[1]} textAnchor="middle" dominantBaseline="middle" fontSize="12" fill="#8C8C8C" fontWeight="600">
+              {label}
+            </text>
+          )
+        })}
+      </svg>
+    </Box>
+  )
+}
+
+function formatBytes(bytes?: number) {
+  if (!bytes || bytes <= 0) return ''
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`
 }
 
 export default function ArticleDetailPage() {
@@ -224,12 +319,22 @@ export default function ArticleDetailPage() {
   const bannedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(id ? Number(id) : null)
   const [deleteConvoId, setDeleteConvoId] = useState<number | null>(null)
+  const [selectedConvoIds, setSelectedConvoIds] = useState<number[]>([])
+  const [batchDeleteIds, setBatchDeleteIds] = useState<number[] | null>(null)
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
+  const [dragImagePos, setDragImagePos] = useState<number | null>(null)
+  const selectedCount = selectedConvoIds.length
+  const allSelected = convos.length > 0 && selectedCount === convos.length
 
   const refreshConvos = useCallback(() => {
     listConversations().then(all => {
-      setConvos(all.filter(c => c.article_id === Number(id)))
-    }).catch(() => setConvos([]))
+      const scoped = all.filter(c => c.article_id === Number(id))
+      setConvos(scoped)
+      setSelectedConvoIds(prev => prev.filter(cid => scoped.some(c => c.id === cid)))
+    }).catch(() => {
+      setConvos([])
+      setSelectedConvoIds([])
+    })
   }, [id])
 
   const newChat = () => {
@@ -251,6 +356,27 @@ export default function ArticleDetailPage() {
     if (convId === String(deleteConvoId)) newChat()
     refreshConvos()
     setDeleteConvoId(null)
+    setSelectedConvoIds(prev => prev.filter(id => id !== deleteConvoId))
+  }
+
+  const toggleConvoSelection = (cid: number) => {
+    setSelectedConvoIds(prev => (
+      prev.includes(cid) ? prev.filter(x => x !== cid) : [...prev, cid]
+    ))
+  }
+
+  const toggleSelectAllConvos = () => {
+    setSelectedConvoIds(allSelected ? [] : convos.map(c => c.id))
+  }
+
+  const confirmBatchRemoveConvos = async () => {
+    const ids = batchDeleteIds || []
+    if (!ids.length) return
+    await deleteConversations(ids)
+    if (convId && ids.includes(Number(convId))) newChat()
+    setSelectedConvoIds([])
+    setBatchDeleteIds(null)
+    refreshConvos()
   }
 
   const refreshVersions = useCallback(() => {
@@ -351,46 +477,50 @@ export default function ArticleDetailPage() {
     return () => window.removeEventListener('beforeunload', handler)
   }, [isDirty])
 
-  const scoreOption = useMemo(() => {
-    const s = art?.score || {}
-    return {
-      radar: {
-        indicator: [
-          { name: '内容', max: 100 },
-          { name: '视觉', max: 100 },
-          { name: '增长', max: 100 },
-          { name: '互动', max: 100 },
-          { name: '综合', max: 100 },
-        ],
-        radius: '62%',
-        axisName: { color: 'text.secondary', fontSize: 12 },
-        splitLine: { lineStyle: { color: '#EEE9E1' } },
-        splitArea: { areaStyle: { color: ['#fafafa', '#ffffff'] } },
-      },
-      series: [
-        {
-          type: 'radar',
-          areaStyle: { color: 'rgba(255,39,65,0.12)' },
-          lineStyle: { color: '#FF2741', width: 2 },
-          symbol: 'circle',
-          data: [
-            {
-              value: [
-                s.content ?? 0,
-                s.visual ?? 0,
-                s.growth ?? 0,
-                s.engagement ?? 0,
-                s.overall ?? 0,
-              ],
-              name: '评分',
-            },
-          ],
-        },
-      ],
-    }
-  }, [art?.score])
-
   if (!art) return null
+
+  const visualImages = [art.cover_image, ...(art.images || [])].filter(Boolean) as string[]
+  const imageBindingForPosition = (pos: number) => (
+    pos === 0
+      ? { article_id: art.id, role: 'cover' as const }
+      : { article_id: art.id, role: 'content' as const, replace_index: pos - 1 }
+  )
+
+  const applyImageOrder = async (queue: string[], message = '图片顺序已更新') => {
+    const r = await arrangeArticleImages({ article_id: art.id, action: 'set_order', order: queue })
+    if (!r.ok || !r.article) throw new Error(r.error || '图片顺序更新失败')
+    setArt(r.article)
+    setSavedArt(r.article)
+    toast.success(message)
+  }
+
+  const moveImagePosition = async (from: number, to: number) => {
+    if (from === to || from < 0 || from >= visualImages.length) return
+    const next = [...visualImages]
+    const [item] = next.splice(from, 1)
+    const safeTo = Math.max(0, Math.min(next.length, to))
+    next.splice(safeTo, 0, item)
+    await applyImageOrder(next, safeTo === 0 ? '已设为首图/封面' : '图片顺序已更新')
+  }
+
+  const removeImagePosition = async (pos: number) => {
+    const r = await arrangeArticleImages({ article_id: art.id, action: 'remove', position: pos })
+    if (!r.ok || !r.article) throw new Error(r.error || '删除失败')
+    setArt(r.article)
+    setSavedArt(r.article)
+    toast.success('已删除图片')
+  }
+
+  const handleImageDrop = async (targetPos: number) => {
+    const from = dragImagePos
+    setDragImagePos(null)
+    if (from === null || from === targetPos) return
+    try {
+      await moveImagePosition(from, targetPos)
+    } catch (e: any) {
+      toast.error(e?.message || '排序失败')
+    }
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -589,70 +719,128 @@ export default function ArticleDetailPage() {
               </Box>
             )}
 
-            {/* images area */}
+            {/* images queue */}
             <Box sx={{ mt: 0.5 }}>
-              <Stack
-                direction={{ xs: 'column', sm: 'row' }}
-                spacing={2}
-                alignItems="flex-start"
-              >
-                {/* cover */}
-                <Box sx={{ width: { xs: '100%', sm: 200 } }}>
-                  <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.8, fontWeight: 600 }}>
-                    封面（2:3）
-                  </Typography>
-                  <ImageFrame
-                    src={art.cover_image || undefined}
-                    aspect="2 / 3"
-                    placeholder="暂无封面"
-                    label={art.cover_image ? '封面' : undefined}
-                    onOpen={art.cover_image ? () => setImageLightbox(art.cover_image) : undefined}
-                    onEdit={
-                      art.cover_image
-                        ? () => {
-                            setEditorSrc(art.cover_image)
-                            setEditorBinding({ article_id: art.id, role: 'cover' })
-                            setEditorDefaultMode('inpaint')
-                          }
-                        : undefined
-                    }
-                  />
-                </Box>
+              <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" sx={{ gap: 0.8, mb: 1 }}>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary', fontWeight: 700 }}>
+                  图片队列（第 1 张 = 首图/封面）
+                </Typography>
+                <Chip size="small" label={`共 ${visualImages.length} 张`} sx={{ height: 20, fontSize: 11 }} />
+                <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
+                  可拖拽调换顺序，也可在菜单中设为首图、前移、后移或删除。
+                </Typography>
+              </Stack>
 
-                {/* content images grid */}
-                <Box sx={{ flex: 1, width: '100%' }}>
-                  <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.8, fontWeight: 600 }}>
-                    内容配图（1:1）
-                  </Typography>
-                  <Box
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-                      gap: 1,
-                    }}
-                  >
-                    {(art.images || []).map((u, i) => (
+              {visualImages.length > 0 ? (
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))',
+                    gap: 1,
+                  }}
+                >
+                  {visualImages.map((u, pos) => {
+                    const binding = imageBindingForPosition(pos)
+                    return (
                       <ImageFrame
-                        key={i}
+                        key={`${pos}-${u}`}
                         src={u}
-                        aspect="1 / 1"
+                        aspect="3 / 4"
                         placeholder=""
-                        label={`#${i + 1}`}
+                        label={pos === 0 ? '首图/封面' : `第 ${pos + 1} 张`}
+                        draggable
+                        dragging={dragImagePos === pos}
+                        onDragStart={e => {
+                          setDragImagePos(pos)
+                          e.dataTransfer.effectAllowed = 'move'
+                          e.dataTransfer.setData('text/plain', String(pos))
+                        }}
+                        onDragOver={e => {
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'move'
+                        }}
+                        onDrop={e => {
+                          e.preventDefault()
+                          handleImageDrop(pos)
+                        }}
                         onOpen={() => setImageLightbox(u)}
                         onEdit={() => {
                           setEditorSrc(u)
-                          setEditorBinding({
-                            article_id: art.id,
-                            role: 'content',
-                            replace_index: i,
-                          })
+                          setEditorBinding(binding)
                           setEditorDefaultMode('inpaint')
                         }}
+                        onSetCover={pos > 0 ? () => moveImagePosition(pos, 0).catch(e => toast.error(e?.message || '设置失败')) : undefined}
+                        onMovePrev={pos > 0 ? () => moveImagePosition(pos, pos - 1).catch(e => toast.error(e?.message || '移动失败')) : undefined}
+                        onMoveNext={pos < visualImages.length - 1 ? () => moveImagePosition(pos, pos + 1).catch(e => toast.error(e?.message || '移动失败')) : undefined}
+                        onRemove={() => removeImagePosition(pos).catch(e => toast.error(e?.message || '删除失败'))}
                       />
-                    ))}
-                  </Box>
+                    )
+                  })}
                 </Box>
-              </Stack>
+              ) : (
+                <Box
+                  sx={{
+                    minHeight: 150,
+                    border: '1px dashed',
+                    borderColor: 'divider',
+                    borderRadius: 2,
+                    display: 'grid',
+                    placeItems: 'center',
+                    color: 'text.secondary',
+                    fontSize: 12,
+                    bgcolor: 'background.default',
+                  }}
+                >
+                  暂无图片。可以让 Agent 生成封面或内容配图，第一张会自动作为首图/封面。
+                </Box>
+              )}
+
+              {art.image_context && (
+                <Box
+                  sx={{
+                    mt: 1.5,
+                    p: 1.5,
+                    borderRadius: 2,
+                    bgcolor: 'rgba(255,36,66,0.035)',
+                    border: '1px solid rgba(255,36,66,0.10)',
+                  }}
+                >
+                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ gap: 0.8, mb: 0.8 }}>
+                    <Typography sx={{ fontSize: 12, fontWeight: 700, color: 'text.secondary' }}>
+                      图片上下文
+                    </Typography>
+                    <Chip size="small" label={`总图 ${art.image_context.image_count}`} sx={{ height: 20, fontSize: 11 }} />
+                    <Chip size="small" label={`首图 ${art.image_context.has_cover ? '已设置' : '无'}`} sx={{ height: 20, fontSize: 11 }} />
+                    <Chip size="small" label={`后续图 ${art.image_context.content_image_count}`} sx={{ height: 20, fontSize: 11 }} />
+                  </Stack>
+                  {art.image_context.all_images.length > 0 ? (
+                    <Stack spacing={0.45}>
+                      {art.image_context.all_images.slice(0, 8).map((img, i) => {
+                        const meta = [
+                          img.width && img.height ? `${img.width}×${img.height}` : '',
+                          img.format || '',
+                          formatBytes(img.bytes),
+                          img.exists === false ? '文件未找到' : '',
+                        ].filter(Boolean).join(' · ')
+                        return (
+                          <Typography key={`${img.role}-${img.index ?? i}-${img.url}`} sx={{ fontSize: 11.5, color: img.exists === false ? '#B91C1C' : 'text.secondary' }} noWrap>
+                            {img.role === 'cover' ? '首图/封面' : `第 ${(img.index ?? 0) + 2} 张`}：{meta ? `${meta} · ` : ''}{img.url}
+                          </Typography>
+                        )
+                      })}
+                      {art.image_context.all_images.length > 8 && (
+                        <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
+                          还有 {art.image_context.all_images.length - 8} 张未展开
+                        </Typography>
+                      )}
+                    </Stack>
+                  ) : (
+                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
+                      当前笔记还没有图片；Agent 打分会在视觉维度扣分，并可继续生成首图/内容配图。
+                    </Typography>
+                  )}
+                </Box>
+              )}
             </Box>
 
             {/* score radar */}
@@ -668,7 +856,7 @@ export default function ArticleDetailPage() {
                     sx={{ bgcolor: '#E6F7EC', color: '#0F8C3D', fontSize: 11, height: 20 }}
                   />
                 </Stack>
-                <ReactECharts option={scoreOption} style={{ height: 220 }} />
+                <ScoreRadar score={art.score || {}} />
                 {art.score?.advice && (
                   <Stack spacing={0.5} sx={{ mt: 0.5 }}>
                     {(art.score.advice as string[]).slice(0, 3).map((x, i) => (
@@ -722,7 +910,7 @@ export default function ArticleDetailPage() {
       {/* right: phone preview */}
       <Box
         sx={{
-          width: 400,
+          width: 370,
           flexShrink: 0,
           borderLeft: 1,
           borderColor: 'divider',
@@ -776,7 +964,7 @@ export default function ArticleDetailPage() {
 
       {/* History drawer */}
       <Drawer open={sidebar} onClose={() => setSidebar(false)}>
-        <Box sx={{ width: 300, bgcolor: 'background.paper' }}>
+        <Box sx={{ width: 340, bgcolor: 'background.paper' }}>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
             <Typography variant="subtitle1" fontWeight={700}>
               笔记对话记录
@@ -790,6 +978,27 @@ export default function ArticleDetailPage() {
               新建
             </Button>
           </Stack>
+          {convos.length > 0 && (
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 2, pb: 1.5 }}>
+              <Button size="small" onClick={toggleSelectAllConvos}>
+                {allSelected ? '取消全选' : '全选'}
+              </Button>
+              <Typography sx={{ flex: 1, fontSize: 12, color: 'text.secondary' }}>
+                {selectedCount > 0 ? `已选 ${selectedCount} 条` : '可勾选多条后批量删除'}
+              </Typography>
+              {selectedCount > 0 && (
+                <Button
+                  size="small"
+                  color="error"
+                  startIcon={<DeleteOutlineIcon sx={{ fontSize: 14 }} />}
+                  onClick={() => setBatchDeleteIds(selectedConvoIds)}
+                  sx={{ fontSize: 12 }}
+                >
+                  批量删除
+                </Button>
+              )}
+            </Stack>
+          )}
           <Divider />
           <List dense>
             {convos.map(c => (
@@ -797,6 +1006,10 @@ export default function ArticleDetailPage() {
                 key={c.id}
                 selected={convId === String(c.id)}
                 onClick={() => {
+                  if (selectedCount > 0) {
+                    toggleConvoSelection(c.id)
+                    return
+                  }
                   setParams(prev => {
                     const next = new URLSearchParams(prev)
                     next.set('c', String(c.id))
@@ -805,6 +1018,13 @@ export default function ArticleDetailPage() {
                   setSidebar(false)
                 }}
               >
+                <Checkbox
+                  size="small"
+                  checked={selectedConvoIds.includes(c.id)}
+                  onClick={e => e.stopPropagation()}
+                  onChange={() => toggleConvoSelection(c.id)}
+                  sx={{ mr: 0.5, p: 0.5 }}
+                />
                 <ListItemText
                   primary={c.title || '新对话'}
                   secondary={new Date(c.updated_at).toLocaleString()}
@@ -886,6 +1106,16 @@ export default function ArticleDetailPage() {
         danger
         onConfirm={confirmRemoveConvo}
         onCancel={() => setDeleteConvoId(null)}
+      />
+
+      <ConfirmDialog
+        open={!!batchDeleteIds?.length}
+        title="确认批量删除"
+        message={`删除后无法恢复，确定要删除选中的 ${batchDeleteIds?.length || 0} 条对话吗？`}
+        confirmLabel="批量删除"
+        danger
+        onConfirm={confirmBatchRemoveConvos}
+        onCancel={() => setBatchDeleteIds(null)}
       />
 
       <ConfirmDialog

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+import time
+import uuid
+from typing import Any, Dict, List, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -11,12 +14,13 @@ from sqlalchemy import or_, select
 
 from ..agents.background import cancel_task, get_stream, is_running, spawn_agent_task
 from ..agents.runner import run_agent_stream
-from ..agents.tools import TOOLS, call_tool_for_user, openai_tool_schemas
+from ..agents.tools import TOOLS, _article_payload, _image_retry_options, call_tool_for_user, openai_tool_schemas
 from ..auth import get_current_user, require_admin
 from ..config import get_settings, update_settings
-from ..database import Article, ArticleVersion, Conversation, SessionLocal, Task, Template, User
+from ..database import Article, ArticleVersion, Conversation, SessionLocal, Task, Template, User, UserMemory
 from ..schemas import (
     ApplyTemplateRequest,
+    ArticleImageArrangeRequest,
     ArticleIn,
     ArticleUpdate,
     ChatRequest,
@@ -46,6 +50,15 @@ from ..services.llm import generate_image
 
 router = APIRouter()
 
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_IMAGE_PIXELS = 25_000_000
+IMAGE_FORMAT_TO_EXT = {
+    "PNG": ".png",
+    "JPEG": ".jpg",
+    "WEBP": ".webp",
+    "GIF": ".gif",
+}
+
 
 async def _call_user_tool(name: str, arguments: Dict[str, Any], user: User) -> Dict[str, Any]:
     """Call a registered tool with the authenticated user's context/settings."""
@@ -53,6 +66,57 @@ async def _call_user_tool(name: str, arguments: Dict[str, Any], user: User) -> D
         return await call_tool_for_user(name, arguments, user.id)
     except Exception as e:
         return {"ok": False, "error": str(e), "tool": name}
+
+
+async def _read_upload_limited(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise HTTPException(413, f"文件过大，最大 {max_bytes // 1024 // 1024}MB")
+    if not content:
+        raise HTTPException(400, "文件为空")
+    return content
+
+
+def _inspect_image(
+    content: bytes,
+    *,
+    allowed_formats: set[str],
+    require_png: bool = False,
+) -> Tuple[str, str, int, int]:
+    """Validate actual image bytes instead of trusting filename/content-type."""
+    from PIL import Image, UnidentifiedImageError
+
+    Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+    try:
+        with Image.open(io.BytesIO(content)) as im:
+            fmt = (im.format or "").upper()
+            width, height = im.size
+            # verify() detects truncated/spoofed payloads without decoding full image.
+            im.verify()
+    except UnidentifiedImageError:
+        raise HTTPException(400, "无法识别图片文件")
+    except Exception as e:
+        raise HTTPException(400, f"图片文件无效: {e}")
+
+    if require_png and fmt != "PNG":
+        raise HTTPException(400, "mask 必须是真实 PNG 文件")
+    if fmt not in allowed_formats or fmt not in IMAGE_FORMAT_TO_EXT:
+        raise HTTPException(400, f"不支持的图片格式: {fmt or 'unknown'}")
+    if width <= 0 or height <= 0:
+        raise HTTPException(400, "图片尺寸无效")
+    if width * height > MAX_IMAGE_PIXELS:
+        raise HTTPException(413, "图片分辨率过大")
+    return fmt, IMAGE_FORMAT_TO_EXT[fmt], width, height
+
+
+def _save_user_upload(content: bytes, user_id: int, ext: str, suffix: str = "") -> str:
+    settings = get_settings()
+    user_dir = Path(settings.image_dir) / f"user_{user_id}"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    safe_suffix = f"_{suffix}" if suffix else ""
+    name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}{safe_suffix}{ext}"
+    (user_dir / name).write_bytes(content)
+    return f"/static/images/user_{user_id}/{name}"
 
 
 # ---------- chat ----------
@@ -71,7 +135,10 @@ async def chat_stream(req: ChatRequest, user: User = Depends(get_current_user)):
             {"role": m.role, "content": m.content, "images": m.images}
         )
 
-    task_id = await spawn_agent_task(messages, conversation_id=req.conversation_id, user_id=user.id)
+    try:
+        task_id = await spawn_agent_task(messages, conversation_id=req.conversation_id, user_id=user.id)
+    except RuntimeError as e:
+        raise HTTPException(429, str(e))
 
     async def event_gen():
         stream = get_stream(task_id)
@@ -113,7 +180,7 @@ async def get_article(aid: int, user: User = Depends(get_current_user)):
         a = await s.get(Article, aid)
         if not a or a.user_id != user.id:
             raise HTTPException(404, "not found")
-        return a.to_dict()
+        return _article_payload(a)
 
 
 @router.post("/articles")
@@ -131,7 +198,7 @@ async def create_article(payload: ArticleIn, user: User = Depends(get_current_us
         s.add(a)
         await s.commit()
         await s.refresh(a)
-        return a.to_dict()
+        return _article_payload(a)
 
 
 @router.patch("/articles/{aid}")
@@ -148,7 +215,7 @@ async def update_article(aid: int, payload: ArticleUpdate, user: User = Depends(
             setattr(a, k, v)
         await s.commit()
         await s.refresh(a)
-        return a.to_dict()
+        return _article_payload(a)
 
 
 @router.delete("/articles/{aid}")
@@ -224,6 +291,11 @@ async def api_remove_image(payload: RemoveImageRequest, user: User = Depends(get
     return await _call_user_tool("remove_image", payload.model_dump(), user)
 
 
+@router.post("/articles/arrange_images")
+async def api_arrange_images(payload: ArticleImageArrangeRequest, user: User = Depends(get_current_user)):
+    return await _call_user_tool("arrange_article_images", payload.model_dump(), user)
+
+
 # ---------- image editing ----------
 
 @router.post("/images/crop")
@@ -249,51 +321,57 @@ async def api_edit_image(payload: EditImageRequest, user: User = Depends(get_cur
 @router.post("/images/upload_mask")
 async def upload_mask(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     """Upload a PNG mask (transparent where the user wants to edit)."""
-    import time, uuid
-    settings = get_settings()
-    Path(settings.image_dir).mkdir(parents=True, exist_ok=True)
-    ext = Path(file.filename or "").suffix.lower() or ".png"
-    if ext != ".png":
-        raise HTTPException(400, "mask 必须是 PNG")
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(413, "文件过大，最大 10MB")
-    name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}_mask.png"
-    (Path(settings.image_dir) / name).write_bytes(content)
-    return {"url": f"/static/images/{name}"}
+    content = await _read_upload_limited(file)
+    _fmt, ext, width, height = _inspect_image(
+        content,
+        allowed_formats={"PNG"},
+        require_png=True,
+    )
+    url = _save_user_upload(content, user.id, ext, suffix="mask")
+    return {"url": url, "width": width, "height": height}
 
 
 @router.post("/images/generate")
 async def api_image(payload: ImageGenRequest, user: User = Depends(get_current_user)):
     from ..config import get_effective_settings
     effective = await get_effective_settings(user.id)
-    urls = await generate_image(
-        prompt=payload.prompt,
-        size=payload.size,
-        n=payload.n,
-        reference_images=payload.reference_images,
-        settings=effective,
-    )
-    return {"images": urls}
+    start = time.perf_counter()
+    try:
+        urls = await generate_image(
+            prompt=payload.prompt,
+            size=payload.size,
+            quality=payload.quality,
+            n=payload.n,
+            reference_images=payload.reference_images,
+            settings=effective,
+        )
+        elapsed = int((time.perf_counter() - start) * 1000)
+        return {"ok": True, "images": urls, "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
+    except Exception as e:
+        elapsed = int((time.perf_counter() - start) * 1000)
+        raw = str(e) or type(e).__name__
+        timeout = any(x in raw.lower() for x in ("timeout", "timed out", "readtimeout", "524"))
+        return {
+            "ok": False,
+            "images": [],
+            "error": f"图片生成失败：{raw[:1000]}",
+            "raw_error": raw[:1000],
+            "timeout": timeout,
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+            "retry_options": _image_retry_options(payload.prompt, payload.size, payload.quality, payload.n),
+        }
 
 
 @router.post("/upload")
 async def upload_image(file: UploadFile = File(...), user: User = Depends(get_current_user)):
-    import time, uuid
-    ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-    MAX_SIZE = 10 * 1024 * 1024
-    settings = get_settings()
-    Path(settings.image_dir).mkdir(parents=True, exist_ok=True)
-    ext = Path(file.filename or "").suffix.lower() or ".png"
-    if ext not in ALLOWED_EXT:
-        raise HTTPException(400, f"不支持的文件类型: {ext}")
-    content = await file.read()
-    if len(content) > MAX_SIZE:
-        raise HTTPException(413, "文件过大，最大 10MB")
-    name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}{ext}"
-    path = Path(settings.image_dir) / name
-    path.write_bytes(content)
-    return {"url": f"/static/images/{name}"}
+    content = await _read_upload_limited(file)
+    _fmt, ext, width, height = _inspect_image(
+        content,
+        allowed_formats=set(IMAGE_FORMAT_TO_EXT),
+    )
+    url = _save_user_upload(content, user.id, ext)
+    return {"url": url, "width": width, "height": height}
 
 
 # ---------- templates ----------
@@ -403,6 +481,40 @@ async def list_conversations(user: User = Depends(get_current_user)):
             .limit(100)
         )
         return {"items": [c.to_dict() for c in res.scalars().all()]}
+
+
+@router.post("/conversations/batch_delete")
+async def batch_delete_conversations(payload: Dict[str, Any], user: User = Depends(get_current_user)):
+    raw_ids = payload.get("ids") or payload.get("conversation_ids") or []
+    if not isinstance(raw_ids, list):
+        raise HTTPException(400, "ids must be a list")
+
+    ids: List[int] = []
+    for raw in raw_ids:
+        try:
+            cid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if cid > 0 and cid not in ids:
+            ids.append(cid)
+
+    if not ids:
+        raise HTTPException(400, "ids is required")
+    if len(ids) > 100:
+        raise HTTPException(400, "一次最多删除 100 条对话")
+
+    async with SessionLocal() as s:
+        res = await s.execute(
+            select(Conversation).where(
+                Conversation.user_id == user.id,
+                Conversation.id.in_(ids),
+            )
+        )
+        conversations = res.scalars().all()
+        for c in conversations:
+            await s.delete(c)
+        await s.commit()
+        return {"ok": True, "deleted": len(conversations), "requested": len(ids)}
 
 
 @router.get("/conversations/{cid}")
@@ -528,10 +640,41 @@ async def rollback_version(aid: int, vid: int, user: User = Depends(get_current_
         a.images = v.images or []
         await s.commit()
         await s.refresh(a)
-        return a.to_dict()
+        return _article_payload(a)
 
 
 # ---------- tasks ----------
+
+@router.get("/tasks")
+async def list_tasks(limit: int = 50, user: User = Depends(get_current_user)):
+    safe_limit = max(1, min(200, int(limit or 50)))
+    async with SessionLocal() as s:
+        q = (
+            select(Task)
+            .where(Task.user_id == user.id)
+            .order_by(Task.updated_at.desc())
+            .limit(safe_limit)
+        )
+        res = await s.execute(q)
+        items = []
+        for t in res.scalars().all():
+            trace = t.trace or {}
+            events = t.events or []
+            items.append(
+                {
+                    "id": t.id,
+                    "conversation_id": t.conversation_id,
+                    "status": t.status,
+                    "trace_id": t.trace_id or "",
+                    "trace": trace,
+                    "event_count": len(events),
+                    "result_preview": (t.result_text or "")[:240],
+                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                    "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+                }
+            )
+        return {"items": items}
+
 
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str, user: User = Depends(get_current_user)):
@@ -555,8 +698,13 @@ async def stream_task(task_id: str, from_index: int = 0, user: User = Depends(ge
             async with SessionLocal() as s:
                 t = await s.get(Task, task_id)
             if t and t.status != "running":
-                ev_type = "cancelled" if t.status == "cancelled" else "done"
-                yield f"data: {json.dumps({'type': ev_type, 'text': t.result_text or ''}, ensure_ascii=False)}\n\n"
+                if t.status == "completed":
+                    yield f"data: {json.dumps({'type': 'done', 'text': t.result_text or ''}, ensure_ascii=False)}\n\n"
+                elif t.status == "cancelled":
+                    yield f"data: {json.dumps({'type': 'cancelled', 'text': t.result_text or ''}, ensure_ascii=False)}\n\n"
+                else:
+                    msg = "任务已中断，请重新发起" if t.status == "stale" else (t.result_text or f"task {t.status}")
+                    yield f"data: {json.dumps({'type':'error','message': msg}, ensure_ascii=False)}\n\n"
             else:
                 yield f"data: {json.dumps({'type':'error','message':'task not found or already finished'}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
@@ -587,6 +735,33 @@ async def cancel_running_task(task_id: str, user: User = Depends(get_current_use
     return {"ok": True}
 
 
+# ---------- user memory ----------
+
+@router.get("/memory")
+async def get_user_memory(user: User = Depends(get_current_user)):
+    async with SessionLocal() as s:
+        res = await s.execute(select(UserMemory).where(UserMemory.user_id == user.id))
+        mem = res.scalars().first()
+        return mem.to_dict() if mem else {
+            "user_id": user.id,
+            "summary": "",
+            "profile": {},
+            "recent_briefs": [],
+            "updated_at": None,
+        }
+
+
+@router.delete("/memory")
+async def clear_user_memory(user: User = Depends(get_current_user)):
+    async with SessionLocal() as s:
+        res = await s.execute(select(UserMemory).where(UserMemory.user_id == user.id))
+        mem = res.scalars().first()
+        if mem:
+            await s.delete(mem)
+            await s.commit()
+    return {"ok": True}
+
+
 # ---------- settings ----------
 
 @router.get("/settings")
@@ -613,7 +788,16 @@ async def test_settings(user: User = Depends(get_current_user)):
             settings=effective,
         )
         content = r.choices[0].message.content or ""
-        return {"ok": True, "reply": content[:80]}
+        return {
+            "ok": True,
+            "reply": content[:80],
+            "chat_base_url": effective.effective_chat_base_url,
+            "chat_model": effective.chat_model,
+            "image_base_url": effective.effective_image_base_url,
+            "image_model": effective.image_model,
+            "image_key_set": bool(effective.effective_image_api_key),
+            "public_base_url": effective.public_base_url.rstrip("/"),
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -654,7 +838,12 @@ async def meta(user: User = Depends(get_current_user)):
     return {
         "chat_model": s.chat_model,
         "image_model": s.image_model,
-        "base_url": s.openai_base_url,
+        # Backward-compatible alias.
+        "base_url": s.effective_chat_base_url,
+        "chat_base_url": s.effective_chat_base_url,
+        "image_base_url": s.effective_image_base_url,
+        "chat_key_set": bool(s.effective_chat_api_key),
+        "image_key_set": bool(s.effective_image_api_key),
     }
 
 

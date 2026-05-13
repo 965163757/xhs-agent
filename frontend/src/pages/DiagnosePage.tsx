@@ -139,40 +139,55 @@ export default function DiagnosePage() {
   const [expandDebate, setExpandDebate] = useState(false)
   const [expandAgents, setExpandAgents] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const runSeqRef = useRef(0)
 
   const startDiagnosis = useCallback(async () => {
+    abortRef.current?.abort()
+    const runSeq = ++runSeqRef.current
     setLoading(true)
     setError('')
     setReport(null)
     setActiveStep(0)
+    setProgressMsg('准备中...')
 
     const ctrl = new AbortController()
     abortRef.current = ctrl
+    let terminalEventReceived = false
 
     try {
       await diagnoseStream(
         { article_id: Number(id) },
         (ev: DiagnoseEvent) => {
+          if (runSeq !== runSeqRef.current || ctrl.signal.aborted) return
           if (ev.type === 'progress') {
             setProgressMsg(ev.message)
             const idx = STEPS.findIndex(s => s.key === ev.step)
             if (idx >= 0) setActiveStep(idx)
           } else if (ev.type === 'result') {
+            terminalEventReceived = true
             setReport(ev.data)
             setActiveStep(STEPS.length - 1)
             setLoading(false)
           } else if (ev.type === 'error') {
+            terminalEventReceived = true
             setError(ev.message)
             setLoading(false)
           }
         },
         ctrl.signal,
       )
-    } catch (e: any) {
-      if (e.name !== 'AbortError') {
-        setError(e.message || '诊断失败')
+      if (runSeq === runSeqRef.current && !ctrl.signal.aborted && !terminalEventReceived) {
+        setError('诊断结束但未返回结果，请重试')
+        setLoading(false)
       }
-      setLoading(false)
+    } catch (e: any) {
+      if (ctrl.signal.aborted || e.name === 'AbortError') {
+        return
+      }
+      if (runSeq === runSeqRef.current) {
+        setError(e.message || '诊断失败')
+        setLoading(false)
+      }
     }
   }, [id])
 

@@ -12,6 +12,7 @@ import {
   ListItemButton,
   ListItemText,
   Divider,
+  Checkbox,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import AddIcon from '@mui/icons-material/Add'
@@ -19,6 +20,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import {
   listConversations,
   deleteConversation,
+  deleteConversations,
   getArticle,
   type Conversation,
   type Article,
@@ -43,8 +45,12 @@ export default function ChatPage() {
   const [sidebar, setSidebar] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
   const [deleteConvoId, setDeleteConvoId] = useState<number | null>(null)
+  const [selectedConvoIds, setSelectedConvoIds] = useState<number[]>([])
+  const [batchDeleteIds, setBatchDeleteIds] = useState<number[] | null>(null)
   const justCreatedRef = useRef(false)
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(articleId ? Number(articleId) : null)
+  const selectedCount = selectedConvoIds.length
+  const allSelected = convos.length > 0 && selectedCount === convos.length
 
   useEffect(() => {
     if (articleId) {
@@ -73,7 +79,13 @@ export default function ChatPage() {
   }, [convId, currentSessionKey])
 
   const refreshConvos = () => {
-    listConversations().then(setConvos).catch(() => setConvos([]))
+    listConversations().then(items => {
+      setConvos(items)
+      setSelectedConvoIds(prev => prev.filter(id => items.some(c => c.id === id)))
+    }).catch(() => {
+      setConvos([])
+      setSelectedConvoIds([])
+    })
   }
   useEffect(() => { refreshConvos() }, [])
 
@@ -98,8 +110,30 @@ export default function ChatPage() {
   const confirmRemoveConvo = async () => {
     if (deleteConvoId === null) return
     await deleteConversation(deleteConvoId)
+    if (convId === String(deleteConvoId)) newChat()
     refreshConvos()
     setDeleteConvoId(null)
+    setSelectedConvoIds(prev => prev.filter(id => id !== deleteConvoId))
+  }
+
+  const toggleConvoSelection = (id: number) => {
+    setSelectedConvoIds(prev => (
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    ))
+  }
+
+  const toggleSelectAll = () => {
+    setSelectedConvoIds(allSelected ? [] : convos.map(c => c.id))
+  }
+
+  const confirmBatchRemoveConvos = async () => {
+    const ids = batchDeleteIds || []
+    if (!ids.length) return
+    await deleteConversations(ids)
+    if (convId && ids.includes(Number(convId))) newChat()
+    setSelectedConvoIds([])
+    setBatchDeleteIds(null)
+    refreshConvos()
   }
 
   return (
@@ -184,7 +218,7 @@ export default function ChatPage() {
 
       {/* History drawer */}
       <Drawer open={sidebar} onClose={() => setSidebar(false)}>
-        <Box sx={{ width: 300, bgcolor: 'background.paper', height: '100%' }}>
+        <Box sx={{ width: 340, bgcolor: 'background.paper', height: '100%' }}>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2.5 }}>
             <Typography sx={{ fontSize: 15, fontWeight: 700 }}>
               历史对话
@@ -202,12 +236,37 @@ export default function ChatPage() {
               新建
             </Button>
           </Stack>
+          {convos.length > 0 && (
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 2.5, pb: 1.5 }}>
+              <Button size="small" onClick={toggleSelectAll} sx={{ fontSize: 12 }}>
+                {allSelected ? '取消全选' : '全选'}
+              </Button>
+              <Typography sx={{ flex: 1, fontSize: 12, color: 'text.secondary' }}>
+                {selectedCount > 0 ? `已选 ${selectedCount} 条` : '可勾选多条后批量删除'}
+              </Typography>
+              {selectedCount > 0 && (
+                <Button
+                  size="small"
+                  color="error"
+                  startIcon={<DeleteOutlineIcon sx={{ fontSize: 14 }} />}
+                  onClick={() => setBatchDeleteIds(selectedConvoIds)}
+                  sx={{ fontSize: 12 }}
+                >
+                  批量删除
+                </Button>
+              )}
+            </Stack>
+          )}
           <Divider />
           <List dense sx={{ px: 0.5, py: 1 }}>
             {convos.map(c => (
               <ListItemButton
                 key={c.id}
                 onClick={() => {
+                  if (selectedCount > 0) {
+                    toggleConvoSelection(c.id)
+                    return
+                  }
                   const next: Record<string, string> = { c: String(c.id) }
                   if (c.article_id) next.article = String(c.article_id)
                   setParams(next)
@@ -215,6 +274,13 @@ export default function ChatPage() {
                 }}
                 sx={{ borderRadius: 2, mb: 0.3 }}
               >
+                <Checkbox
+                  size="small"
+                  checked={selectedConvoIds.includes(c.id)}
+                  onClick={e => e.stopPropagation()}
+                  onChange={() => toggleConvoSelection(c.id)}
+                  sx={{ mr: 0.5, p: 0.5 }}
+                />
                 <ListItemText
                   primary={c.title || '新对话'}
                   secondary={new Date(c.updated_at).toLocaleString()}
@@ -249,6 +315,16 @@ export default function ChatPage() {
         danger
         onConfirm={confirmRemoveConvo}
         onCancel={() => setDeleteConvoId(null)}
+      />
+
+      <ConfirmDialog
+        open={!!batchDeleteIds?.length}
+        title="确认批量删除"
+        message={`删除后无法恢复，确定要删除选中的 ${batchDeleteIds?.length || 0} 条对话吗？`}
+        confirmLabel="批量删除"
+        danger
+        onConfirm={confirmBatchRemoveConvos}
+        onCancel={() => setBatchDeleteIds(null)}
       />
     </Box>
   )

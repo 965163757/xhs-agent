@@ -17,7 +17,6 @@ export default defineConfig({
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           'vendor-mui': ['@mui/material', '@mui/icons-material'],
-          'vendor-echarts': ['echarts', 'echarts-for-react'],
         },
       },
     },

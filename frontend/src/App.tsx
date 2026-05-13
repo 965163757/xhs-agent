@@ -18,6 +18,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage'))
 const DiagnosePage = lazy(() => import('./pages/DiagnosePage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
+const TasksPage = lazy(() => import('./pages/TasksPage'))
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -110,6 +111,7 @@ export default function App() {
                     <TopTab to="/articles" label="笔记" />
                     <TopTab to="/templates" label="模板" />
                     <TopTab to="/analytics" label="数据" />
+                    <TopTab to="/tasks" label="任务" />
                     <TopTab to="/settings" label="设置" />
                   </Stack>
 
@@ -177,6 +179,7 @@ export default function App() {
                     <Route path="/articles/:id/diagnose" element={<DiagnosePage />} />
                     <Route path="/templates" element={<TemplatesPage />} />
                     <Route path="/analytics" element={<AnalyticsPage />} />
+                    <Route path="/tasks" element={<TasksPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>

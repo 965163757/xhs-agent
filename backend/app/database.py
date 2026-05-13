@@ -14,6 +14,11 @@ engine = create_async_engine(settings.database_url, future=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
+def _mask_key(key: str) -> str:
+    k = key or ""
+    return (k[:6] + "…" + k[-4:]) if len(k) > 12 else ("已设置" if k else "")
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -85,6 +90,8 @@ class Task(Base):
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="running")
+    trace_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    trace: Mapped[dict] = mapped_column(JSON, default=dict)
     events: Mapped[list] = mapped_column(JSON, default=list)
     result_text: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -97,6 +104,8 @@ class Task(Base):
             "id": self.id,
             "conversation_id": self.conversation_id,
             "status": self.status,
+            "trace_id": self.trace_id or "",
+            "trace": self.trace or {},
             "events": self.events or [],
             "result_text": self.result_text or "",
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -184,19 +193,53 @@ class UserSettings(Base):
     use_own_key: Mapped[bool] = mapped_column(Boolean, default=False)
     openai_api_key: Mapped[str] = mapped_column(String(256), default="")
     openai_base_url: Mapped[str] = mapped_column(String(512), default="")
+    chat_api_key: Mapped[str] = mapped_column(String(256), default="")
+    chat_base_url: Mapped[str] = mapped_column(String(512), default="")
+    image_api_key: Mapped[str] = mapped_column(String(256), default="")
+    image_base_url: Mapped[str] = mapped_column(String(512), default="")
     chat_model: Mapped[str] = mapped_column(String(64), default="")
     image_model: Mapped[str] = mapped_column(String(64), default="")
 
     def to_dict(self) -> dict:
-        k = self.openai_api_key or ""
-        masked = (k[:6] + "…" + k[-4:]) if len(k) > 12 else ("已设置" if k else "")
+        chat_key = self.chat_api_key or self.openai_api_key or ""
+        image_key = self.image_api_key or self.chat_api_key or self.openai_api_key or ""
         return {
             "use_own_key": self.use_own_key,
-            "openai_api_key_mask": masked,
-            "openai_api_key_set": bool(k),
-            "openai_base_url": self.openai_base_url,
+            # Backward-compatible aliases map to text/chat config.
+            "openai_api_key_mask": _mask_key(chat_key),
+            "openai_api_key_set": bool(chat_key),
+            "openai_base_url": self.chat_base_url or self.openai_base_url,
+            # Split config.
+            "chat_api_key_mask": _mask_key(chat_key),
+            "chat_api_key_set": bool(chat_key),
+            "chat_base_url": self.chat_base_url or self.openai_base_url,
+            "image_api_key_mask": _mask_key(image_key),
+            "image_api_key_set": bool(image_key),
+            "image_base_url": self.image_base_url or self.chat_base_url or self.openai_base_url,
             "chat_model": self.chat_model,
             "image_model": self.image_model,
+        }
+
+
+class UserMemory(Base):
+    __tablename__ = "user_memories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    profile: Mapped[dict] = mapped_column(JSON, default=dict)
+    recent_briefs: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "user_id": self.user_id,
+            "summary": self.summary or "",
+            "profile": self.profile or {},
+            "recent_briefs": self.recent_briefs or [],
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -284,6 +327,12 @@ async def _migrate_columns(conn) -> None:
         ("articles", "user_id", "INTEGER"),
         ("conversations", "user_id", "INTEGER"),
         ("tasks", "user_id", "INTEGER"),
+        ("tasks", "trace_id", "VARCHAR(64) DEFAULT ''"),
+        ("tasks", "trace", "JSON"),
+        ("user_settings", "chat_api_key", "VARCHAR(256) DEFAULT ''"),
+        ("user_settings", "chat_base_url", "VARCHAR(512) DEFAULT ''"),
+        ("user_settings", "image_api_key", "VARCHAR(256) DEFAULT ''"),
+        ("user_settings", "image_base_url", "VARCHAR(512) DEFAULT ''"),
         ("article_versions", "user_id", "INTEGER"),
         ("templates", "creator_id", "INTEGER"),
         ("users", "role", "VARCHAR(16) DEFAULT 'user'"),
@@ -309,11 +358,25 @@ async def _backfill_ownership(conn) -> None:
         )
 
 
+async def _recover_interrupted_tasks(conn) -> None:
+    """Mark in-flight tasks from a previous process as stale on startup."""
+    await conn.execute(
+        text("UPDATE tasks SET status='stale' WHERE status='running'")
+    )
+    await conn.execute(
+        text(
+            "UPDATE conversations SET active_task_id=NULL "
+            "WHERE active_task_id IN (SELECT id FROM tasks WHERE status='stale')"
+        )
+    )
+
+
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_columns(conn)
         await _backfill_ownership(conn)
+        await _recover_interrupted_tasks(conn)
     await _seed_templates()
 
 

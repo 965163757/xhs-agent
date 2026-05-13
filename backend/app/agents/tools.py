@@ -3,13 +3,18 @@ and an MCP-compatible callable. The backend API and the embedded MCP endpoints
 share this registry."""
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json
 import re
+import time
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import or_, select
 
+from ..config import get_settings
 from ..database import Article, ArticleVersion, Conversation, SessionLocal, Template
 from ..services.llm import (
     chat_completion,
@@ -22,9 +27,13 @@ from ..services.llm import (
 
 
 ToolFn = Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
+ProgressEmitter = Callable[[Dict[str, Any]], None]
 
 _current_user_id: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
     "_current_user_id", default=None
+)
+_tool_progress_emitter: contextvars.ContextVar[Optional[ProgressEmitter]] = contextvars.ContextVar(
+    "_tool_progress_emitter", default=None
 )
 
 
@@ -38,6 +47,155 @@ def set_tool_user_id(uid: Optional[int]) -> contextvars.Token:
 
 def reset_tool_user_id(token: contextvars.Token) -> None:
     _current_user_id.reset(token)
+
+
+def set_tool_progress_emitter(emitter: Optional[ProgressEmitter]) -> contextvars.Token:
+    return _tool_progress_emitter.set(emitter)
+
+
+def reset_tool_progress_emitter(token: contextvars.Token) -> None:
+    _tool_progress_emitter.reset(token)
+
+
+def emit_tool_progress(message: str, *, step: str = "", data: Optional[Dict[str, Any]] = None) -> None:
+    emitter = _tool_progress_emitter.get()
+    if not emitter:
+        return
+    payload: Dict[str, Any] = {
+        "type": "tool_progress",
+        "message": message,
+    }
+    if step:
+        payload["step"] = step
+    if data:
+        payload["data"] = data
+    emitter(payload)
+
+
+def _elapsed_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
+def _fmt_elapsed(ms: int) -> str:
+    seconds = ms / 1000
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    return f"{int(seconds // 60)}m{int(seconds % 60)}s"
+
+
+def _safe_int(value: Any, default: int, *, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
+    try:
+        out = int(value)
+    except Exception:
+        out = default
+    if min_value is not None:
+        out = max(min_value, out)
+    if max_value is not None:
+        out = min(max_value, out)
+    return out
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(x in text for x in ("timeout", "timed out", "readtimeout", "524"))
+
+
+def _friendly_tool_error(exc: BaseException, *, elapsed_ms: int = 0, action: str = "操作") -> str:
+    raw = str(exc) or type(exc).__name__
+    raw_short = raw[:500]
+    prefix = f"{action}失败"
+    if _is_timeout_error(exc):
+        prefix = f"{action}超时"
+        return f"{prefix}：已等待 {_fmt_elapsed(elapsed_ms)}，上游仍未返回。建议降低 size/quality、简化 prompt，或稍后重试。原始错误：{raw_short}"
+    if "502" in raw or "upstream" in raw.lower():
+        return f"{prefix}：上游图片服务返回 502/Upstream error，通常是模型队列或供应商侧失败。耗时 {_fmt_elapsed(elapsed_ms)}。原始错误：{raw_short}"
+    if "524" in raw:
+        return f"{prefix}：网关 524 超时，图片服务处理时间过长。耗时 {_fmt_elapsed(elapsed_ms)}。原始错误：{raw_short}"
+    if "blocked" in raw.lower() or "403" in raw:
+        return f"{prefix}：请求被图片服务拦截或拒绝。请尝试调整 prompt，避免敏感/过度复杂描述。原始错误：{raw_short}"
+    return f"{prefix}：{raw_short}"
+
+
+def _image_retry_options(prompt: str, size: str, quality: str, n: int = 1) -> List[Dict[str, Any]]:
+    """Manual retry suggestions. Never silently lowers quality."""
+    options: List[Dict[str, Any]] = []
+    if size not in {"1024x1024", "1024x1536", "1536x1024"}:
+        if "x" in str(size):
+            try:
+                w, h = [int(x) for x in str(size).lower().split("x", 1)]
+                if h >= w:
+                    smaller = "1024x1536" if h / max(w, 1) > 1.15 else "1024x1024"
+                else:
+                    smaller = "1536x1024" if w / max(h, 1) > 1.15 else "1024x1024"
+            except Exception:
+                smaller = "1024x1536"
+        else:
+            smaller = "1024x1536"
+        options.append(
+            {
+                "label": "保持最高质量，降低尺寸重试",
+                "reason": "不降低 quality，只减少像素量，通常能避开网关超时。",
+                "arguments": {
+                    "prompt": prompt,
+                    "size": smaller,
+                    "quality": quality or "high",
+                    "n": _safe_int(n, 1, min_value=1, max_value=2),
+                },
+            }
+        )
+    options.append(
+        {
+            "label": "保持参数，直接重试",
+            "reason": "适合 502/524/队列波动等临时失败。",
+            "arguments": {"prompt": prompt, "size": size, "quality": quality or "high", "n": n},
+        }
+    )
+    simplified = re.sub(r"[，,。；;、]\\s*", "，", prompt or "")[:420]
+    if simplified and simplified != prompt:
+        options.append(
+            {
+                "label": "简化提示词重试",
+                "reason": "不降低画质，只减少复杂中文密集排版和约束数量。",
+                "arguments": {"prompt": simplified, "size": size, "quality": quality or "high", "n": n},
+            }
+        )
+    options.append(
+        {
+            "label": "速度优先可选",
+            "reason": "仅在你接受速度优先时手动使用；系统不会自动降低画质。",
+            "arguments": {"prompt": prompt, "size": size, "quality": "auto", "n": n},
+        }
+    )
+    return options[:4]
+
+
+async def _await_with_progress(
+    awaitable: Awaitable[Any],
+    *,
+    label: str,
+    step: str,
+    heartbeat_seconds: float = 20.0,
+    timeout_hint_seconds: int = 480,
+    data: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Await a long-running operation while emitting ChatGPT-like heartbeat progress."""
+    start = time.perf_counter()
+    task = asyncio.create_task(awaitable)
+    meta = dict(data or {})
+    try:
+        while True:
+            try:
+                return await asyncio.wait_for(asyncio.shield(task), timeout=heartbeat_seconds)
+            except asyncio.TimeoutError:
+                elapsed = _elapsed_ms(start)
+                emit_tool_progress(
+                    f"{label}仍在进行，已等待 {_fmt_elapsed(elapsed)}（最长约 {timeout_hint_seconds // 60} 分钟）",
+                    step=f"{step}_waiting",
+                    data={**meta, "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 1)},
+                )
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
 
 
 # ---------- helpers ----------
@@ -143,6 +301,160 @@ def _safe_json(text: str) -> Dict[str, Any]:
     return {}
 
 
+def _static_image_path(url_or_path: str) -> Optional[Path]:
+    """Resolve an app image URL/path to disk, returning None if not local/safe."""
+    if not url_or_path:
+        return None
+    try:
+        base = Path(get_settings().image_dir).resolve()
+        s = str(url_or_path)
+        path_part = s
+        if s.startswith("http://") or s.startswith("https://"):
+            parsed = urlparse(s)
+            host = (parsed.hostname or "").lower()
+            if host not in {"localhost", "127.0.0.1", "::1"} and not host.endswith(".local"):
+                return None
+            path_part = parsed.path
+        if path_part.startswith("/static/images/"):
+            rel = path_part[len("/static/images/"):].lstrip("/")
+            candidate = (base / rel).resolve()
+        else:
+            p = Path(s)
+            candidate = p.resolve() if p.is_absolute() else (base / p.name).resolve()
+        if not candidate.is_relative_to(base):
+            return None
+        return candidate
+    except Exception:
+        return None
+
+
+def _image_asset(url: str, role: str, index: Optional[int] = None) -> Dict[str, Any]:
+    """Return lightweight image metadata for agent reasoning without embedding bytes."""
+    item: Dict[str, Any] = {"role": role, "url": url}
+    if index is not None:
+        item["index"] = index
+    path = _static_image_path(url)
+    if path and path.exists():
+        item["exists"] = True
+        try:
+            item["bytes"] = path.stat().st_size
+        except Exception:
+            pass
+        try:
+            from PIL import Image
+
+            with Image.open(path) as im:
+                item["width"], item["height"] = im.size
+                item["format"] = im.format
+        except Exception:
+            pass
+    elif path:
+        item["exists"] = False
+    return item
+
+
+def _article_image_context(art: Article) -> Dict[str, Any]:
+    cover = (art.cover_image or "").strip()
+    content_images = [str(x).strip() for x in (art.images or []) if str(x or "").strip()]
+    assets: List[Dict[str, Any]] = []
+    if cover:
+        assets.append(_image_asset(cover, "cover"))
+    for i, url in enumerate(content_images):
+        assets.append(_image_asset(url, "content", i))
+    visual_images: List[Dict[str, Any]] = []
+    for position, item in enumerate(assets):
+        visual_item = {
+            "position": position,
+            "role": item.get("role"),
+            "url": item.get("url"),
+        }
+        if "index" in item:
+            visual_item["index"] = item["index"]
+        visual_images.append(visual_item)
+    return {
+        "has_cover": bool(cover),
+        "cover_image": cover,
+        "content_images": [
+            {"index": i, "url": url}
+            for i, url in enumerate(content_images)
+        ],
+        # 小红书真实展示语义：所有图片是一个队列，position=0 即首图/封面。
+        "visual_images": visual_images,
+        "all_images": assets,
+        "image_count": len(assets),
+        "content_image_count": len(content_images),
+        "notes": (
+            "visual_images 按展示顺序排列，position=0 是首图/封面；"
+            "content_images 按 index 从 0 开始，对应 visual position=index+1。"
+            "需要移动、设为首图、插入或重排时优先使用 arrange_article_images。"
+        ),
+    }
+
+
+def _article_payload(art: Article) -> Dict[str, Any]:
+    payload = art.to_dict()
+    payload["image_context"] = _article_image_context(art)
+    payload["content_stats"] = {
+        "title_chars": len(art.title or ""),
+        "body_chars": len(art.body or ""),
+        "tag_count": len(payload.get("tags") or []),
+        "image_count": payload["image_context"]["image_count"],
+    }
+    return payload
+
+
+def _article_image_summary_text(art: Article) -> str:
+    ctx = _article_image_context(art)
+    lines = [
+        f"图片总数：{ctx['image_count']}（封面：{'有' if ctx['has_cover'] else '无'}，内容图：{ctx['content_image_count']}）"
+    ]
+    assets_by_key: Dict[tuple, Dict[str, Any]] = {
+        (item.get("role"), item.get("index")): item
+        for item in ctx.get("all_images", [])
+    }
+
+    def meta_text(asset: Optional[Dict[str, Any]]) -> str:
+        if not asset:
+            return ""
+        parts: List[str] = []
+        if asset.get("width") and asset.get("height"):
+            parts.append(f"{asset['width']}x{asset['height']}")
+        if asset.get("format"):
+            parts.append(str(asset["format"]))
+        if asset.get("bytes"):
+            try:
+                parts.append(f"{int(asset['bytes']) / 1024 / 1024:.1f}MB")
+            except Exception:
+                pass
+        if asset.get("exists") is False:
+            parts.append("文件未找到")
+        return f"（{ '，'.join(parts) }）" if parts else ""
+
+    if ctx["cover_image"]:
+        lines.append(f"封面图：{ctx['cover_image']}{meta_text(assets_by_key.get(('cover', None)))}")
+    for img in ctx["content_images"][:12]:
+        asset = assets_by_key.get(("content", img["index"]))
+        lines.append(f"内容图[{img['index']}]：{img['url']}{meta_text(asset)}")
+    if ctx["content_image_count"] > 12:
+        lines.append(f"其余内容图：{ctx['content_image_count'] - 12} 张未展开")
+    return "\n".join(lines)
+
+
+def _article_prompt_context(art: Article, *, body_limit: int = 8000) -> str:
+    body = art.body or ""
+    if len(body) > body_limit:
+        body = body[: body_limit - 1] + "…"
+    tags = " ".join([t for t in (art.tags or "").split(",") if t.strip()]) or "（无）"
+    return (
+        f"笔记ID：{art.id}\n"
+        f"标题：{art.title or ''}\n"
+        f"状态：{art.status or ''}\n"
+        f"标签：{tags}\n"
+        f"{_article_image_summary_text(art)}\n"
+        f"正文：\n{body}"
+    )
+
+
 XHS_WRITER_SYSTEM = (
     "你是小红书爆款内容创作专家，精通平台话术、用户心理和流量机制。"
     "你的文风像跟闺蜜聊天——真诚、有温度、口语化，但信息密度高。\n\n"
@@ -179,11 +491,82 @@ XHS_WORKFLOW_SYSTEM = (
     '"title_candidates":["备选标题1","备选标题2","备选标题3","备选标题4","备选标题5","备选标题6"],'
     '"body":"完整正文",'
     '"tags":["#标签1","#标签2"],'
-    '"cover_prompt":{"prompt":"中文封面图生成提示词","size":"1024x1536"},'
-    '"content_image_prompts":[{"scene":"场景名","prompt":"中文配图提示词","size":"1024x1024"}],'
+    '"cover_prompt":{"prompt":"中文封面图生成提示词","size":"1024x1536","quality":"high"},'
+    '"content_image_prompts":[{"scene":"场景名","prompt":"中文配图提示词","size":"1024x1024","quality":"high"}],'
     '"self_check":{"strengths":["亮点"],"risks":["风险"],"next_actions":["下一步建议"]}'
     "}"
 )
+
+
+XHS_CATEGORY_PLAYBOOKS: Dict[str, Dict[str, str]] = {
+    "travel": {
+        "title": "旅游/攻略",
+        "writing": "路线要按天/区域写，必须包含交通、预算/时间、避坑、拍照机位；正文适合收藏转发。",
+        "title_formula": "地名 + 天数/人均/避坑/路线，例如「北京3天不踩坑」。",
+        "visual": "首图优先地图感信息图/地标拼贴/路线卡片，分区清楚，文字少而准。",
+    },
+    "food": {
+        "title": "美食/食谱",
+        "writing": "突出一口感受、做法步骤、食材替换和失败避坑；语气要有食欲和烟火气。",
+        "title_formula": "强情绪 + 食物名 + 结果，如「这个拌面香迷糊了」。",
+        "visual": "首图要近景、有油润光泽/拉丝/热气，步骤图清楚。",
+    },
+    "beauty": {
+        "title": "美妆/护肤",
+        "writing": "强调肤质/场景/使用感，避免医疗承诺；用「改善观感/提亮/维稳」替代绝对功效。",
+        "title_formula": "人群/肤质 + 痛点 + 体验结果，如「油皮夏天这样维稳」。",
+        "visual": "首图适合产品质感平铺、上脸/手臂试色、before-after 但避免夸张承诺。",
+    },
+    "fashion": {
+        "title": "穿搭/时尚",
+        "writing": "写清身高体重/场景/单品公式/显高显瘦点，给可复制搭配。",
+        "title_formula": "场景 + 风格 + 身材收益，如「小个子通勤这样穿」。",
+        "visual": "首图要完整 outfit、色系统一、留白干净；可加单品编号。",
+    },
+    "home": {
+        "title": "家居/收纳",
+        "writing": "突出面积、预算、前后对比、收纳逻辑和购买/改造清单。",
+        "title_formula": "空间痛点 + 预算/面积 + 改造结果，如「38㎡住出80㎡」。",
+        "visual": "首图适合 before-after、空间全景、清单式编号。",
+    },
+    "tech": {
+        "title": "科技/效率",
+        "writing": "先给结论，再写适合谁/不适合谁/核心参数/真实体验，避免堆术语。",
+        "title_formula": "产品/工具 + 结论/场景，如「一篇看懂这款AI工具」。",
+        "visual": "首图适合产品界面截图、功能对比表、参数卡片。",
+    },
+    "fitness": {
+        "title": "健身/身材管理",
+        "writing": "强调动作、频率、适合人群和注意事项；避免绝对减重承诺。",
+        "title_formula": "时间/动作数 + 目标部位 + 体验，如「每天10分钟练背」。",
+        "visual": "首图适合动作分解、计划表、打卡模板。",
+    },
+    "lifestyle": {
+        "title": "生活/经验",
+        "writing": "强调共鸣、具体场景和可执行清单；少空话，多真实细节。",
+        "title_formula": "情绪/身份 + 具体收获，如「打工人周末回血清单」。",
+        "visual": "首图适合手账清单、生活场景、情绪氛围图。",
+    },
+}
+
+
+def _category_playbook_text(category: str) -> str:
+    from .research_data import CATEGORY_CN, MODEL_PARAMS, VIRAL_TITLES
+
+    cat = category if category in XHS_CATEGORY_PLAYBOOKS else "lifestyle"
+    p = XHS_CATEGORY_PLAYBOOKS[cat]
+    model = MODEL_PARAMS.get(cat, MODEL_PARAMS["lifestyle"])
+    viral = VIRAL_TITLES.get(cat, [])[:3]
+    return (
+        f"【赛道写作模板：{CATEGORY_CN.get(cat, p['title'])}】\n"
+        f"- 写作重点：{p['writing']}\n"
+        f"- 标题公式：{p['title_formula']}\n"
+        f"- 首图/配图：{p['visual']}\n"
+        f"- 数据建议：标题 {model['title_length']['min']}-{model['title_length']['max']} 字；"
+        f"标签 {model['tag_count']['min']}-{model['tag_count']['max']} 个；"
+        f"图片 {model['image_count']['min']}-{model['image_count']['max']} 张。\n"
+        f"- 爆款标题参考：{' / '.join(viral)}"
+    )
 
 
 def _normalize_tags(tags: Any, limit: int = 10) -> List[str]:
@@ -220,6 +603,7 @@ def _normalize_shots(shots: Any, limit: int = 4) -> List[Dict[str, str]]:
                 "scene": str(item.get("scene") or f"配图{len(out) + 1}"),
                 "prompt": prompt,
                 "size": str(item.get("size") or "1024x1024"),
+                "quality": str(item.get("quality") or "high"),
             }
         )
     return out
@@ -268,7 +652,7 @@ async def tool_create_article(args: Dict[str, Any]) -> Dict[str, Any]:
         s.add(art)
         await s.commit()
         await s.refresh(art)
-        return {"ok": True, "article": art.to_dict()}
+        return {"ok": True, "article": _article_payload(art)}
 
 
 async def tool_update_article(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -289,7 +673,7 @@ async def tool_update_article(args: Dict[str, Any]) -> Dict[str, Any]:
             art.images = args["images"]
         await s.commit()
         await s.refresh(art)
-        return {"ok": True, "article": art.to_dict()}
+        return {"ok": True, "article": _article_payload(art)}
 
 
 async def tool_read_article(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -300,18 +684,22 @@ async def tool_read_article(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": f"article {aid} not found"}
     if uid is not None and art.user_id != uid:
         return {"ok": False, "error": "无权访问该笔记"}
-    return {"ok": True, "article": art.to_dict()}
+    return {
+        "ok": True,
+        "article": _article_payload(art),
+        "read_scope": "包含标题、正文、标签、状态、封面图 cover_image、内容图 images/image_context、评分和时间信息。",
+    }
 
 
 async def tool_list_articles(args: Dict[str, Any]) -> Dict[str, Any]:
-    limit = int(args.get("limit", 20))
+    limit = _safe_int(args.get("limit", 20), 20, min_value=1, max_value=100)
     uid = get_tool_user_id()
     async with SessionLocal() as s:
         q = select(Article).order_by(Article.updated_at.desc()).limit(limit)
         if uid:
             q = q.where(Article.user_id == uid)
         res = await s.execute(q)
-        items = [a.to_dict() for a in res.scalars().all()]
+        items = [_article_payload(a) for a in res.scalars().all()]
         return {"ok": True, "items": items}
 
 
@@ -339,9 +727,13 @@ async def tool_generate_article(args: Dict[str, Any]) -> Dict[str, Any]:
     length = args.get("length", "中等")
     audience = args.get("audience", "20-30岁女性")
     extra = args.get("extra", "")
+    from .research_data import detect_category
+    category = detect_category(str(topic), str(extra), [])
+    playbook = _category_playbook_text(category)
 
     user_prompt = (
         f"主题：{topic}\n语气：{tone}\n长度：{length}\n目标受众：{audience}\n补充：{extra}\n"
+        f"{playbook}\n"
         "请按系统要求输出 JSON。"
     )
     resp = await chat_completion(
@@ -363,7 +755,7 @@ async def tool_generate_article(args: Dict[str, Any]) -> Dict[str, Any]:
         s.add(art)
         await s.commit()
         await s.refresh(art)
-        return {"ok": True, "article": art.to_dict()}
+        return {"ok": True, "article": _article_payload(art)}
 
 
 async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -377,6 +769,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     if not topic:
         return {"ok": False, "error": "topic is required"}
 
+    emit_tool_progress("已收到完整成稿需求，正在拆解 brief", step="workflow_start")
     audience = args.get("audience", "小红书主力用户")
     tone = args.get("tone", args.get("style", "真诚、有温度、有网感"))
     length = args.get("length", "中等")
@@ -385,7 +778,11 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     include_visual_prompts = bool(args.get("include_visual_prompts", True))
     generate_cover = bool(args.get("generate_cover", False))
     generate_content_images = bool(args.get("generate_content_images", False))
-    image_count = max(1, min(6, int(args.get("image_count", 4))))
+    image_count = _safe_int(args.get("image_count", 4), 4, min_value=1, max_value=6)
+    image_concurrency = _safe_int(args.get("image_concurrency", 3), 3, min_value=1, max_value=4)
+    from .research_data import detect_category
+    category = detect_category(str(topic), str(extra), [])
+    playbook = _category_playbook_text(category)
 
     plan_prompt = (
         f"创作主题/brief：{topic}\n"
@@ -393,9 +790,11 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         f"语气风格：{tone}\n"
         f"篇幅：{length}\n"
         f"补充信息：{extra}\n"
+        f"{playbook}\n"
         f"是否需要视觉方向：{include_visual_prompts}\n"
         "请一次性交付完整小红书笔记工作流结果。"
     )
+    emit_tool_progress("正在规划内容策略、正文结构、标题候选和视觉方向", step="planning")
     resp = await chat_completion(
         messages=[
             {"role": "system", "content": XHS_WORKFLOW_SYSTEM},
@@ -404,6 +803,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         temperature=0.85,
     )
     data = _safe_json(resp.choices[0].message.content or "")
+    emit_tool_progress("已完成初稿生成，正在整理标题、正文、标签和图片方向", step="draft_ready")
 
     title = str(data.get("title") or topic).strip()
     body = str(data.get("body") or "").strip()
@@ -421,6 +821,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         cover_prompt = {
             "prompt": f"小红书封面，主题：{topic}，干净高级感，竖图 2:3，主体明确，预留标题区域",
             "size": "1024x1536",
+            "quality": "high",
         }
     content_shots = _normalize_shots(
         data.get("content_image_prompts") or data.get("shots") or [],
@@ -428,6 +829,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     )
 
     initial = {"title": title, "body": body, "tags": tags}
+    emit_tool_progress("正在做本地发布前自检：标题长度、标签、敏感词、基础评分", step="self_check")
     checks_before = _article_quick_check(title, body, tags, image_count=0)
     optimization_applied = False
     changelog: List[str] = []
@@ -440,6 +842,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     )
 
     if should_optimize:
+        emit_tool_progress("发现可优化项，正在进行二次优化", step="auto_optimize")
         opt_prompt = (
             "请基于自检结果做一次最终优化，只返回 JSON。\n"
             "要求：标题≤20字，保留原主题；替换敏感/绝对化表达；补足标签；正文更有钩子和互动。\n\n"
@@ -463,10 +866,14 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             optimization_applied = True
             if title and title not in title_candidates:
                 title_candidates.insert(0, title)
+        emit_tool_progress("二次优化完成，正在复检", step="optimize_done")
+    else:
+        emit_tool_progress("自检通过，无需二次优化", step="optimize_skipped")
 
     checks_after = _article_quick_check(title, body, tags, image_count=0)
     uid = get_tool_user_id()
 
+    emit_tool_progress("正在写入草稿箱", step="saving")
     async with SessionLocal() as s:
         art = Article(
             title=title,
@@ -485,34 +892,114 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         await s.commit()
         await s.refresh(art)
         article_id = art.id
+    emit_tool_progress(f"已写入笔记 #{article_id}", step="saved", data={"article_id": article_id})
 
     generated_cover = ""
     generated_content_images: List[str] = []
+    image_errors: List[Dict[str, Any]] = []
     if generate_cover:
-        urls = await generate_image(
-            prompt=str(cover_prompt.get("prompt") or ""),
-            size=str(cover_prompt.get("size") or "1024x1536"),
-            n=1,
-        )
-        generated_cover = urls[0] if urls else ""
-        if generated_cover:
-            await _bind_image_to_article(generated_cover, article_id, role="cover")
+        emit_tool_progress("正在生成封面图", step="generate_cover", data={"article_id": article_id})
+        img_start = time.perf_counter()
+        try:
+            urls = await _await_with_progress(
+                generate_image(
+                    prompt=str(cover_prompt.get("prompt") or ""),
+                    size=str(cover_prompt.get("size") or "1024x1536"),
+                    quality=str(cover_prompt.get("quality") or "high"),
+                    n=1,
+                ),
+                label="封面图生成",
+                step="generate_cover",
+                data={"article_id": article_id, "role": "cover"},
+            )
+            generated_cover = urls[0] if urls else ""
+            if generated_cover:
+                await _bind_image_to_article(generated_cover, article_id, role="cover")
+                emit_tool_progress(
+                    f"封面图已绑定到笔记，用时 {_fmt_elapsed(_elapsed_ms(img_start))}",
+                    step="cover_bound",
+                    data={"article_id": article_id, "image": generated_cover, "elapsed_ms": _elapsed_ms(img_start)},
+                )
+        except Exception as e:
+            elapsed = _elapsed_ms(img_start)
+            msg = _friendly_tool_error(e, elapsed_ms=elapsed, action="封面图生成")
+            image_errors.append({"role": "cover", "error": msg, "elapsed_ms": elapsed})
+            emit_tool_progress(msg, step="cover_failed", data={"article_id": article_id, "elapsed_ms": elapsed})
 
     if generate_content_images and content_shots:
-        for shot in content_shots[:image_count]:
-            urls = await generate_image(
-                prompt=shot["prompt"],
-                size=shot.get("size", "1024x1024"),
-                n=1,
-            )
-            generated_content_images.extend(urls[:1])
+        shots_to_generate = content_shots[:image_count]
+        emit_tool_progress(
+            f"将并发生成 {len(shots_to_generate)} 张内容配图（并发数 {image_concurrency}）",
+            step="content_images_concurrent_start",
+            data={"article_id": article_id, "count": len(shots_to_generate), "concurrency": image_concurrency},
+        )
+        sem = asyncio.Semaphore(image_concurrency)
+
+        async def _generate_one_content_image(idx: int, shot: Dict[str, str]) -> Dict[str, Any]:
+            async with sem:
+                scene = shot.get("scene") or f"配图{idx + 1}"
+                emit_tool_progress(
+                    f"开始生成内容配图 {idx + 1}/{len(shots_to_generate)}：{scene}",
+                    step="generate_content_image",
+                    data={"article_id": article_id, "index": idx, "scene": scene},
+                )
+                img_start = time.perf_counter()
+                try:
+                    urls = await _await_with_progress(
+                        generate_image(
+                            prompt=shot["prompt"],
+                            size=shot.get("size", "1024x1024"),
+                            quality=shot.get("quality", "high"),
+                            n=1,
+                        ),
+                        label=f"内容配图 {idx + 1}/{len(shots_to_generate)}",
+                        step=f"generate_content_image_{idx}",
+                        data={"article_id": article_id, "index": idx, "scene": scene},
+                    )
+                    url = urls[0] if urls else ""
+                    elapsed = _elapsed_ms(img_start)
+                    emit_tool_progress(
+                        f"内容配图 {idx + 1} 生成完成，用时 {_fmt_elapsed(elapsed)}",
+                        step="content_image_done",
+                        data={"article_id": article_id, "index": idx, "scene": scene, "image": url, "elapsed_ms": elapsed},
+                    )
+                    return {"index": idx, "url": url, "elapsed_ms": elapsed}
+                except Exception as e:
+                    elapsed = _elapsed_ms(img_start)
+                    msg = _friendly_tool_error(e, elapsed_ms=elapsed, action=f"内容配图 {idx + 1} 生成")
+                    emit_tool_progress(
+                        msg,
+                        step="content_image_failed",
+                        data={"article_id": article_id, "index": idx, "scene": scene, "elapsed_ms": elapsed},
+                    )
+                    return {"index": idx, "url": "", "error": msg, "elapsed_ms": elapsed}
+
+        image_results = await asyncio.gather(
+            *[_generate_one_content_image(idx, shot) for idx, shot in enumerate(shots_to_generate)]
+        )
+        for item in sorted(image_results, key=lambda x: int(x.get("index", 0))):
+            if item.get("url"):
+                generated_content_images.append(str(item["url"]))
+            elif item.get("error"):
+                image_errors.append({"role": "content", **item})
         for idx, url in enumerate(generated_content_images):
             await _bind_image_to_article(url, article_id, role="content", replace_index=idx)
+        if generated_content_images:
+            emit_tool_progress(
+                f"已生成并绑定 {len(generated_content_images)} 张内容配图",
+                step="content_images_bound",
+                data={
+                    "article_id": article_id,
+                    "count": len(generated_content_images),
+                    "failed": len([x for x in image_errors if x.get("role") == "content"]),
+                },
+            )
 
+    emit_tool_progress("工作流完成，正在整理返回结果", step="workflow_done", data={"article_id": article_id})
     final = await _get_article(article_id)
     return {
         "ok": True,
-        "article": final.to_dict() if final else {"id": article_id, "title": title, "body": body, "tags": tags},
+        "article": _article_payload(final) if final else {"id": article_id, "title": title, "body": body, "tags": tags},
         "workflow": {
             "strategy": data.get("strategy", {}),
             "title_candidates": title_candidates[:8],
@@ -525,6 +1012,8 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             "changelog": changelog,
             "generated_cover": generated_cover,
             "generated_content_images": generated_content_images,
+            "image_errors": image_errors,
+            "image_concurrency": image_concurrency if generate_content_images else None,
             "next_actions": [
                 "打开笔记详情微调正文",
                 "生成或替换封面图",
@@ -547,6 +1036,8 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "无权操作该笔记"}
 
     await _snapshot_article(aid, "rewrite")
+    from .research_data import detect_category
+    playbook = _category_playbook_text(detect_category(art.title or "", art.body or "", (art.tags or "").split(",")))
 
     resp = await chat_completion(
         messages=[
@@ -554,8 +1045,10 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "role": "user",
                 "content": (
-                    f"请基于下列原稿改写为小红书风格。\n改写风格：{style}\n附加要求：{instruction}\n"
-                    f"原标题：{art.title}\n原正文：\n{art.body}\n"
+                    f"请基于下列笔记改写为小红书风格。\n改写风格：{style}\n附加要求：{instruction}\n"
+                    f"{playbook}\n"
+                    f"{_article_prompt_context(art)}\n"
+                    "注意：保留与现有封面/内容图匹配的叙事，不要写出和图片明显冲突的场景。\n"
                     "严格按系统要求 JSON 返回。"
                 ),
             },
@@ -573,7 +1066,7 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
             art.tags = ",".join(data["tags"])
         await s.commit()
         await s.refresh(art)
-        return {"ok": True, "article": art.to_dict()}
+        return {"ok": True, "article": _article_payload(art)}
 
 
 async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -587,6 +1080,8 @@ async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "无权操作该笔记"}
 
     await _snapshot_article(aid, "optimize")
+    from .research_data import detect_category
+    playbook = _category_playbook_text(detect_category(art.title or "", art.body or "", (art.tags or "").split(",")))
 
     resp = await chat_completion(
         messages=[
@@ -601,7 +1096,8 @@ async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "role": "user",
                 "content": (
-                    f"优化重点：{focus}\n原标题：{art.title}\n原正文：\n{art.body}\n原标签：{art.tags}"
+                    f"优化重点：{focus}\n{playbook}\n{_article_prompt_context(art)}\n"
+                    "若涉及视觉/封面/配图，请结合现有图片数量和图片 URL 给出一致的文案优化。"
                 ),
             },
         ],
@@ -618,7 +1114,7 @@ async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
             art.tags = ",".join(data["tags"])
         await s.commit()
         await s.refresh(art)
-        result = art.to_dict()
+        result = _article_payload(art)
         result["changelog"] = data.get("changelog", [])
         return {"ok": True, "article": result}
 
@@ -661,11 +1157,12 @@ async def tool_score_article(args: Dict[str, Any]) -> Dict[str, Any]:
                 "content": (
                     "你是小红书数据专家，从五个维度打分（0-100）："
                     "内容质量 content、视觉吸引 visual、增长潜力 growth、互动潜力 engagement、综合 overall。"
+                    "visual 必须结合封面/内容图数量、图片 URL/尺寸元数据和图文匹配度评估；没有图片时要明确扣分原因。"
                     "严格按 JSON 返回："
                     '{"content":90,"visual":80,"growth":75,"engagement":82,"overall":82,"advice":["..."]}'
                 ),
             },
-            {"role": "user", "content": f"标题：{art.title}\n正文：\n{art.body}\n标签：{art.tags}"},
+            {"role": "user", "content": _article_prompt_context(art)},
         ],
         temperature=0.3,
     )
@@ -691,20 +1188,23 @@ async def tool_diagnose_article(args: Dict[str, Any]) -> Dict[str, Any]:
     assert art is not None
 
     tags = [t for t in (art.tags or "").split(",") if t.strip()]
-    images = art.images or []
-    image_count = len(images) + (1 if art.cover_image else 0)
+    content_images = art.images or []
+    visual_images = ([art.cover_image] if art.cover_image else []) + content_images
+    image_count = len(visual_images)
 
     result = await run_diagnosis(
         title=art.title or "",
         content=art.body or "",
         tags=tags,
         image_count=image_count,
-        images=images,
+        images=visual_images,
+        cover_image=art.cover_image or "",
     )
 
     return {
         "ok": True,
         "article_id": aid,
+        "image_context": _article_image_context(art),
         "overall_score": result.overall_score,
         "grade": result.grade,
         "radar_data": result.radar_data,
@@ -713,8 +1213,11 @@ async def tool_diagnose_article(args: Dict[str, Any]) -> Dict[str, Any]:
         "optimized_title": result.optimized_title,
         "optimized_content": result.optimized_content,
         "optimized_tags": result.optimized_tags,
+        "cover_direction": result.cover_direction,
         "simulated_comments": result.simulated_comments,
         "debate_summary": result.debate_summary,
+        "agent_opinions": result.agent_opinions,
+        "debate_results": result.debate_results,
         "category": result.category_cn,
         "elapsed_ms": result.elapsed_ms,
     }
@@ -745,7 +1248,9 @@ async def tool_suggest_tags(args: Dict[str, Any]) -> Dict[str, Any]:
 async def tool_suggest_titles(args: Dict[str, Any]) -> Dict[str, Any]:
     topic = args.get("topic") or ""
     body = args.get("body") or ""
-    n = int(args.get("n", 6))
+    n = _safe_int(args.get("n", 6), 6, min_value=1, max_value=12)
+    from .research_data import detect_category
+    playbook = _category_playbook_text(detect_category(str(topic), str(body), []))
     resp = await chat_completion(
         messages=[
             {
@@ -756,7 +1261,7 @@ async def tool_suggest_titles(args: Dict[str, Any]) -> Dict[str, Any]:
                     '严格按 JSON：{"titles":["...","..."]}'
                 ),
             },
-            {"role": "user", "content": f"主题：{topic}\n素材：{body}"},
+            {"role": "user", "content": f"主题：{topic}\n素材：{body}\n{playbook}"},
         ],
         temperature=0.95,
     )
@@ -788,6 +1293,8 @@ async def tool_cover_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
     topic = args.get("topic") or ""
     title = args.get("title") or topic
     style = args.get("style", "小红书风、干净、高级感、柔和光")
+    from .research_data import detect_category
+    playbook = _category_playbook_text(detect_category(str(title), str(topic), []))
     resp = await chat_completion(
         messages=[
             {
@@ -809,10 +1316,10 @@ async def tool_cover_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
                     "- 对比类：左右分屏/前后对比/色彩反差\n\n"
                     "prompt 用中文描述，要具体到：主体内容、构图方式、光线氛围、色彩基调、画面风格。\n"
                     "竖图比例 2:3。\n"
-                    '严格 JSON：{"prompt":"中文描述...","size":"1024x1536"}'
+                    '严格 JSON：{"prompt":"中文描述...","size":"1024x1536","quality":"high"}'
                 ),
             },
-            {"role": "user", "content": f"标题：{title}\n主题：{topic}\n风格偏好：{style}"},
+            {"role": "user", "content": f"标题：{title}\n主题：{topic}\n风格偏好：{style}\n{playbook}"},
         ],
         temperature=0.8,
     )
@@ -823,30 +1330,82 @@ async def tool_cover_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
 # ---------- images ----------
 
 async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
-    prompt = args["prompt"]
+    prompt = (args.get("prompt") or "").strip()
+    if not prompt:
+        return {"ok": False, "error": "prompt is required"}
     size = args.get("size", "1024x1536")
-    n = int(args.get("n", 1))
-    aid = args.get("article_id")
+    quality = args.get("quality", "high")
+    n = _safe_int(args.get("n", 1), 1, min_value=1, max_value=4)
+    raw_aid = args.get("article_id")
+    aid = int(raw_aid) if str(raw_aid or "").strip().isdigit() and int(raw_aid) > 0 else None
     role = args.get("role", "content")
     replace_index = args.get("replace_index")
-    access_err = await _ensure_article_access(int(aid) if aid else None)
+    access_err = await _ensure_article_access(aid)
     if access_err:
         return access_err
-    urls = await generate_image(
-        prompt=prompt,
-        size=size,
-        n=n,
-        reference_images=args.get("reference_images"),
+    emit_tool_progress(
+        "正在生成图片" + (f"并准备绑定到笔记 #{aid}" if aid else "（独立图片，不创建笔记）"),
+        step="image_generation_start",
+        data={"article_id": aid, "size": size, "quality": quality, "n": n},
     )
+    img_start = time.perf_counter()
+    try:
+        urls = await _await_with_progress(
+            generate_image(
+                prompt=prompt,
+                size=size,
+                quality=quality,
+                n=n,
+                reference_images=args.get("reference_images"),
+            ),
+            label="图片生成",
+            step="image_generation",
+            data={"article_id": aid, "size": size, "quality": quality, "n": n},
+        )
+    except Exception as e:
+        elapsed = _elapsed_ms(img_start)
+        msg = _friendly_tool_error(e, elapsed_ms=elapsed, action="图片生成")
+        emit_tool_progress(
+            msg,
+            step="image_generation_failed",
+            data={
+                "article_id": aid,
+                "size": size,
+                "quality": quality,
+                "elapsed_ms": elapsed,
+                "timeout": _is_timeout_error(e),
+            },
+        )
+        return {
+            "ok": False,
+            "error": msg,
+            "raw_error": str(e)[:1000],
+            "timeout": _is_timeout_error(e),
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+            "suggestions": [
+                "降低 size，例如 1536x2048 → 1024x1365",
+                "将 quality 从 high 改为 medium/auto",
+                "减少中文密集文字和分区数量，先生成背景再用编辑器叠字",
+            ],
+            "retry_options": _image_retry_options(prompt, str(size), str(quality), n),
+        }
+    elapsed_done = _elapsed_ms(img_start)
+    emit_tool_progress(
+        f"图片生成完成，共 {len(urls)} 张，用时 {_fmt_elapsed(elapsed_done)}" + ("，正在写入笔记" if aid else ""),
+        step="image_generation_done",
+        data={"article_id": aid, "count": len(urls), "elapsed_ms": elapsed_done},
+    )
+    bound_article: Optional[Dict[str, Any]] = None
     if aid:
         async with SessionLocal() as s:
-            art = await s.get(Article, int(aid))
+            art = await s.get(Article, aid)
             if art:
                 if role == "cover":
                     art.cover_image = urls[0] if urls else art.cover_image
                 elif replace_index is not None and urls:
                     imgs = list(art.images or [])
-                    idx = int(replace_index)
+                    idx = _safe_int(replace_index, len(imgs), min_value=0)
                     if 0 <= idx < len(imgs):
                         imgs[idx] = urls[0]
                     else:
@@ -856,7 +1415,21 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
                     art.images = (art.images or []) + urls
                 await s.commit()
                 await s.refresh(art)
-    return {"ok": True, "images": urls}
+                bound_article = _article_payload(art)
+                emit_tool_progress(
+                    "图片已绑定到笔记",
+                    step="image_bound",
+                    data={"article_id": aid, "role": role, "count": len(urls)},
+                )
+    result: Dict[str, Any] = {
+        "ok": True,
+        "images": urls,
+        "elapsed_ms": elapsed_done,
+        "elapsed_sec": round(elapsed_done / 1000, 2),
+    }
+    if bound_article:
+        result["article"] = bound_article
+    return result
 
 
 async def tool_remove_image(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -878,13 +1451,131 @@ async def tool_remove_image(args: Dict[str, Any]) -> Dict[str, Any]:
             if idx is None:
                 imgs = []
             else:
-                idx = int(idx)
+                idx = _safe_int(idx, -1)
+                if idx < 0:
+                    return {"ok": False, "error": "index must be a non-negative integer"}
                 if 0 <= idx < len(imgs):
                     imgs.pop(idx)
+                else:
+                    return {"ok": False, "error": f"index {idx} out of range"}
             art.images = imgs
         await s.commit()
         await s.refresh(art)
-        return {"ok": True, "article": art.to_dict()}
+        return {"ok": True, "article": _article_payload(art)}
+
+
+def _article_visual_queue(art: Article) -> List[str]:
+    """Return the Xiaohongshu-style image queue; position 0 is the cover/first image."""
+    queue: List[str] = []
+    if (art.cover_image or "").strip():
+        queue.append(str(art.cover_image).strip())
+    queue.extend([str(x).strip() for x in (art.images or []) if str(x or "").strip()])
+    return queue
+
+
+def _dedupe_preserve_order(items: List[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for raw in items:
+        item = str(raw or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _apply_article_visual_queue(art: Article, queue: List[str]) -> None:
+    queue = _dedupe_preserve_order(queue)
+    art.cover_image = queue[0] if queue else ""
+    art.images = queue[1:] if len(queue) > 1 else []
+
+
+async def tool_arrange_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Arrange article images as one visual queue; position 0 is the cover/first image."""
+    aid = int(args["article_id"])
+    action = str(args.get("action") or "set_order").strip().lower()
+    async with SessionLocal() as s:
+        art = await s.get(Article, aid)
+        if not art:
+            return {"ok": False, "error": f"article {aid} not found"}
+        uid = get_tool_user_id()
+        if uid is not None and art.user_id != uid:
+            return {"ok": False, "error": "无权操作该笔记"}
+
+        queue = _article_visual_queue(art)
+        image_url = str(args.get("image_url") or "").strip()
+
+        if action in {"set_order", "reorder"}:
+            order = args.get("order")
+            if not isinstance(order, list):
+                return {"ok": False, "error": "order must be a list of image URLs"}
+            queue = _dedupe_preserve_order([str(x) for x in order])
+        elif action == "move":
+            if not queue:
+                return {"ok": False, "error": "no images to move"}
+            from_pos = _safe_int(args.get("from_position"), -1)
+            to_pos = _safe_int(args.get("to_position"), -1)
+            if from_pos < 0 or from_pos >= len(queue):
+                return {"ok": False, "error": f"from_position {from_pos} out of range"}
+            to_pos = max(0, min(len(queue) - 1, to_pos))
+            item = queue.pop(from_pos)
+            queue.insert(to_pos, item)
+        elif action in {"set_cover", "make_cover", "set_first"}:
+            pos_arg = args.get("position")
+            if image_url:
+                if image_url in queue:
+                    queue.remove(image_url)
+                queue.insert(0, image_url)
+            else:
+                pos = _safe_int(pos_arg, -1)
+                if pos < 0 or pos >= len(queue):
+                    return {"ok": False, "error": f"position {pos} out of range"}
+                item = queue.pop(pos)
+                queue.insert(0, item)
+        elif action == "insert":
+            if not image_url:
+                return {"ok": False, "error": "image_url is required for insert"}
+            pos = _safe_int(args.get("position"), len(queue), min_value=0, max_value=len(queue))
+            if image_url in queue:
+                queue.remove(image_url)
+                pos = min(pos, len(queue))
+            queue.insert(pos, image_url)
+        elif action == "replace":
+            if not image_url:
+                return {"ok": False, "error": "image_url is required for replace"}
+            pos = _safe_int(args.get("position"), 0, min_value=0)
+            if pos < len(queue):
+                queue[pos] = image_url
+            else:
+                queue.append(image_url)
+        elif action == "remove":
+            if image_url:
+                queue = [x for x in queue if x != image_url]
+            else:
+                pos = _safe_int(args.get("position"), -1)
+                if pos < 0 or pos >= len(queue):
+                    return {"ok": False, "error": f"position {pos} out of range"}
+                queue.pop(pos)
+        elif action == "clear":
+            queue = []
+        else:
+            return {"ok": False, "error": f"unknown action: {action}"}
+
+        _apply_article_visual_queue(art, queue)
+        await s.commit()
+        await s.refresh(art)
+        emit_tool_progress(
+            "图片队列已更新：首图即封面",
+            step="article_images_arranged",
+            data={"article_id": aid, "action": action, "image_count": len(_article_visual_queue(art))},
+        )
+        return {
+            "ok": True,
+            "article": _article_payload(art),
+            "visual_queue": _article_visual_queue(art),
+            "message": "已更新图片顺序。第 1 张会作为小红书首图/封面展示。",
+        }
 
 
 async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -892,7 +1583,8 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
     topic = args.get("topic", "")
     title = args.get("title", "")
     body = args.get("body", "")
-    n = int(args.get("n", 4))
+    n = _safe_int(args.get("n", 4), 4, min_value=1, max_value=8)
+    image_context_text = "当前没有已知配图。"
     if aid and not body:
         art, err = await _get_article_for_user(int(aid))
         if err:
@@ -901,6 +1593,9 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
         title = title or art.title
         body = art.body
         topic = topic or art.title
+        image_context_text = _article_image_summary_text(art)
+    from .research_data import detect_category
+    playbook = _category_playbook_text(detect_category(str(title or topic), str(body), []))
     resp = await chat_completion(
         messages=[
             {
@@ -922,12 +1617,12 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
                     "- 画面风格：清新/复古/极简/日系等\n\n"
                     "正方形比例 1:1。prompt 用中文。\n"
                     '严格按 JSON 返回：'
-                    '{"shots":[{"scene":"场景标题","prompt":"中文描述","size":"1024x1024"}]}'
+                    '{"shots":[{"scene":"场景标题","prompt":"中文描述","size":"1024x1024","quality":"high"}]}'
                 ),
             },
             {
                 "role": "user",
-                "content": f"主题：{topic}\n标题：{title}\n正文：\n{body}",
+                "content": f"主题：{topic}\n标题：{title}\n{playbook}\n已有图片：\n{image_context_text}\n正文：\n{body}",
             },
         ],
         temperature=0.8,
@@ -935,6 +1630,163 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
     data = _safe_json(resp.choices[0].message.content or "")
     shots = data.get("shots", [])[:n]
     return {"ok": True, "shots": shots}
+
+
+async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate cover/content images for an existing article with concurrent content-image workers."""
+    aid = int(args["article_id"])
+    art, err = await _get_article_for_user(aid)
+    if err:
+        return {"ok": False, "error": err}
+    assert art is not None
+
+    include_cover = bool(args.get("include_cover", False))
+    raw_content_count = args.get("content_count", args.get("n"))
+    if raw_content_count is None:
+        raw_content_count = 0 if include_cover else 4
+    content_count = _safe_int(raw_content_count, 0 if include_cover else 4, min_value=0, max_value=8)
+    concurrency = _safe_int(args.get("concurrency", args.get("image_concurrency", 3)), 3, min_value=1, max_value=4)
+    replace_existing = bool(args.get("replace_existing", False))
+    default_size = args.get("size", "1024x1024")
+    default_quality = args.get("quality", "high")
+    style = args.get("style", "小红书风、统一色调、干净高级、有生活感")
+    image_errors: List[Dict[str, Any]] = []
+    generated_cover = ""
+    generated_content_images: List[str] = []
+    total_start = time.perf_counter()
+
+    emit_tool_progress(
+        f"正在为笔记 #{aid} 准备图片生成任务",
+        step="article_images_prepare",
+        data={"article_id": aid, "include_cover": include_cover, "content_count": content_count, "concurrency": concurrency},
+    )
+
+    if include_cover:
+        cover_prompt = args.get("cover_prompt")
+        if not cover_prompt:
+            cover_resp = await tool_cover_prompt({"topic": art.title or "", "title": art.title or "", "style": style})
+            cover_prompt = (cover_resp.get("cover") or {}).get("prompt") or f"小红书封面图，主题：{art.title}，{style}"
+        cover_size = args.get("cover_size", "1024x1536")
+        cover_start = time.perf_counter()
+        emit_tool_progress("正在生成笔记封面图", step="article_cover_start", data={"article_id": aid})
+        try:
+            urls = await _await_with_progress(
+                generate_image(
+                    prompt=str(cover_prompt),
+                    size=str(cover_size),
+                    quality=str(default_quality),
+                    n=1,
+                ),
+                label="笔记封面图",
+                step="article_cover",
+                data={"article_id": aid, "role": "cover"},
+            )
+            generated_cover = urls[0] if urls else ""
+            if generated_cover:
+                await _bind_image_to_article(generated_cover, aid, role="cover")
+                emit_tool_progress(
+                    f"封面图已生成并绑定，用时 {_fmt_elapsed(_elapsed_ms(cover_start))}",
+                    step="article_cover_done",
+                    data={"article_id": aid, "image": generated_cover, "elapsed_ms": _elapsed_ms(cover_start)},
+                )
+        except Exception as e:
+            elapsed = _elapsed_ms(cover_start)
+            msg = _friendly_tool_error(e, elapsed_ms=elapsed, action="封面图生成")
+            image_errors.append({"role": "cover", "error": msg, "elapsed_ms": elapsed})
+            emit_tool_progress(msg, step="article_cover_failed", data={"article_id": aid, "elapsed_ms": elapsed})
+
+    shots = args.get("shots")
+    if not isinstance(shots, list) or not shots:
+        if content_count > 0:
+            prompt_resp = await tool_content_image_prompt({"article_id": aid, "n": content_count})
+            if not prompt_resp.get("ok"):
+                return prompt_resp
+            shots = prompt_resp.get("shots") or []
+    shots = _normalize_shots(shots or [], limit=content_count or 0)
+    for shot in shots:
+        shot.setdefault("size", default_size)
+        shot.setdefault("quality", default_quality)
+
+    if shots:
+        emit_tool_progress(
+            f"开始并发生成 {len(shots)} 张内容配图（并发数 {concurrency}）",
+            step="article_content_images_start",
+            data={"article_id": aid, "count": len(shots), "concurrency": concurrency},
+        )
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _gen(idx: int, shot: Dict[str, str]) -> Dict[str, Any]:
+            async with sem:
+                scene = shot.get("scene") or f"配图{idx + 1}"
+                start = time.perf_counter()
+                emit_tool_progress(
+                    f"内容配图 {idx + 1}/{len(shots)} 开始生成：{scene}",
+                    step="article_content_image_start",
+                    data={"article_id": aid, "index": idx, "scene": scene},
+                )
+                try:
+                    urls = await _await_with_progress(
+                        generate_image(
+                            prompt=shot["prompt"],
+                            size=shot.get("size", default_size),
+                            quality=shot.get("quality", default_quality),
+                            n=1,
+                        ),
+                        label=f"内容配图 {idx + 1}/{len(shots)}",
+                        step=f"article_content_image_{idx}",
+                        data={"article_id": aid, "index": idx, "scene": scene},
+                    )
+                    elapsed = _elapsed_ms(start)
+                    url = urls[0] if urls else ""
+                    emit_tool_progress(
+                        f"内容配图 {idx + 1} 完成，用时 {_fmt_elapsed(elapsed)}",
+                        step="article_content_image_done",
+                        data={"article_id": aid, "index": idx, "image": url, "elapsed_ms": elapsed},
+                    )
+                    return {"index": idx, "url": url, "elapsed_ms": elapsed, "scene": scene}
+                except Exception as e:
+                    elapsed = _elapsed_ms(start)
+                    msg = _friendly_tool_error(e, elapsed_ms=elapsed, action=f"内容配图 {idx + 1} 生成")
+                    emit_tool_progress(
+                        msg,
+                        step="article_content_image_failed",
+                        data={"article_id": aid, "index": idx, "scene": scene, "elapsed_ms": elapsed},
+                    )
+                    return {"index": idx, "url": "", "error": msg, "elapsed_ms": elapsed, "scene": scene}
+
+        results = await asyncio.gather(*[_gen(i, shot) for i, shot in enumerate(shots)])
+        for item in sorted(results, key=lambda x: int(x.get("index", 0))):
+            if item.get("url"):
+                generated_content_images.append(str(item["url"]))
+            elif item.get("error"):
+                image_errors.append({"role": "content", **item})
+
+        for idx, url in enumerate(generated_content_images):
+            await _bind_image_to_article(
+                url,
+                aid,
+                role="content",
+                replace_index=idx if replace_existing else None,
+            )
+
+    final = await _get_article(aid)
+    elapsed = _elapsed_ms(total_start)
+    emit_tool_progress(
+        f"笔记图片生成任务完成：成功 {len(generated_content_images) + (1 if generated_cover else 0)} 张，失败 {len(image_errors)} 项，用时 {_fmt_elapsed(elapsed)}",
+        step="article_images_done",
+        data={"article_id": aid, "success": len(generated_content_images) + (1 if generated_cover else 0), "failed": len(image_errors), "elapsed_ms": elapsed},
+    )
+    return {
+        "ok": len(generated_content_images) > 0 or bool(generated_cover) or not image_errors,
+        "article_id": aid,
+        "generated_cover": generated_cover,
+        "generated_content_images": generated_content_images,
+        "image_errors": image_errors,
+        "concurrency": concurrency,
+        "elapsed_ms": elapsed,
+        "elapsed_sec": round(elapsed / 1000, 2),
+        "article": _article_payload(final) if final else None,
+    }
 
 
 # ---------- image editing (crop / inpaint / remove) ----------
@@ -959,7 +1811,7 @@ async def _bind_image_to_article(
         else:
             imgs = list(art.images or [])
             if replace_index is not None:
-                idx = int(replace_index)
+                idx = _safe_int(replace_index, len(imgs), min_value=0)
                 if 0 <= idx < len(imgs):
                     imgs[idx] = url
                 else:
@@ -973,13 +1825,16 @@ async def _bind_image_to_article(
 
 async def tool_crop_image(args: Dict[str, Any]) -> Dict[str, Any]:
     """Crop an image by pixel box. Result can replace cover / content slot."""
-    image_url = args["image_url"]
-    x = int(args.get("x", 0))
-    y = int(args.get("y", 0))
-    w = int(args.get("w", 0))
-    h = int(args.get("h", 0))
+    image_url = (args.get("image_url") or "").strip()
+    if not image_url:
+        return {"ok": False, "error": "image_url is required"}
+    x = _safe_int(args.get("x", 0), 0, min_value=0)
+    y = _safe_int(args.get("y", 0), 0, min_value=0)
+    w = _safe_int(args.get("w", 0), 0, min_value=0)
+    h = _safe_int(args.get("h", 0), 0, min_value=0)
     if w <= 0 or h <= 0:
         return {"ok": False, "error": "w/h must be > 0"}
+    op_start = time.perf_counter()
     access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
     if access_err:
         return access_err
@@ -992,19 +1847,40 @@ async def tool_crop_image(args: Dict[str, Any]) -> Dict[str, Any]:
     )
     if bind_err:
         return bind_err
-    return {"ok": True, "image": new_url}
+    elapsed = _elapsed_ms(op_start)
+    return {"ok": True, "image": new_url, "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
 
 
 async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
     """Inpaint the transparent region of mask with new content described by prompt."""
-    image_url = args["image_url"]
-    mask_url = args.get("mask_url")
+    image_url = (args.get("image_url") or "").strip()
+    mask_url = (args.get("mask_url") or "").strip()
+    if not image_url or not mask_url:
+        return {"ok": False, "error": "image_url and mask_url are required"}
     prompt = args.get("prompt") or "match surrounding style"
     size = args.get("size", "1024x1024")
+    quality = args.get("quality", "high")
+    op_start = time.perf_counter()
     access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
     if access_err:
         return access_err
-    urls = await edit_image(image_url, mask_url, prompt, size=size, n=1)
+    try:
+        urls = await _await_with_progress(
+            edit_image(image_url, mask_url, prompt, size=size, quality=quality, n=1),
+            label="局部重绘",
+            step="inpaint_image",
+            data={"image_url": image_url, "size": size, "quality": quality},
+        )
+    except Exception as e:
+        elapsed = _elapsed_ms(op_start)
+        return {
+            "ok": False,
+            "error": _friendly_tool_error(e, elapsed_ms=elapsed, action="局部重绘"),
+            "raw_error": str(e)[:1000],
+            "timeout": _is_timeout_error(e),
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+        }
     if not urls:
         return {"ok": False, "error": "no image returned"}
     bind_err = await _bind_image_to_article(
@@ -1015,22 +1891,43 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
     )
     if bind_err:
         return bind_err
-    return {"ok": True, "image": urls[0]}
+    elapsed = _elapsed_ms(op_start)
+    return {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
 
 
 async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
     """Erase / clean the masked region by inpainting with a 'clean background' prompt."""
-    image_url = args["image_url"]
-    mask_url = args["mask_url"]
+    image_url = (args.get("image_url") or "").strip()
+    mask_url = (args.get("mask_url") or "").strip()
+    if not image_url or not mask_url:
+        return {"ok": False, "error": "image_url and mask_url are required"}
     prompt = args.get("prompt") or (
         "seamlessly fill and clean this region, continue the surrounding background, "
         "remove any object present in the masked area, keep the same lighting, texture and color"
     )
     size = args.get("size", "1024x1024")
+    quality = args.get("quality", "high")
+    op_start = time.perf_counter()
     access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
     if access_err:
         return access_err
-    urls = await edit_image(image_url, mask_url, prompt, size=size, n=1)
+    try:
+        urls = await _await_with_progress(
+            edit_image(image_url, mask_url, prompt, size=size, quality=quality, n=1),
+            label="消除物体",
+            step="remove_object",
+            data={"image_url": image_url, "size": size, "quality": quality},
+        )
+    except Exception as e:
+        elapsed = _elapsed_ms(op_start)
+        return {
+            "ok": False,
+            "error": _friendly_tool_error(e, elapsed_ms=elapsed, action="消除物体"),
+            "raw_error": str(e)[:1000],
+            "timeout": _is_timeout_error(e),
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+        }
     if not urls:
         return {"ok": False, "error": "no image returned"}
     bind_err = await _bind_image_to_article(
@@ -1041,18 +1938,39 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
     )
     if bind_err:
         return bind_err
-    return {"ok": True, "image": urls[0]}
+    elapsed = _elapsed_ms(op_start)
+    return {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
 
 
 async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
     """Generic image-to-image edit without mask (variation / style shift)."""
-    image_url = args["image_url"]
+    image_url = (args.get("image_url") or "").strip()
+    if not image_url:
+        return {"ok": False, "error": "image_url is required"}
     prompt = args.get("prompt") or "enhance clarity, keep composition"
     size = args.get("size", "1024x1024")
+    quality = args.get("quality", "high")
+    op_start = time.perf_counter()
     access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
     if access_err:
         return access_err
-    urls = await edit_image(image_url, None, prompt, size=size, n=1)
+    try:
+        urls = await _await_with_progress(
+            edit_image(image_url, None, prompt, size=size, quality=quality, n=1),
+            label="图片编辑",
+            step="edit_image",
+            data={"image_url": image_url, "size": size, "quality": quality},
+        )
+    except Exception as e:
+        elapsed = _elapsed_ms(op_start)
+        return {
+            "ok": False,
+            "error": _friendly_tool_error(e, elapsed_ms=elapsed, action="图片编辑"),
+            "raw_error": str(e)[:1000],
+            "timeout": _is_timeout_error(e),
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+        }
     if not urls:
         return {"ok": False, "error": "no image returned"}
     bind_err = await _bind_image_to_article(
@@ -1063,7 +1981,8 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
     )
     if bind_err:
         return bind_err
-    return {"ok": True, "image": urls[0]}
+    elapsed = _elapsed_ms(op_start)
+    return {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
 
 
 # ---------- templates ----------
@@ -1115,7 +2034,7 @@ async def tool_apply_template(args: Dict[str, Any]) -> Dict[str, Any]:
         s.add(art)
         await s.commit()
         await s.refresh(art)
-        return {"ok": True, "article": art.to_dict()}
+        return {"ok": True, "article": _article_payload(art)}
 
 
 # ---------- search / batch / export / stats / schedule ----------
@@ -1125,7 +2044,7 @@ async def tool_search_articles(args: Dict[str, Any]) -> Dict[str, Any]:
     keyword = args.get("keyword", "")
     status_filter = args.get("status")
     tag_filter = args.get("tag")
-    limit = int(args.get("limit", 20))
+    limit = _safe_int(args.get("limit", 20), 20, min_value=1, max_value=100)
     uid = get_tool_user_id()
 
     async with SessionLocal() as s:
@@ -1144,7 +2063,7 @@ async def tool_search_articles(args: Dict[str, Any]) -> Dict[str, Any]:
     for a in articles:
         if kw and kw not in (a.title or "").lower() and kw not in (a.body or "").lower():
             continue
-        results.append(a.to_dict())
+        results.append(_article_payload(a))
         if len(results) >= limit:
             break
 
@@ -1189,7 +2108,7 @@ async def tool_export_articles(args: Dict[str, Any]) -> Dict[str, Any]:
     """Export articles as JSON array with optional filters."""
     status_filter = args.get("status")
     tag_filter = args.get("tag")
-    limit = int(args.get("limit", 50))
+    limit = _safe_int(args.get("limit", 50), 50, min_value=1, max_value=500)
     uid = get_tool_user_id()
 
     async with SessionLocal() as s:
@@ -1201,7 +2120,7 @@ async def tool_export_articles(args: Dict[str, Any]) -> Dict[str, Any]:
         if tag_filter:
             q = q.where(Article.tags.contains(tag_filter))
         res = await s.execute(q.limit(limit))
-        items = [a.to_dict() for a in res.scalars().all()]
+        items = [_article_payload(a) for a in res.scalars().all()]
 
     return {"ok": True, "count": len(items), "articles": items}
 
@@ -1265,7 +2184,7 @@ async def tool_schedule_publish(args: Dict[str, Any]) -> Dict[str, Any]:
                 return {"ok": False, "error": f"invalid datetime: {scheduled_at_str}"}
         await s.commit()
         await s.refresh(art)
-        return {"ok": True, "article": art.to_dict()}
+        return {"ok": True, "article": _article_payload(art)}
 
 
 # ---------- registry ----------
@@ -1305,7 +2224,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_create_complete_note_workflow,
         "schema": _fn_schema(
             "create_complete_note_workflow",
-            "端到端创作工作流：解析 brief，生成笔记、标题候选、标签、封面/配图方向，本地自检并可自动二次优化后入库。复杂创作请求优先使用。",
+            "端到端创作工作流：只在用户明确要求生成完整笔记/帖子/草稿/一键成稿时使用。会解析 brief，生成笔记、标题候选、标签、封面/配图方向，本地自检并可自动二次优化后入库。不要用于单纯生成图片/封面/海报。",
             {
                 "topic": {"type": "string", "description": "主题、灵感或完整 brief"},
                 "audience": {"type": "string", "description": "目标受众"},
@@ -1317,6 +2236,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "generate_cover": {"type": "boolean", "description": "是否直接生成封面图，默认 false"},
                 "generate_content_images": {"type": "boolean", "description": "是否直接生成正文配图，默认 false"},
                 "image_count": {"type": "integer", "description": "配图 prompt/生成数量，1-6"},
+                "image_concurrency": {"type": "integer", "description": "正文配图并发生成数量，1-4，默认 3"},
             },
             required=["topic"],
         ),
@@ -1356,7 +2276,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_score_article,
         "schema": _fn_schema(
             "score_article",
-            "对笔记进行五维度打分并写回。",
+            "对笔记进行五维度打分并写回，会结合正文、标签、封面/内容图数量和 image_context 评估 visual。",
             {"article_id": {"type": "integer"}},
             required=["article_id"],
         ),
@@ -1365,7 +2285,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_diagnose_article,
         "schema": _fn_schema(
             "diagnose_article",
-            "发布前诊断：违禁词、钩子缺失、CTA、可改进建议。",
+            "发布前深度诊断：内容、视觉、增长、用户反应、违禁词、CTA 和图文匹配；会把封面/内容图传给视觉诊断 Agent（模型不支持图片时自动退化为 URL/数量判断）。",
             {"article_id": {"type": "integer"}},
             required=["article_id"],
         ),
@@ -1403,7 +2323,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_read_article,
         "schema": _fn_schema(
             "read_article",
-            "读取指定笔记详情。",
+            "读取指定笔记完整详情，包含正文、标签、状态、score、cover_image、images、image_context（图片角色/索引/尺寸元数据）和 content_stats。",
             {"article_id": {"type": "integer"}},
             required=["article_id"],
         ),
@@ -1429,15 +2349,20 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_generate_image,
         "schema": _fn_schema(
             "generate_image",
-            "用 gpt-image-2 生成图片，可直接绑定到笔记（role=cover|content）。若指定 replace_index，则替换该位置的配图。",
+            "独立生成图片，不会创建笔记/帖子。只有在显式传 article_id 时才绑定到笔记（role=cover|content）；若指定 replace_index，则替换该位置的配图。",
             {
                 "prompt": {"type": "string"},
                 "size": {"type": "string", "description": "如 1024x1536 / 1024x1024"},
+                "quality": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low", "auto"],
+                    "description": "生成质量，默认 high（最高）",
+                },
                 "n": {"type": "integer"},
                 "reference_images": {"type": "array", "items": {"type": "string"}},
-                "article_id": {"type": "integer"},
-                "role": {"type": "string", "enum": ["cover", "content"]},
-                "replace_index": {"type": "integer", "description": "替换第 N 张内容配图（0-based）"},
+                "article_id": {"type": "integer", "description": "仅当用户明确要求绑定到某篇笔记时传；独立生成图片时不要传，也不要传 0"},
+                "role": {"type": "string", "enum": ["cover", "content"], "description": "仅绑定到笔记时传"},
+                "replace_index": {"type": "integer", "description": "仅绑定到笔记时传；替换第 N 张内容配图（0-based）"},
             },
             required=["prompt"],
         ),
@@ -1455,6 +2380,27 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             required=["article_id"],
         ),
     },
+    "arrange_article_images": {
+        "fn": tool_arrange_article_images,
+        "schema": _fn_schema(
+            "arrange_article_images",
+            "编排笔记图片队列：第 1 张就是小红书首图/封面。可把某张图设为封面、移动到第 N 张、插入、替换、删除或按完整 order 重排。",
+            {
+                "article_id": {"type": "integer"},
+                "action": {
+                    "type": "string",
+                    "enum": ["set_order", "move", "set_cover", "insert", "replace", "remove", "clear"],
+                    "description": "set_order=按 order 完整重排；move=from_position 移到 to_position；set_cover=position/image_url 设为首图；insert/replace/remove/clear 如名",
+                },
+                "order": {"type": "array", "items": {"type": "string"}, "description": "完整展示队列，order[0] 会成为封面"},
+                "image_url": {"type": "string", "description": "insert/replace/set_cover/remove 可用"},
+                "from_position": {"type": "integer", "description": "0-based 展示位置；0 是封面"},
+                "to_position": {"type": "integer", "description": "0-based 展示位置；0 是封面"},
+                "position": {"type": "integer", "description": "0-based 展示位置；0 是封面"},
+            },
+            required=["article_id", "action"],
+        ),
+    },
     "content_image_prompt": {
         "fn": tool_content_image_prompt,
         "schema": _fn_schema(
@@ -1467,6 +2413,38 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "body": {"type": "string"},
                 "n": {"type": "integer"},
             },
+        ),
+    },
+    "generate_article_images": {
+        "fn": tool_generate_article_images,
+        "schema": _fn_schema(
+            "generate_article_images",
+            "为已有笔记并发生成封面图/内容配图并自动绑定。适合用户要求“给这篇笔记生成多张配图/按段落生成图片/补齐帖子图片”。内容配图会并发生成并实时回报耗时与失败项。",
+            {
+                "article_id": {"type": "integer"},
+                "include_cover": {"type": "boolean", "description": "是否生成/替换封面，默认 false"},
+                "content_count": {"type": "integer", "description": "内容配图数量，0-8，默认 4"},
+                "concurrency": {"type": "integer", "description": "并发数量，1-4，默认 3"},
+                "replace_existing": {"type": "boolean", "description": "是否从第 0 张开始替换已有内容图；false 为追加"},
+                "size": {"type": "string", "description": "内容图尺寸，默认 1024x1024"},
+                "cover_size": {"type": "string", "description": "封面尺寸，默认 1024x1536"},
+                "quality": {"type": "string", "enum": ["high", "medium", "low", "auto"]},
+                "style": {"type": "string"},
+                "cover_prompt": {"type": "string"},
+                "shots": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "scene": {"type": "string"},
+                            "prompt": {"type": "string"},
+                            "size": {"type": "string"},
+                            "quality": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            required=["article_id"],
         ),
     },
     "crop_image": {
@@ -1497,6 +2475,11 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "mask_url": {"type": "string"},
                 "prompt": {"type": "string"},
                 "size": {"type": "string"},
+                "quality": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low", "auto"],
+                    "description": "生成质量，默认 high（最高）",
+                },
                 "article_id": {"type": "integer"},
                 "role": {"type": "string", "enum": ["cover", "content"]},
                 "replace_index": {"type": "integer"},
@@ -1514,6 +2497,11 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "mask_url": {"type": "string"},
                 "prompt": {"type": "string"},
                 "size": {"type": "string"},
+                "quality": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low", "auto"],
+                    "description": "生成质量，默认 high（最高）",
+                },
                 "article_id": {"type": "integer"},
                 "role": {"type": "string", "enum": ["cover", "content"]},
                 "replace_index": {"type": "integer"},
@@ -1530,6 +2518,11 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "image_url": {"type": "string"},
                 "prompt": {"type": "string"},
                 "size": {"type": "string"},
+                "quality": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low", "auto"],
+                    "description": "生成质量，默认 high（最高）",
+                },
                 "article_id": {"type": "integer"},
                 "role": {"type": "string", "enum": ["cover", "content"]},
                 "replace_index": {"type": "integer"},

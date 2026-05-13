@@ -143,10 +143,23 @@ export async function loadFromConversation(convId: number, key: string): Promise
   return conv.active_task_id || null
 }
 
-function buildContextPreface(article?: Article | null): UiMessage[] {
+function shouldAttachArticleImages(text: string): boolean {
+  return /(图片|图像|封面|配图|视觉|图文|画面|构图|排版|设计|海报|诊断|打分|匹配|裁剪|重绘|消除|编辑图|参考图)/i.test(text)
+}
+
+function buildContextPreface(article?: Article | null, latestText = ''): UiMessage[] {
   if (!article) return []
   const body = article.body || ''
   const preview = body.length > 1200 ? body.slice(0, 1200) + '…' : body
+  const contentImages = (article.images || []).filter(Boolean)
+  const articleImages = [article.cover_image, ...contentImages].filter(Boolean)
+  const attachVisuals = shouldAttachArticleImages(latestText)
+  const attachedImages = attachVisuals ? articleImages.slice(0, 5) : []
+  const imageLines = [
+    `封面图：${article.cover_image || '无'}`,
+    ...contentImages.slice(0, 12).map((url, i) => `内容图[${i}]：${url}`),
+    contentImages.length > 12 ? `其余内容图：${contentImages.length - 12} 张未展开` : '',
+  ].filter(Boolean).join('\n')
   return [{
     role: 'user',
     content:
@@ -154,9 +167,14 @@ function buildContextPreface(article?: Article | null): UiMessage[] {
       `标题：${article.title}\n` +
       `状态：${article.status}\n` +
       `标签：${(article.tags || []).join(' ')}\n\n` +
+      `图片：共 ${articleImages.length} 张\n${imageLines}\n` +
+      (attachedImages.length > 0
+        ? `本轮涉及视觉/图片，已随上下文附带前 ${attachedImages.length} 张图片供视觉理解。\n\n`
+        : `本轮先提供图片 URL；如需视觉像素级分析，用户问题包含图片/视觉/封面/配图等意图时会自动附带图片。\n\n`) +
       `正文：\n${preview}\n\n` +
       `---\n请把对「笔记 ${article.id}」的任何操作通过工具完成（read/update/rewrite/optimize/score/diagnose/generate_image/remove_image）。` +
-      `每次改写/优化前先 read_article 拿最新版。`,
+      `每次改写/优化前先 read_article 拿最新版；read_article 会返回 cover_image、images 和 image_context。`,
+    images: attachedImages,
   }]
 }
 
@@ -173,7 +191,8 @@ const toolLabel: Record<string, string> = {
   read_article: '读取',
   list_articles: '列出',
   delete_article: '删除',
-  generate_image: '配图',
+  generate_image: '生成图片',
+  generate_article_images: '批量生成配图',
   remove_image: '删图',
   suggest_tags: '标签',
   suggest_titles: '标题',
@@ -261,7 +280,7 @@ export async function sendMessage(
   }
 
   const outgoing: UiMessage[] = [
-    ...buildContextPreface(opts.article),
+    ...buildContextPreface(opts.article, content),
     ...s.messages.slice(0, -1),
   ]
 
@@ -289,8 +308,10 @@ export async function sendMessage(
           if (!gotFirstToken) { gotFirstToken = true; cur.status = '' }
         } else if (ev.type === 'tool_call') {
           cur.status = `${toolLabel[ev.name] || ev.name}…`
+        } else if (ev.type === 'tool_progress') {
+          cur.status = ev.message || `${toolLabel[ev.name] || ev.name}…`
         } else if (ev.type === 'tool_result') {
-          cur.status = '整合结果…'
+          cur.status = ev.elapsed_ms ? `${toolLabel[ev.name] || ev.name}完成，用时 ${(ev.elapsed_ms / 1000).toFixed(1)}s，整合结果…` : '整合结果…'
           opts.onArticleMayChange?.()
           if (ev.name === 'generate_article' && ev.result?.ok && ev.result?.article?.id) {
             opts.onArticleCreated?.(ev.result.article.id)
@@ -308,9 +329,18 @@ export async function sendMessage(
         if (ev.type === 'token') {
           last.content += ev.text
         } else if (ev.type === 'tool_call') {
-          last.tool_events.push({ type: 'tool_call', name: ev.name, arguments: ev.arguments })
+          last.tool_events.push({ type: 'tool_call', name: ev.name, arguments: ev.arguments, id: ev.id })
+        } else if (ev.type === 'tool_progress') {
+          // Progress is shown in the live status bar and persisted in task trace;
+          // avoid polluting chat history with many transient step events.
         } else if (ev.type === 'tool_result') {
-          last.tool_events.push({ type: 'tool_result', name: ev.name, result: ev.result })
+          last.tool_events.push({
+            type: 'tool_result',
+            name: ev.name,
+            result: ev.result,
+            id: ev.id,
+            elapsed_ms: ev.elapsed_ms,
+          } as ToolEvent)
         } else if (ev.type === 'error') {
           last.content += `\n\n⚠️ ${ev.message}`
         } else if (ev.type === 'cancelled') {
@@ -331,7 +361,8 @@ export async function sendMessage(
       const copy = cur.messages.slice()
       if (copy.length > 0 && copy[copy.length - 1].role === 'assistant') {
         const last = { ...copy[copy.length - 1] } as UiMessage
-        last.content += `\n\n⚠️ 网络异常，请检查连接后重试`
+        const detail = err?.message || '网络异常，请检查连接后重试'
+        last.content += `\n\n⚠️ ${detail}`
         copy[copy.length - 1] = last
       }
       cur.messages = copy
@@ -430,8 +461,10 @@ export async function reconnectTask(
           cur.status = ''
         } else if (ev.type === 'tool_call') {
           cur.status = `${toolLabel[ev.name] || ev.name}…`
+        } else if (ev.type === 'tool_progress') {
+          cur.status = ev.message || `${toolLabel[ev.name] || ev.name}…`
         } else if (ev.type === 'tool_result') {
-          cur.status = '整合结果…'
+          cur.status = ev.elapsed_ms ? `${toolLabel[ev.name] || ev.name}完成，用时 ${(ev.elapsed_ms / 1000).toFixed(1)}s，整合结果…` : '整合结果…'
           opts.onArticleMayChange?.()
         } else if (ev.type === 'done') {
           cur.status = ''
@@ -446,9 +479,17 @@ export async function reconnectTask(
           if (ev.type === 'token') {
             last.content += ev.text
           } else if (ev.type === 'tool_call') {
-            last.tool_events.push({ type: 'tool_call', name: ev.name, arguments: ev.arguments })
+            last.tool_events.push({ type: 'tool_call', name: ev.name, arguments: ev.arguments, id: ev.id })
+          } else if (ev.type === 'tool_progress') {
+            // Live-only progress; task trace has the durable details.
           } else if (ev.type === 'tool_result') {
-            last.tool_events.push({ type: 'tool_result', name: ev.name, result: ev.result })
+            last.tool_events.push({
+              type: 'tool_result',
+              name: ev.name,
+              result: ev.result,
+              id: ev.id,
+              elapsed_ms: ev.elapsed_ms,
+            } as ToolEvent)
           } else if (ev.type === 'error') {
             last.content += `\n\n⚠️ ${ev.message}`
           } else if (ev.type === 'cancelled') {
@@ -462,8 +503,18 @@ export async function reconnectTask(
       controller.signal,
       replayEvents.length
     )
-  } catch {
-    // reconnection failed silently
+  } catch (err: any) {
+    const cur = ensure(key)
+    cur.status = ''
+    const copy = cur.messages.slice()
+    if (copy.length > 0 && copy[copy.length - 1].role === 'assistant') {
+      const last = { ...copy[copy.length - 1] } as UiMessage
+      if (!last.content.includes('重连失败')) {
+        last.content += `\n\n⚠️ 重连失败：${err?.message || '请刷新后重试'}`
+        copy[copy.length - 1] = last
+        cur.messages = copy
+      }
+    }
   } finally {
     const cur = ensure(key)
     cur.streaming = false

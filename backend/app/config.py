@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import threading
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -18,7 +17,28 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 OVERLAY_PATH = DATA_DIR / "settings.json"
 
-_MUTABLE_KEYS = ("openai_api_key", "openai_base_url", "chat_model", "image_model")
+_MUTABLE_KEYS = (
+    # Legacy shared OpenAI-compatible config. Kept as fallback for old .env /
+    # settings.json and old clients.
+    "openai_api_key",
+    "openai_base_url",
+    # New split config: text/chat and image can use different gateways/keys.
+    "chat_api_key",
+    "chat_base_url",
+    "image_api_key",
+    "image_base_url",
+    "chat_model",
+    "image_model",
+    # Public origin of this app when deployed, e.g. https://xhs.example.com.
+    # If set, /static/images/... can be sent to model providers as absolute
+    # URLs instead of being uploaded/inlined.
+    "public_base_url",
+)
+
+
+def _mask_key(key: str) -> str:
+    k = key or ""
+    return (k[:6] + "…" + k[-4:]) if len(k) > 12 else ("已设置" if k else "")
 
 
 class Settings(BaseSettings):
@@ -30,8 +50,13 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
+    chat_api_key: str = ""
+    chat_base_url: str = ""
+    image_api_key: str = ""
+    image_base_url: str = ""
     chat_model: str = "gpt-4o"
     image_model: str = "gpt-image-1"
+    public_base_url: str = ""
 
     database_url: str = f"sqlite+aiosqlite:///{DATA_DIR / 'xhs_agent.db'}"
     image_dir: str = str(DATA_DIR / "images")
@@ -43,21 +68,69 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
+    @property
+    def effective_chat_api_key(self) -> str:
+        return self.chat_api_key or self.openai_api_key
+
+    @property
+    def effective_chat_base_url(self) -> str:
+        return self.chat_base_url or self.openai_base_url
+
+    @property
+    def effective_image_api_key(self) -> str:
+        return self.image_api_key or self.chat_api_key or self.openai_api_key
+
+    @property
+    def effective_image_base_url(self) -> str:
+        return self.image_base_url or self.chat_base_url or self.openai_base_url
+
     def public_dict(self) -> Dict[str, Any]:
         """What we expose via /api/settings. Mask the key."""
-        k = self.openai_api_key or ""
-        masked = (k[:6] + "…" + k[-4:]) if len(k) > 12 else ("已设置" if k else "")
+        chat_key = self.effective_chat_api_key
+        image_key = self.effective_image_api_key
         return {
-            "openai_api_key_mask": masked,
-            "openai_api_key_set": bool(k),
-            "openai_base_url": self.openai_base_url,
+            # Backward-compatible aliases map to the text/chat config.
+            "openai_api_key_mask": _mask_key(chat_key),
+            "openai_api_key_set": bool(chat_key),
+            "openai_base_url": self.effective_chat_base_url,
+            # Split config.
+            "chat_api_key_mask": _mask_key(chat_key),
+            "chat_api_key_set": bool(chat_key),
+            "chat_base_url": self.effective_chat_base_url,
+            "image_api_key_mask": _mask_key(image_key),
+            "image_api_key_set": bool(image_key),
+            "image_base_url": self.effective_image_base_url,
             "chat_model": self.chat_model,
             "image_model": self.image_model,
+            "public_base_url": self.public_base_url.rstrip("/"),
         }
 
 
 _lock = threading.Lock()
 _cached: Settings | None = None
+
+
+def _normalize_sqlite_database_url(url: str) -> str:
+    """Anchor relative sqlite URLs to backend/ so cwd changes don't create a new DB."""
+    value = (url or "").strip()
+    for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
+        if not value.startswith(prefix):
+            continue
+        path_part = value[len(prefix):]
+        if not path_part or path_part == ":memory:":
+            return value
+        p = Path(path_part)
+        if p.is_absolute():
+            return value
+        return prefix + str((BASE_DIR / p).resolve())
+    return value
+
+
+def _normalize_runtime_paths(settings: Settings) -> Settings:
+    settings.database_url = _normalize_sqlite_database_url(settings.database_url)
+    if settings.image_dir and not Path(settings.image_dir).is_absolute():
+        settings.image_dir = str((BASE_DIR / settings.image_dir).resolve())
+    return settings
 
 
 def _load_overlay() -> Dict[str, Any]:
@@ -71,7 +144,7 @@ def _load_overlay() -> Dict[str, Any]:
 
 def _apply_overlay(settings: Settings, overlay: Dict[str, Any]) -> None:
     for k, v in overlay.items():
-        if k in _MUTABLE_KEYS and v is not None and v != "":
+        if k in _MUTABLE_KEYS and v is not None and (v != "" or k == "public_base_url"):
             setattr(settings, k, v)
 
 
@@ -81,6 +154,7 @@ def get_settings() -> Settings:
         if _cached is None:
             s = Settings()
             _apply_overlay(s, _load_overlay())
+            _normalize_runtime_paths(s)
             Path(s.image_dir).mkdir(parents=True, exist_ok=True)
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             _cached = s
@@ -92,7 +166,7 @@ def update_settings(patch: Dict[str, Any]) -> Settings:
     global _cached
     clean: Dict[str, Any] = {}
     for k in _MUTABLE_KEYS:
-        if k in patch and patch[k] is not None and patch[k] != "":
+        if k in patch and patch[k] is not None and (patch[k] != "" or k == "public_base_url"):
             clean[k] = patch[k]
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     overlay = _load_overlay()
@@ -118,17 +192,29 @@ async def get_effective_settings(user_id: int) -> Settings:
         )
         us = result.scalars().first()
 
-    if not us or not us.use_own_key or not us.openai_api_key:
+    if not us or not us.use_own_key:
         return base
 
     # Build a copy with user overrides
     effective = Settings()
     _apply_overlay(effective, _load_overlay())
-    effective.openai_api_key = us.openai_api_key
+
+    # Legacy per-user fields are still supported and act as shared fallback.
+    if us.openai_api_key:
+        effective.openai_api_key = us.openai_api_key
     if us.openai_base_url:
         effective.openai_base_url = us.openai_base_url
+    if getattr(us, "chat_api_key", ""):
+        effective.chat_api_key = us.chat_api_key
+    if getattr(us, "chat_base_url", ""):
+        effective.chat_base_url = us.chat_base_url
+    if getattr(us, "image_api_key", ""):
+        effective.image_api_key = us.image_api_key
+    if getattr(us, "image_base_url", ""):
+        effective.image_base_url = us.image_base_url
     if us.chat_model:
         effective.chat_model = us.chat_model
     if us.image_model:
         effective.image_model = us.image_model
+    _normalize_runtime_paths(effective)
     return effective

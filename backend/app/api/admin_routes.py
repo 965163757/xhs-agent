@@ -85,6 +85,12 @@ async def get_my_settings(user: User = Depends(get_current_user)):
             "openai_api_key_mask": "",
             "openai_api_key_set": False,
             "openai_base_url": "",
+            "chat_api_key_mask": "",
+            "chat_api_key_set": False,
+            "chat_base_url": "",
+            "image_api_key_mask": "",
+            "image_api_key_set": False,
+            "image_base_url": "",
             "chat_model": "",
             "image_model": "",
         }
@@ -95,6 +101,10 @@ class MySettingsUpdate(BaseModel):
     use_own_key: Optional[bool] = None
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
+    chat_api_key: Optional[str] = None
+    chat_base_url: Optional[str] = None
+    image_api_key: Optional[str] = None
+    image_base_url: Optional[str] = None
     chat_model: Optional[str] = None
     image_model: Optional[str] = None
 

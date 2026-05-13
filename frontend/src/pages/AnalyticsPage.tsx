@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Box, Chip, Paper, Stack, Typography } from '@mui/material'
-import ReactECharts from 'echarts-for-react'
 import { getCalendar, getStats } from '../api/client'
 
 interface Stats {
@@ -36,6 +35,103 @@ function StatCard({ value, label, color }: { value: string | number; label: stri
   )
 }
 
+function TagBarChart({ items }: { items: Array<{ tag: string; count: number }> }) {
+  const max = Math.max(1, ...items.map(x => x.count))
+  if (!items.length) {
+    return <Typography sx={{ py: 6, textAlign: 'center', fontSize: 13, color: 'text.secondary' }}>暂无标签数据</Typography>
+  }
+  return (
+    <Stack spacing={1.1} sx={{ height: 240, justifyContent: 'center' }}>
+      {items.slice(0, 10).map(item => (
+        <Box key={item.tag}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Typography sx={{ width: 70, fontSize: 11, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {item.tag}
+            </Typography>
+            <Box sx={{ flex: 1, height: 9, borderRadius: 999, bgcolor: 'rgba(255,36,66,0.08)', overflow: 'hidden' }}>
+              <Box
+                sx={{
+                  width: `${Math.max(6, (item.count / max) * 100)}%`,
+                  height: '100%',
+                  borderRadius: 999,
+                  background: 'linear-gradient(90deg,#FF2442,#FF7A00)',
+                }}
+              />
+            </Box>
+            <Typography sx={{ width: 24, fontSize: 11, fontWeight: 700, color: 'text.primary', textAlign: 'right' }}>
+              {item.count}
+            </Typography>
+          </Stack>
+        </Box>
+      ))}
+    </Stack>
+  )
+}
+
+function StatusDonutChart({
+  data,
+  labels,
+}: {
+  data: Record<string, number>
+  labels: Record<string, string>
+}) {
+  const colors = ['#FF2442', '#16A34A', '#FFB800', '#8C8C8C']
+  const entries = Object.entries(data).filter(([, v]) => v > 0)
+  const total = entries.reduce((sum, [, v]) => sum + v, 0)
+  let offset = 25
+  const radius = 54
+  const circumference = 2 * Math.PI * radius
+
+  if (!total) {
+    return <Typography sx={{ py: 6, textAlign: 'center', fontSize: 13, color: 'text.secondary' }}>暂无状态数据</Typography>
+  }
+
+  return (
+    <Stack direction="row" alignItems="center" justifyContent="center" spacing={2} sx={{ height: 240 }}>
+      <Box sx={{ position: 'relative', width: 150, height: 150 }}>
+        <svg width="150" height="150" viewBox="0 0 150 150">
+          <circle cx="75" cy="75" r={radius} fill="none" stroke="#F3F4F6" strokeWidth="18" />
+          {entries.map(([key, value], i) => {
+            const dash = (value / total) * circumference
+            const circle = (
+              <circle
+                key={key}
+                cx="75"
+                cy="75"
+                r={radius}
+                fill="none"
+                stroke={colors[i % colors.length]}
+                strokeWidth="18"
+                strokeLinecap="round"
+                strokeDasharray={`${dash} ${circumference - dash}`}
+                strokeDashoffset={-offset}
+                transform="rotate(-90 75 75)"
+              />
+            )
+            offset += dash
+            return circle
+          })}
+        </svg>
+        <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+          <Box sx={{ textAlign: 'center' }}>
+            <Typography sx={{ fontSize: 24, fontWeight: 800 }}>{total}</Typography>
+            <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>总计</Typography>
+          </Box>
+        </Box>
+      </Box>
+      <Stack spacing={1}>
+        {entries.map(([key, value], i) => (
+          <Stack key={key} direction="row" alignItems="center" spacing={1}>
+            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: colors[i % colors.length] }} />
+            <Typography sx={{ fontSize: 12, color: 'text.secondary', minWidth: 56 }}>{labels[key] || key}</Typography>
+            <Typography sx={{ fontSize: 12, fontWeight: 700 }}>{value}</Typography>
+          </Stack>
+        ))}
+      </Stack>
+    </Stack>
+  )
+}
+
 export default function AnalyticsPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [calendar, setCalendar] = useState<CalendarData>({})
@@ -51,40 +147,6 @@ export default function AnalyticsPage() {
     published: '已发布',
     scheduled: '定时发布',
   }
-
-  const tagChartOption = stats ? {
-    tooltip: { trigger: 'axis', backgroundColor: '#1A1A1A', borderColor: 'transparent', textStyle: { color: '#fff', fontSize: 12 } },
-    xAxis: {
-      type: 'category',
-      data: stats.top_tags.map(t => t.tag),
-      axisLabel: { rotate: 30, fontSize: 11, color: '#8C8C8C' },
-      axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
-      axisTick: { show: false },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { fontSize: 11, color: '#8C8C8C' },
-      splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      axisLine: { show: false },
-    },
-    series: [{
-      type: 'bar',
-      data: stats.top_tags.map(t => t.count),
-      itemStyle: {
-        borderRadius: [6, 6, 0, 0],
-        color: {
-          type: 'linear',
-          x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: '#FF2442' },
-            { offset: 1, color: '#FF7A00' },
-          ],
-        },
-      },
-      barWidth: '60%',
-    }],
-    grid: { left: 40, right: 20, top: 20, bottom: 60 },
-  } : null
 
   const today = new Date()
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
@@ -114,10 +176,10 @@ export default function AnalyticsPage() {
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2.5, mb: 4 }}>
         {/* Tag distribution */}
-        {tagChartOption && (
+        {stats && (
           <Paper sx={{ p: 2.5 }}>
             <Typography sx={{ fontSize: 14, fontWeight: 600, mb: 1.5 }}>标签分布 Top 15</Typography>
-            <ReactECharts option={tagChartOption} style={{ height: 240 }} />
+            <TagBarChart items={stats.top_tags} />
           </Paper>
         )}
 
@@ -125,24 +187,7 @@ export default function AnalyticsPage() {
         {stats && (
           <Paper sx={{ p: 2.5 }}>
             <Typography sx={{ fontSize: 14, fontWeight: 600, mb: 1.5 }}>状态分布</Typography>
-            <ReactECharts
-              style={{ height: 240 }}
-              option={{
-                tooltip: { trigger: 'item', backgroundColor: '#1A1A1A', borderColor: 'transparent', textStyle: { color: '#fff', fontSize: 12 } },
-                series: [{
-                  type: 'pie',
-                  radius: ['42%', '72%'],
-                  data: Object.entries(stats.by_status).map(([k, v]) => ({
-                    name: statusLabel[k] || k,
-                    value: v,
-                  })),
-                  itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 3 },
-                  label: { fontSize: 12, color: '#6B6B6B' },
-                  emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.1)' } },
-                }],
-                color: ['#FF2442', '#16A34A', '#FFB800', '#8C8C8C'],
-              }}
-            />
+            <StatusDonutChart data={stats.by_status} labels={statusLabel} />
           </Paper>
         )}
       </Box>

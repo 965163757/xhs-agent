@@ -55,21 +55,29 @@ function Section({ title, desc, children }: { title: string; desc?: string; chil
 export default function SettingsPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : ''
 
   const [s, setS] = useState<PublicSettings | null>(null)
-  const [apiKey, setApiKey] = useState('')
-  const [baseUrl, setBaseUrl] = useState('')
+  const [chatApiKey, setChatApiKey] = useState('')
+  const [chatBaseUrl, setChatBaseUrl] = useState('')
+  const [imageApiKey, setImageApiKey] = useState('')
+  const [imageBaseUrl, setImageBaseUrl] = useState('')
   const [chatModel, setChatModel] = useState('')
   const [imageModel, setImageModel] = useState('')
-  const [showKey, setShowKey] = useState(false)
+  const [publicBaseUrl, setPublicBaseUrl] = useState('')
+  const [showChatKey, setShowChatKey] = useState(false)
+  const [showImageKey, setShowImageKey] = useState(false)
 
   const [my, setMy] = useState<MySettings | null>(null)
-  const [myKey, setMyKey] = useState('')
-  const [myBaseUrl, setMyBaseUrl] = useState('')
+  const [myChatKey, setMyChatKey] = useState('')
+  const [myChatBaseUrl, setMyChatBaseUrl] = useState('')
+  const [myImageKey, setMyImageKey] = useState('')
+  const [myImageBaseUrl, setMyImageBaseUrl] = useState('')
   const [myChatModel, setMyChatModel] = useState('')
   const [myImageModel, setMyImageModel] = useState('')
   const [useOwnKey, setUseOwnKey] = useState(false)
-  const [showMyKey, setShowMyKey] = useState(false)
+  const [showMyChatKey, setShowMyChatKey] = useState(false)
+  const [showMyImageKey, setShowMyImageKey] = useState(false)
 
   const [users, setUsers] = useState<AdminUser[]>([])
   const [regOpen, setRegOpen] = useState(true)
@@ -81,15 +89,18 @@ export default function SettingsPage() {
   const load = async () => {
     const cur = await getSettings()
     setS(cur)
-    setBaseUrl(cur.openai_base_url)
+    setChatBaseUrl(cur.chat_base_url || cur.openai_base_url)
+    setImageBaseUrl(cur.image_base_url || cur.chat_base_url || cur.openai_base_url)
     setChatModel(cur.chat_model)
     setImageModel(cur.image_model)
+    setPublicBaseUrl(cur.public_base_url || '')
     getMcpTools().then(setMcpTools).catch(() => setMcpTools([]))
 
     getMySettings().then(ms => {
       setMy(ms)
       setUseOwnKey(ms.use_own_key)
-      setMyBaseUrl(ms.openai_base_url)
+      setMyChatBaseUrl(ms.chat_base_url || ms.openai_base_url)
+      setMyImageBaseUrl(ms.image_base_url || ms.chat_base_url || ms.openai_base_url)
       setMyChatModel(ms.chat_model)
       setMyImageModel(ms.image_model)
     }).catch(() => {})
@@ -111,13 +122,17 @@ export default function SettingsPage() {
     setMsg(null)
     try {
       const next = await updateSettings({
-        openai_api_key: apiKey || undefined,
-        openai_base_url: baseUrl || undefined,
+        chat_api_key: chatApiKey || undefined,
+        chat_base_url: chatBaseUrl || undefined,
+        image_api_key: imageApiKey || undefined,
+        image_base_url: imageBaseUrl || undefined,
         chat_model: chatModel || undefined,
         image_model: imageModel || undefined,
+        public_base_url: publicBaseUrl.trim(),
       })
       setS(next)
-      setApiKey('')
+      setChatApiKey('')
+      setImageApiKey('')
       setMsg({ kind: 'success', text: '全局配置已保存。' })
     } catch (e: any) {
       setMsg({ kind: 'error', text: e?.response?.data?.detail || e?.message || '保存失败' })
@@ -132,13 +147,16 @@ export default function SettingsPage() {
     try {
       const next = await updateMySettings({
         use_own_key: useOwnKey,
-        openai_api_key: myKey || undefined,
-        openai_base_url: myBaseUrl || undefined,
+        chat_api_key: myChatKey || undefined,
+        chat_base_url: myChatBaseUrl || undefined,
+        image_api_key: myImageKey || undefined,
+        image_base_url: myImageBaseUrl || undefined,
         chat_model: myChatModel || undefined,
         image_model: myImageModel || undefined,
       })
       setMy(next)
-      setMyKey('')
+      setMyChatKey('')
+      setMyImageKey('')
       setMsg({ kind: 'success', text: '个人设置已保存。' })
     } catch (e: any) {
       setMsg({ kind: 'error', text: e?.message || '保存失败' })
@@ -152,7 +170,7 @@ export default function SettingsPage() {
     setMsg({ kind: 'info', text: '正在测试连接...' })
     try {
       const r = await testSettings()
-      if (r.ok) setMsg({ kind: 'success', text: `连接正常，模型回复：${r.reply || ''}` })
+      if (r.ok) setMsg({ kind: 'success', text: `文本连接正常：${r.reply || ''}；生图配置：${r.image_model || '-'} @ ${r.image_base_url || '-'}；公网地址：${r.public_base_url || '未配置'}` })
       else setMsg({ kind: 'error', text: `连接失败：${r.error || ''}` })
     } finally {
       setBusy(false)
@@ -207,46 +225,75 @@ export default function SettingsPage() {
 
           {useOwnKey && (
             <Stack spacing={2}>
+              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary' }}>
+                文本 / 对话模型
+              </Typography>
               <TextField
-                label="我的 API Key"
-                placeholder={my?.openai_api_key_set ? '留空则保持不变' : '填入 sk-...'}
+                label="文本 API Key"
+                placeholder={my?.chat_api_key_set || my?.openai_api_key_set ? '留空则保持不变' : '填入 sk-...'}
                 fullWidth
-                value={myKey}
-                type={showMyKey ? 'text' : 'password'}
-                onChange={e => setMyKey(e.target.value)}
+                value={myChatKey}
+                type={showMyChatKey ? 'text' : 'password'}
+                onChange={e => setMyChatKey(e.target.value)}
                 InputProps={{
                   endAdornment: (
                     <InputAdornment position="end">
-                      <IconButton onClick={() => setShowMyKey(v => !v)} edge="end" size="small">
-                        {showMyKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                      <IconButton onClick={() => setShowMyChatKey(v => !v)} edge="end" size="small">
+                        {showMyChatKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
                       </IconButton>
                     </InputAdornment>
                   ),
                 }}
               />
               <TextField
-                label="Base URL"
+                label="文本 Base URL"
                 placeholder="https://api.openai.com/v1"
                 fullWidth
-                value={myBaseUrl}
-                onChange={e => setMyBaseUrl(e.target.value)}
+                value={myChatBaseUrl}
+                onChange={e => setMyChatBaseUrl(e.target.value)}
               />
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField
-                  label="对话模型"
-                  placeholder="留空则用全局"
-                  fullWidth
-                  value={myChatModel}
-                  onChange={e => setMyChatModel(e.target.value)}
-                />
-                <TextField
-                  label="图片模型"
-                  placeholder="留空则用全局"
-                  fullWidth
-                  value={myImageModel}
-                  onChange={e => setMyImageModel(e.target.value)}
-                />
-              </Stack>
+              <TextField
+                label="对话模型"
+                placeholder="留空则用全局"
+                fullWidth
+                value={myChatModel}
+                onChange={e => setMyChatModel(e.target.value)}
+              />
+
+              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
+                生图模型
+              </Typography>
+              <TextField
+                label="生图 API Key"
+                placeholder={my?.image_api_key_set ? '留空则保持不变；不填则复用文本 Key' : '可留空复用文本 Key'}
+                fullWidth
+                value={myImageKey}
+                type={showMyImageKey ? 'text' : 'password'}
+                onChange={e => setMyImageKey(e.target.value)}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowMyImageKey(v => !v)} edge="end" size="small">
+                        {showMyImageKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <TextField
+                label="生图 Base URL"
+                placeholder="可留空复用文本 Base URL"
+                fullWidth
+                value={myImageBaseUrl}
+                onChange={e => setMyImageBaseUrl(e.target.value)}
+              />
+              <TextField
+                label="图片模型"
+                placeholder="留空则用全局"
+                fullWidth
+                value={myImageModel}
+                onChange={e => setMyImageModel(e.target.value)}
+              />
             </Stack>
           )}
 
@@ -276,56 +323,127 @@ export default function SettingsPage() {
             <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ gap: 0.5, mb: 2.5 }}>
               <Chip
                 size="small"
-                label={`Key: ${s.openai_api_key_mask || '未设置'}`}
+                label={`文本 Key: ${s.chat_api_key_mask || s.openai_api_key_mask || '未设置'}`}
                 sx={{
-                  bgcolor: s.openai_api_key_set ? 'rgba(22,163,74,0.08)' : 'rgba(0,0,0,0.04)',
-                  color: s.openai_api_key_set ? '#16A34A' : 'text.secondary',
+                  bgcolor: (s.chat_api_key_set || s.openai_api_key_set) ? 'rgba(22,163,74,0.08)' : 'rgba(0,0,0,0.04)',
+                  color: (s.chat_api_key_set || s.openai_api_key_set) ? '#16A34A' : 'text.secondary',
+                  fontWeight: 500,
+                }}
+              />
+              <Chip
+                size="small"
+                label={`生图 Key: ${s.image_api_key_mask || '未设置'}`}
+                sx={{
+                  bgcolor: s.image_api_key_set ? 'rgba(22,163,74,0.08)' : 'rgba(0,0,0,0.04)',
+                  color: s.image_api_key_set ? '#16A34A' : 'text.secondary',
                   fontWeight: 500,
                 }}
               />
               <Chip size="small" label={`对话 ${s.chat_model}`} />
               <Chip size="small" label={`图片 ${s.image_model}`} />
+              <Chip
+                size="small"
+                label={`公网地址 ${s.public_base_url || '未配置'}`}
+                sx={{
+                  bgcolor: s.public_base_url ? 'rgba(22,163,74,0.08)' : 'rgba(0,0,0,0.04)',
+                  color: s.public_base_url ? '#16A34A' : 'text.secondary',
+                  fontWeight: 500,
+                }}
+              />
             </Stack>
 
             <Stack spacing={2}>
+              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary' }}>
+                文本 / 对话模型
+              </Typography>
               <TextField
-                label="OpenAI API Key"
-                placeholder={s.openai_api_key_set ? '留空则保持不变' : '填入 sk-...'}
+                label="文本 API Key"
+                placeholder={(s.chat_api_key_set || s.openai_api_key_set) ? '留空则保持不变' : '填入 sk-...'}
                 fullWidth
-                value={apiKey}
-                type={showKey ? 'text' : 'password'}
-                onChange={e => setApiKey(e.target.value)}
+                value={chatApiKey}
+                type={showChatKey ? 'text' : 'password'}
+                onChange={e => setChatApiKey(e.target.value)}
                 InputProps={{
                   endAdornment: (
                     <InputAdornment position="end">
-                      <IconButton onClick={() => setShowKey(v => !v)} edge="end" size="small">
-                        {showKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                      <IconButton onClick={() => setShowChatKey(v => !v)} edge="end" size="small">
+                        {showChatKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
                       </IconButton>
                     </InputAdornment>
                   ),
                 }}
               />
               <TextField
-                label="Base URL"
+                label="文本 Base URL"
                 placeholder="https://api.openai.com/v1"
                 fullWidth
-                value={baseUrl}
-                onChange={e => setBaseUrl(e.target.value)}
+                value={chatBaseUrl}
+                onChange={e => setChatBaseUrl(e.target.value)}
               />
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField
+                label="对话模型"
+                fullWidth
+                value={chatModel}
+                onChange={e => setChatModel(e.target.value)}
+              />
+
+              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
+                生图模型
+              </Typography>
+              <TextField
+                label="生图 API Key"
+                placeholder={s.image_api_key_set ? '留空则保持不变；不填则复用文本 Key' : '可留空复用文本 Key'}
+                fullWidth
+                value={imageApiKey}
+                type={showImageKey ? 'text' : 'password'}
+                onChange={e => setImageApiKey(e.target.value)}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowImageKey(v => !v)} edge="end" size="small">
+                        {showImageKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <TextField
+                label="生图 Base URL"
+                placeholder="可留空复用文本 Base URL"
+                fullWidth
+                value={imageBaseUrl}
+                onChange={e => setImageBaseUrl(e.target.value)}
+              />
+              <TextField
+                label="图片模型"
+                fullWidth
+                value={imageModel}
+                onChange={e => setImageModel(e.target.value)}
+              />
+
+              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
+                部署访问地址
+              </Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                 <TextField
-                  label="对话模型"
+                  label="服务公网地址 / 当前部署 Origin"
+                  placeholder="例如 http://服务器IP:8787 或 https://xhs.example.com"
                   fullWidth
-                  value={chatModel}
-                  onChange={e => setChatModel(e.target.value)}
+                  value={publicBaseUrl}
+                  onChange={e => setPublicBaseUrl(e.target.value)}
+                  helperText="直接用 IP/域名访问后端时填这里。模型读取 /static/images/... 会优先转成这个公网地址；失败再回退本地上传/内联。"
                 />
-                <TextField
-                  label="图片模型"
-                  fullWidth
-                  value={imageModel}
-                  onChange={e => setImageModel(e.target.value)}
-                />
+                <Button
+                  variant="outlined"
+                  onClick={() => setPublicBaseUrl(currentOrigin)}
+                  sx={{ minWidth: 138, alignSelf: { xs: 'stretch', sm: 'flex-start' }, mt: { sm: 0.5 } }}
+                >
+                  使用当前地址
+                </Button>
               </Stack>
+              <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mt: -1 }}>
+                当前浏览器访问地址：{currentOrigin || '-'}。本地开发经 Vite 代理时可不填；服务器直连 IP/域名部署时建议填写。
+              </Typography>
               <Button
                 variant="contained"
                 onClick={saveGlobal}

@@ -9,10 +9,19 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from ..database import Conversation, SessionLocal, Task
+from sqlalchemy import select
+
+from ..database import Conversation, SessionLocal, Task, UserMemory
 from .runner import run_agent_stream
+
+
+MAX_RUNNING_TASKS_PER_USER = 2
+TRACE_FLUSH_INTERVAL_SECONDS = 2.0
+STREAM_RETENTION_SECONDS = 60
+MAX_MEMORY_BRIEFS = 20
 
 
 class TaskStream:
@@ -61,7 +70,51 @@ class TaskStream:
 _streams: Dict[str, TaskStream] = {}
 _running: Dict[str, bool] = {}
 _task_handles: Dict[str, asyncio.Task] = {}
+_task_users: Dict[str, Optional[int]] = {}
 _cancelled: set[str] = set()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _truncate(text: Any, limit: int = 800) -> str:
+    s = text if isinstance(text, str) else str(text or "")
+    s = s.strip()
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def _new_trace(
+    task_id: str,
+    trace_id: str,
+    conversation_id: Optional[int],
+    user_id: Optional[int],
+) -> Dict[str, Any]:
+    return {
+        "trace_id": trace_id,
+        "task_id": task_id,
+        "user_id": user_id,
+        "conversation_id": conversation_id,
+        "status": "running",
+        "created_at": _utc_now_iso(),
+        "model": {},
+        "timings_ms": {},
+        "event_counts": {},
+        "tools": [],
+        "errors": [],
+        "token_chars": 0,
+    }
+
+
+def _count_event(trace: Dict[str, Any], event_type: str) -> None:
+    counts = trace.setdefault("event_counts", {})
+    counts[event_type] = int(counts.get(event_type, 0)) + 1
+
+
+def _running_count_for_user(user_id: Optional[int]) -> int:
+    if user_id is None:
+        return 0
+    return sum(1 for uid in _task_users.values() if uid == user_id)
 
 
 async def spawn_agent_task(
@@ -70,10 +123,22 @@ async def spawn_agent_task(
     user_id: Optional[int] = None,
 ) -> str:
     """Create a Task row and spawn the agent loop in the background. Returns task_id."""
+    if user_id is not None and _running_count_for_user(user_id) >= MAX_RUNNING_TASKS_PER_USER:
+        raise RuntimeError(f"同一用户最多同时运行 {MAX_RUNNING_TASKS_PER_USER} 个 Agent 任务")
+
     task_id = uuid.uuid4().hex[:16]
+    trace_id = uuid.uuid4().hex[:12]
+    trace = _new_trace(task_id, trace_id, conversation_id, user_id)
 
     async with SessionLocal() as s:
-        t = Task(id=task_id, user_id=user_id, conversation_id=conversation_id, status="running")
+        t = Task(
+            id=task_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            status="running",
+            trace_id=trace_id,
+            trace=trace,
+        )
         s.add(t)
         if conversation_id:
             conv = await s.get(Conversation, conversation_id)
@@ -84,8 +149,9 @@ async def spawn_agent_task(
     stream = TaskStream()
     _streams[task_id] = stream
     _running[task_id] = True
+    _task_users[task_id] = user_id
 
-    task = asyncio.create_task(_run_loop(task_id, messages, conversation_id, user_id, stream))
+    task = asyncio.create_task(_run_loop(task_id, messages, conversation_id, user_id, stream, trace))
     _task_handles[task_id] = task
     return task_id
 
@@ -96,6 +162,7 @@ async def _run_loop(
     conversation_id: Optional[int],
     user_id: Optional[int],
     stream: TaskStream,
+    trace: Dict[str, Any],
 ):
     """Execute the agent stream, pushing events to the broadcast stream."""
     from ..config import get_effective_settings
@@ -105,38 +172,108 @@ async def _run_loop(
     settings = None
     if user_id:
         settings = await get_effective_settings(user_id)
+    if settings:
+        trace["model"] = {
+            "chat_model": settings.chat_model,
+            "image_model": settings.image_model,
+            "chat_base_url": settings.effective_chat_base_url,
+            "image_base_url": settings.effective_image_base_url,
+        }
+
+    runtime_messages = await _with_user_memory(user_id, messages)
     user_token = set_tool_user_id(user_id)
     settings_token = set_current_settings(settings)
 
     result_text = ""
     last_flush = time.time()
     status = "completed"
+    started = time.perf_counter()
+    first_event_ms: Optional[int] = None
+    first_token_ms: Optional[int] = None
+    tool_started_at: Dict[str, float] = {}
 
     try:
-        async for ev in run_agent_stream(messages, settings=settings):
+        async for ev in run_agent_stream(runtime_messages, settings=settings):
             if task_id in _cancelled:
                 status = "cancelled"
                 break
+
+            now_perf = time.perf_counter()
+            if first_event_ms is None:
+                first_event_ms = int((now_perf - started) * 1000)
+                trace.setdefault("timings_ms", {})["first_event"] = first_event_ms
+
+            ev_type = ev.get("type", "unknown")
+            _count_event(trace, ev_type)
             stream.push(ev)
 
             if ev.get("type") == "token":
-                result_text += ev.get("text", "")
+                text = ev.get("text", "")
+                if first_token_ms is None:
+                    first_token_ms = int((now_perf - started) * 1000)
+                    trace.setdefault("timings_ms", {})["first_token"] = first_token_ms
+                result_text += text
+                trace["token_chars"] = int(trace.get("token_chars", 0)) + len(text or "")
             elif ev.get("type") == "error":
                 status = "failed"
+                trace.setdefault("errors", []).append(_truncate(ev.get("message"), 500))
+            elif ev.get("type") == "tool_call":
+                tid = str(ev.get("id") or uuid.uuid4().hex[:8])
+                tool_started_at[tid] = now_perf
+                trace.setdefault("tools", []).append(
+                    {
+                        "id": tid,
+                        "name": ev.get("name", "unknown"),
+                        "started_ms": int((now_perf - started) * 1000),
+                        "arguments_preview": _truncate(ev.get("arguments"), 500),
+                    }
+                )
+            elif ev.get("type") == "tool_progress":
+                tid = str(ev.get("id") or "")
+                for item in reversed(trace.setdefault("tools", [])):
+                    if item.get("id") == tid:
+                        progress = item.setdefault("progress", [])
+                        if len(progress) < 50:
+                            progress.append(
+                                {
+                                    "step": ev.get("step", ""),
+                                    "message": _truncate(ev.get("message"), 240),
+                                    "at_ms": int((now_perf - started) * 1000),
+                                }
+                            )
+                        break
+            elif ev.get("type") == "tool_result":
+                tid = str(ev.get("id") or "")
+                elapsed = None
+                if tid in tool_started_at:
+                    elapsed = int((now_perf - tool_started_at.pop(tid)) * 1000)
+                for item in reversed(trace.setdefault("tools", [])):
+                    if item.get("id") == tid:
+                        result = ev.get("result")
+                        item["elapsed_ms"] = elapsed
+                        item["ok"] = bool(result.get("ok", True)) if isinstance(result, dict) else True
+                        item["result_preview"] = _truncate(result, 500)
+                        break
 
             now = time.time()
-            if now - last_flush > 2.0:
+            if now - last_flush > TRACE_FLUSH_INTERVAL_SECONDS:
                 last_flush = now
-                await _flush_events(task_id, stream.events, result_text)
+                trace.setdefault("timings_ms", {})["elapsed"] = int((time.perf_counter() - started) * 1000)
+                await _flush_events(task_id, stream.events, result_text, trace)
     except asyncio.CancelledError:
         status = "cancelled"
         _cancelled.add(task_id)
     except Exception as e:
         stream.push({"type": "error", "message": str(e)})
         status = "failed"
+        trace.setdefault("errors", []).append(_truncate(str(e), 500))
     finally:
         reset_current_settings(settings_token)
         reset_tool_user_id(user_token)
+
+        trace["status"] = status
+        trace["completed_at"] = _utc_now_iso()
+        trace.setdefault("timings_ms", {})["elapsed"] = int((time.perf_counter() - started) * 1000)
 
         if status == "cancelled" and not stream.done:
             stream.push({"type": "cancelled", "text": result_text})
@@ -144,24 +281,34 @@ async def _run_loop(
             stream.push({"type": "done", "text": result_text})
 
         try:
-            await _finalize_task(task_id, conversation_id, stream.events, result_text, status)
+            await _finalize_task(task_id, conversation_id, stream.events, result_text, status, trace)
+            if status == "completed":
+                await _update_user_memory(user_id, messages, result_text)
         except Exception:
             pass
 
         _running.pop(task_id, None)
         _task_handles.pop(task_id, None)
+        _task_users.pop(task_id, None)
         _cancelled.discard(task_id)
-        await asyncio.sleep(60)
+        await asyncio.sleep(STREAM_RETENTION_SECONDS)
         _streams.pop(task_id, None)
 
 
-async def _flush_events(task_id: str, events: List[Dict[str, Any]], result_text: str):
+async def _flush_events(
+    task_id: str,
+    events: List[Dict[str, Any]],
+    result_text: str,
+    trace: Optional[Dict[str, Any]] = None,
+):
     try:
         async with SessionLocal() as s:
             t = await s.get(Task, task_id)
             if t:
                 t.events = list(events)
                 t.result_text = result_text
+                if trace is not None:
+                    t.trace = dict(trace)
                 await s.commit()
     except Exception:
         pass
@@ -173,6 +320,7 @@ async def _finalize_task(
     events: List[Dict[str, Any]],
     result_text: str,
     status: str,
+    trace: Dict[str, Any],
 ):
     """Mark task complete and write final assistant message to conversation."""
     try:
@@ -182,6 +330,7 @@ async def _finalize_task(
                 t.status = status
                 t.events = list(events)
                 t.result_text = result_text
+                t.trace = dict(trace)
 
             if conversation_id:
                 conv = await s.get(Conversation, conversation_id)
@@ -197,6 +346,136 @@ async def _finalize_task(
                         if tool_events:
                             msgs[-1]["tool_events"] = tool_events
                     conv.messages = msgs
+            await s.commit()
+    except Exception:
+        pass
+
+
+async def _with_user_memory(
+    user_id: Optional[int],
+    messages: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Inject a compact user-memory system message without persisting it to chat history."""
+    if user_id is None:
+        return messages
+    try:
+        async with SessionLocal() as s:
+            res = await s.execute(select(UserMemory).where(UserMemory.user_id == user_id))
+            mem = res.scalars().first()
+        if not mem:
+            return messages
+        parts: List[str] = []
+        if mem.summary:
+            parts.append(f"长期偏好摘要：{_truncate(mem.summary, 900)}")
+        profile = mem.profile or {}
+        if profile:
+            compact_profile = {k: v for k, v in profile.items() if v}
+            if compact_profile:
+                parts.append(f"偏好画像：{compact_profile}")
+        recent = (mem.recent_briefs or [])[-5:]
+        if recent:
+            lines = []
+            for item in recent:
+                content = _truncate(item.get("content", ""), 120)
+                if content:
+                    lines.append(f"- {content}")
+            if lines:
+                parts.append("最近创作需求：\n" + "\n".join(lines))
+        if not parts:
+            return messages
+        memory_prompt = (
+            "以下是该用户的长期创作上下文。用于保持风格连续性，但如果与本轮明确要求冲突，"
+            "以本轮要求为准。\n" + "\n\n".join(parts)
+        )
+        return [{"role": "system", "content": memory_prompt}] + messages
+    except Exception:
+        return messages
+
+
+def _last_user_content(messages: List[Dict[str, Any]]) -> str:
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            return _truncate(msg.get("content", ""), 600)
+    return ""
+
+
+def _infer_profile_hint(content: str) -> Dict[str, Any]:
+    """Small deterministic preference extractor; avoids extra model calls."""
+    hints: Dict[str, Any] = {}
+    text = content or ""
+    if any(x in text for x in ("小红书", "种草", "爆款")):
+        hints["platform"] = "小红书"
+    for tone in ("治愈", "专业", "口语", "高级", "活泼", "犀利", "干货", "情绪"):
+        if tone in text:
+            hints.setdefault("tones", [])
+            if tone not in hints["tones"]:
+                hints["tones"].append(tone)
+    for audience in ("打工人", "宝妈", "学生", "新手", "女生", "职场", "创业者"):
+        if audience in text:
+            hints.setdefault("audiences", [])
+            if audience not in hints["audiences"]:
+                hints["audiences"].append(audience)
+    return hints
+
+
+def _merge_profile(old: Dict[str, Any], hints: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(old or {})
+    for key, value in hints.items():
+        if isinstance(value, list):
+            existing = list(merged.get(key) or [])
+            for item in value:
+                if item not in existing:
+                    existing.append(item)
+            merged[key] = existing[-12:]
+        elif value:
+            merged[key] = value
+    return merged
+
+
+def _build_memory_summary(recent: List[Dict[str, Any]], profile: Dict[str, Any]) -> str:
+    lines: List[str] = []
+    if profile.get("platform"):
+        lines.append(f"主要平台：{profile['platform']}")
+    if profile.get("tones"):
+        lines.append("偏好语气：" + "、".join(profile["tones"][-8:]))
+    if profile.get("audiences"):
+        lines.append("常见受众：" + "、".join(profile["audiences"][-8:]))
+    briefs = [_truncate(x.get("content", ""), 80) for x in recent[-5:] if x.get("content")]
+    if briefs:
+        lines.append("近期主题：" + " / ".join(briefs))
+    return _truncate("\n".join(lines), 1200)
+
+
+async def _update_user_memory(
+    user_id: Optional[int],
+    messages: List[Dict[str, Any]],
+    result_text: str,
+) -> None:
+    if user_id is None:
+        return
+    content = _last_user_content(messages)
+    if not content:
+        return
+    try:
+        async with SessionLocal() as s:
+            res = await s.execute(select(UserMemory).where(UserMemory.user_id == user_id))
+            mem = res.scalars().first()
+            if not mem:
+                mem = UserMemory(user_id=user_id)
+                s.add(mem)
+            recent = list(mem.recent_briefs or [])
+            recent.append(
+                {
+                    "content": content,
+                    "result_preview": _truncate(result_text, 160),
+                    "at": _utc_now_iso(),
+                }
+            )
+            recent = recent[-MAX_MEMORY_BRIEFS:]
+            profile = _merge_profile(mem.profile or {}, _infer_profile_hint(content))
+            mem.recent_briefs = recent
+            mem.profile = profile
+            mem.summary = _build_memory_summary(recent, profile)
             await s.commit()
     except Exception:
         pass

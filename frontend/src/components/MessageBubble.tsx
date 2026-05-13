@@ -21,7 +21,8 @@ const toolNameZh: Record<string, string> = {
   read_article: '读取笔记',
   list_articles: '列出笔记',
   delete_article: '删除笔记',
-  generate_image: '生成配图',
+  generate_image: '生成图片',
+  generate_article_images: '批量生成配图',
   suggest_tags: '推荐标签',
   suggest_titles: '候选标题',
   outline_article: '生成大纲',
@@ -45,8 +46,18 @@ const toolNameZh: Record<string, string> = {
 export type ToolEvent = {
   type: 'tool_call' | 'tool_result'
   name: string
+  id?: string
   arguments?: any
   result?: any
+  elapsed_ms?: number
+  ok?: boolean
+}
+
+function formatElapsed(ms?: number) {
+  if (!ms && ms !== 0) return ''
+  const sec = ms / 1000
+  if (sec < 60) return `${sec.toFixed(1)}s`
+  return `${Math.floor(sec / 60)}m${Math.round(sec % 60)}s`
 }
 
 function toAbs(url: string) {
@@ -69,6 +80,11 @@ function ToolCard({
   const name = (call || result)?.name || ''
   const zh = toolNameZh[name] || name
   const running = !!call && !result
+  const elapsedMs = result?.elapsed_ms ?? result?.result?.elapsed_ms
+  const elapsedText = formatElapsed(elapsedMs)
+  const ok = !result || result.result?.ok !== false
+  const errorText: string | undefined = result?.result?.error
+  const retryOptions: Array<{ label: string; reason?: string; arguments?: any }> = result?.result?.retry_options || []
   const images: string[] =
     (result?.result?.images as string[]) ||
     (result?.result?.article?.images as string[]) ||
@@ -89,7 +105,7 @@ function ToolCard({
     <Box
       sx={{
         border: '1px solid',
-        borderColor: running ? 'warning.main' : 'divider',
+        borderColor: running ? 'warning.main' : ok ? 'divider' : 'error.main',
         bgcolor: running ? 'action.hover' : 'action.selected',
         borderRadius: 2,
         my: 1,
@@ -108,11 +124,11 @@ function ToolCard({
             width: 8,
             height: 8,
             borderRadius: '50%',
-            bgcolor: running ? '#F59E0B' : '#16A34A',
+            bgcolor: running ? '#F59E0B' : ok ? '#16A34A' : '#DC2626',
           }}
         />
         <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.primary' }}>
-          {running ? `调用 ${zh}…` : `${zh} · 完成`}
+          {running ? `调用 ${zh}…` : `${zh} · ${ok ? '完成' : '失败'}${elapsedText ? ` · ${elapsedText}` : ''}`}
         </Typography>
         <Typography sx={{ fontSize: 12, color: 'text.secondary', fontFamily: 'monospace' }}>
           {name}
@@ -129,6 +145,44 @@ function ToolCard({
       </Stack>
       <Collapse in={open}>
         <Box sx={{ px: 1.4, pb: 1.4, borderTop: '1px solid', borderColor: 'divider', pt: 1 }}>
+          {errorText && (
+            <Box
+              sx={{
+                fontSize: 13,
+                color: 'error.main',
+                bgcolor: 'rgba(220,38,38,0.08)',
+                border: '1px solid rgba(220,38,38,0.2)',
+                borderRadius: 1,
+                p: 1,
+                whiteSpace: 'pre-wrap',
+                mb: 1,
+              }}
+            >
+              {errorText}
+            </Box>
+          )}
+          {retryOptions.length > 0 && (
+            <Box sx={{ mb: 1 }}>
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.6 }}>
+                可选重试方案（不会自动降低画质）
+              </Typography>
+              <Stack direction="row" spacing={0.6} flexWrap="wrap" sx={{ gap: 0.6 }}>
+                {retryOptions.map((opt, idx) => (
+                  <Chip
+                    key={idx}
+                    size="small"
+                    label={opt.label || `方案 ${idx + 1}`}
+                    title={opt.reason || ''}
+                    onClick={() => {
+                      navigator.clipboard.writeText(JSON.stringify(opt.arguments || {}, null, 2))
+                      toast.success('已复制重试参数', { duration: 1200 })
+                    }}
+                    sx={{ cursor: 'pointer' }}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          )}
           {argJson !== '{}' && (
             <Box
               sx={{
@@ -414,7 +468,9 @@ function pairToolEvents(events: ToolEvent[]): Array<{ call?: ToolEvent; result?:
       out.push({ call: ev })
       openCalls.push({ call: ev, idx: out.length - 1 })
     } else if (ev.type === 'tool_result') {
-      const matchIdx = openCalls.findIndex(oc => oc.call.name === ev.name)
+      const matchIdx = openCalls.findIndex(oc => (
+        ev.id && oc.call.id ? oc.call.id === ev.id : oc.call.name === ev.name
+      ))
       if (matchIdx !== -1) {
         const { idx } = openCalls[matchIdx]
         out[idx] = { ...out[idx], result: ev }

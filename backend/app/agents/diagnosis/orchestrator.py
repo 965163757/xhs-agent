@@ -74,27 +74,66 @@ async def _call_agent(
     user_content: str,
     temperature: float = 0.7,
     settings: Optional[Settings] = None,
+    images: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    resp = await chat_completion(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-        temperature=temperature,
-        settings=settings,
-    )
+    user_msg: Dict[str, Any] = {"role": "user", "content": user_content}
+    if images:
+        user_msg["images"] = images
+    try:
+        resp = await chat_completion(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                user_msg,
+            ],
+            temperature=temperature,
+            settings=settings,
+        )
+    except Exception:
+        if not images:
+            raise
+        # Some configured chat models are text-only.  Retry with image URLs in
+        # text context so diagnosis still completes instead of failing outright.
+        resp = await chat_completion(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": user_content + "\n\n（当前模型未接受图片输入，本轮按图片 URL/数量做文本级视觉判断。）",
+                },
+            ],
+            temperature=temperature,
+            settings=settings,
+        )
     text = resp.choices[0].message.content or ""
     return _safe_json_parse(text)
 
 
-def _build_note_context(title: str, content: str, tags: List[str], image_count: int, category: str) -> str:
+def _build_note_context(
+    title: str,
+    content: str,
+    tags: List[str],
+    image_count: int,
+    category: str,
+    *,
+    cover_image: str = "",
+    images: Optional[List[str]] = None,
+) -> str:
     tags_str = " ".join(tags) if tags else "（无标签）"
+    images = images or []
+    image_lines: List[str] = []
+    if cover_image:
+        image_lines.append(f"- 封面图：{cover_image}")
+    for idx, url in enumerate([x for x in images if x and x != cover_image][:12]):
+        image_lines.append(f"- 内容图[{idx}]：{url}")
+    if not image_lines:
+        image_lines.append("- 无已知图片 URL")
     return (
         f"## 待诊断笔记\n\n"
         f"**标题：** {title}\n\n"
         f"**正文：**\n{content}\n\n"
         f"**标签：** {tags_str}\n\n"
         f"**图片数量：** {image_count}张\n"
+        f"**图片清单：**\n" + "\n".join(image_lines) + "\n"
         f"**品类：** {CATEGORY_CN.get(category, category)}\n"
     )
 
@@ -105,6 +144,7 @@ async def run_diagnosis(
     tags: List[str] | None = None,
     image_count: int = 0,
     images: List[str] | None = None,
+    cover_image: str = "",
     progress: Optional[ProgressCallback] = None,
     settings: Optional[Settings] = None,
 ) -> DiagnosisResult:
@@ -112,6 +152,13 @@ async def run_diagnosis(
     start_time = time.time()
     tags = tags or []
     images = images or []
+    visual_images = []
+    if cover_image:
+        visual_images.append(cover_image)
+    for url in images:
+        if url and url not in visual_images:
+            visual_images.append(url)
+    visual_images = visual_images[:6]
 
     async def emit(step: str, message: str, data: Optional[Dict[str, Any]] = None):
         if progress:
@@ -130,7 +177,15 @@ async def run_diagnosis(
     text_analysis = full_analysis(title, content, category, tags, image_count)
 
     # ─── Step 3: 构建笔记上下文 ───
-    note_context = _build_note_context(title, content, tags, image_count, category)
+    note_context = _build_note_context(
+        title,
+        content,
+        tags,
+        image_count,
+        category,
+        cover_image=cover_image,
+        images=images,
+    )
     analysis_context = (
         f"\n\n## 客观数据分析结果\n"
         f"- Model A 总分：{model_a['total_score']}\n"
@@ -153,7 +208,8 @@ async def run_diagnosis(
         data_supplement = build_data_prompt(agent_type, category)
         full_prompt = prompt + data_supplement
         user_msg = note_context + analysis_context
-        result = await _call_agent(full_prompt, user_msg, settings=settings)
+        attached_images = visual_images if agent_type in {"visual", "user_sim"} else []
+        result = await _call_agent(full_prompt, user_msg, settings=settings, images=attached_images)
         await emit(f"agent_done_{agent_type}", f"{name}完成评估", {"score": result.get("score", 0)})
         return result
 

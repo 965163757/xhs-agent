@@ -33,6 +33,7 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
     tags = req.tags
     image_count = req.image_count
     images = req.images
+    cover_image = ""
 
     if req.article_id:
         async with SessionLocal() as s:
@@ -44,8 +45,9 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
             title = article.title or ""
             content = article.body or ""
             tags = [t for t in (article.tags or "").split(",") if t.strip()]
-            images = article.images or []
-            image_count = len(images) + (1 if article.cover_image else 0)
+            cover_image = article.cover_image or ""
+            images = ([cover_image] if cover_image else []) + (article.images or [])
+            image_count = len(images)
 
     if not title and not content:
         raise HTTPException(400, "标题和正文不能同时为空")
@@ -64,6 +66,7 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
                 tags=tags,
                 image_count=image_count,
                 images=images,
+                cover_image=cover_image,
                 progress=progress_callback,
                 settings=effective_settings,
             )
@@ -96,7 +99,7 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
         task = asyncio.create_task(run_task())
         try:
             while True:
-                item = await asyncio.wait_for(progress_queue.get(), timeout=120)
+                item = await asyncio.wait_for(progress_queue.get(), timeout=480)
                 if item is None:
                     break
                 yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
