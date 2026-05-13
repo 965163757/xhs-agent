@@ -51,7 +51,7 @@ import ImageEditor from '../components/ImageEditor'
 import PhonePreview from '../components/PhonePreview'
 import TagInput from '../components/TagInput'
 import { getSession, loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor } from '../chatStore'
-import { formatBeijingDateTime } from '../utils/time'
+import { appDateTimestamp, formatBeijingDateTime } from '../utils/time'
 
 function ImageFrame({
   src,
@@ -364,7 +364,7 @@ export default function ArticleDetailPage() {
         const aCurrent = a.article_id === currentId ? 0 : 1
         const bCurrent = b.article_id === currentId ? 0 : 1
         if (aCurrent !== bCurrent) return aCurrent - bCurrent
-        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+        return appDateTimestamp(b.updated_at) - appDateTimestamp(a.updated_at)
       })
       setConvos(sorted)
       setSelectedConvoIds(prev => prev.filter(cid => sorted.some(c => c.id === cid)))

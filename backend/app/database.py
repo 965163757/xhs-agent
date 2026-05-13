@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import AsyncIterator
 
 from sqlalchemy import Boolean, JSON, DateTime, Integer, String, Text, select, text
@@ -423,6 +423,53 @@ async def _migrate_sqlite_utc_timestamps_to_beijing(conn) -> None:
     )
 
 
+async def _repair_future_beijing_timestamps(conn) -> None:
+    """Repair timestamps that were accidentally shifted +8h twice.
+
+    Earlier timezone migration code intentionally converted legacy SQLite UTC
+    rows to naive Beijing rows.  If a server already had Beijing-local rows but
+    no migration flag yet, those rows could be moved 8 hours into the future.
+    Created/updated timestamps should not be in the future, so this startup
+    guard safely moves only values that are both clearly future and become
+    non-future after subtracting 8 hours.
+    """
+    if not settings.database_url.startswith(("sqlite+aiosqlite://", "sqlite://")):
+        return
+
+    threshold = (beijing_now_naive() + timedelta(minutes=10)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    columns = [
+        ("articles", "created_at"),
+        ("articles", "updated_at"),
+        ("conversations", "created_at"),
+        ("conversations", "updated_at"),
+        ("tasks", "created_at"),
+        ("tasks", "updated_at"),
+        ("article_versions", "created_at"),
+        ("article_diagnoses", "created_at"),
+        ("article_diagnoses", "applied_at"),
+        ("templates", "created_at"),
+        ("users", "created_at"),
+        ("user_memories", "updated_at"),
+    ]
+    for table, col in columns:
+        try:
+            await conn.execute(
+                text(
+                    f"UPDATE {table} "
+                    f"SET {col}=datetime({col}, '-8 hours') "
+                    f"WHERE {col} IS NOT NULL AND {col} != '' "
+                    f"AND datetime({col}) > datetime(:threshold) "
+                    f"AND datetime({col}, '-8 hours') <= datetime(:threshold)"
+                ),
+                {"threshold": threshold},
+            )
+        except Exception:
+            # Some tables/columns may be absent in very old databases.
+            pass
+
+
 async def _backfill_ownership(conn) -> None:
     """Assign orphan records to the first user and make them admin."""
     result = await conn.execute(text("SELECT id FROM users ORDER BY id LIMIT 1"))
@@ -459,6 +506,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_columns(conn)
         await _migrate_sqlite_utc_timestamps_to_beijing(conn)
+        await _repair_future_beijing_timestamps(conn)
         await _backfill_ownership(conn)
         await _recover_interrupted_tasks(conn)
     await _seed_templates()

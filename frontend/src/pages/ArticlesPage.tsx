@@ -26,7 +26,7 @@ import SortIcon from '@mui/icons-material/Sort'
 import { deleteArticle, listArticles, type Article } from '../api/client'
 import { toast } from 'sonner'
 import ConfirmDialog from '../components/ConfirmDialog'
-import { formatBeijingDate } from '../utils/time'
+import { appDateTimestamp, formatBeijingDate } from '../utils/time'
 
 type SortKey = 'updated' | 'score' | 'title'
 
@@ -75,7 +75,7 @@ export default function ArticlesPage() {
     list = [...list].sort((a, b) => {
       if (sortBy === 'score') return articleScore(b) - articleScore(a)
       if (sortBy === 'title') return a.title.localeCompare(b.title)
-      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      return appDateTimestamp(b.updated_at) - appDateTimestamp(a.updated_at)
     })
     return list
   }, [items, query, statusFilter, sortBy])
