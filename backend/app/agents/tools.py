@@ -10,7 +10,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from sqlalchemy import or_, select
 
@@ -236,8 +236,12 @@ async def _ensure_article_image_access(
     if err:
         return {"ok": False, "error": err}
     assert art is not None
-    allowed = {art.cover_image, *(art.images or [])}
-    if image_url not in allowed:
+    allowed = {
+        _canonicalize_app_image_ref(x)
+        for x in [art.cover_image, *(art.images or [])]
+        if str(x or "").strip()
+    }
+    if _canonicalize_app_image_ref(image_url) not in allowed:
         return {"ok": False, "error": "图片不属于该笔记"}
     return None
 
@@ -301,13 +305,94 @@ def _safe_json(text: str) -> Dict[str, Any]:
     return {}
 
 
+def _configured_public_base_url() -> str:
+    base = (getattr(get_settings(), "public_base_url", "") or "").strip().rstrip("/")
+    if not base:
+        return ""
+    try:
+        parsed = urlparse(base)
+        if parsed.scheme.lower() in {"http", "https"} and parsed.netloc:
+            return base
+    except Exception:
+        pass
+    return ""
+
+
+def _absolute_image_url(url_or_path: str) -> str:
+    """Best user/agent-facing absolute URL for an image.
+
+    Storage keeps app images as /static/images/... so local edits stay portable.
+    For model/Agent context we additionally expose an absolute public URL when
+    PUBLIC_BASE_URL is configured.  Public external URLs are already complete.
+    """
+    value = str(url_or_path or "").strip()
+    if not value:
+        return ""
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    base = _configured_public_base_url()
+    if base and value.startswith("/static/images/"):
+        return urljoin(base + "/", value.lstrip("/"))
+    return value
+
+
+def _image_url_fields(url_or_path: str) -> Dict[str, Any]:
+    value = str(url_or_path or "").strip()
+    full = _absolute_image_url(value)
+    fields: Dict[str, Any] = {
+        "url": value,
+        "full_url": full,
+        # Explicit aliases for model/tool readers.  `url` stays as the stored
+        # app path; `model_url` is the best URL to show/pass to an upstream.
+        "model_url": full,
+    }
+    if value != full:
+        fields["stored_url"] = value
+        fields["public_url"] = full
+    if value.startswith("/static/images/") and not _configured_public_base_url():
+        fields["public_url_configured"] = False
+        fields["url_note"] = "本地静态图片路径；如需外部模型直接读取，请在设置页配置 PUBLIC_BASE_URL。"
+    return fields
+
+
+def _canonicalize_app_image_ref(url_or_path: str) -> str:
+    """Convert this app's public/static image URL back to portable storage form."""
+    value = str(url_or_path or "").strip()
+    if not value:
+        return ""
+    if value.startswith("/static/images/"):
+        return value
+    if not (value.startswith("http://") or value.startswith("https://")):
+        return value
+    try:
+        parsed = urlparse(value)
+        host = (parsed.hostname or "").lower()
+        if parsed.path.startswith("/static/images/") and host in {"localhost", "127.0.0.1", "::1"}:
+            return parsed.path
+        base = _configured_public_base_url()
+        if base:
+            b = urlparse(base)
+            base_path = b.path.rstrip("/")
+            expected = f"{base_path}/static/images/" if base_path else "/static/images/"
+            if (
+                parsed.scheme.lower() == b.scheme.lower()
+                and parsed.netloc.lower() == b.netloc.lower()
+                and parsed.path.startswith(expected)
+            ):
+                rel = parsed.path[len(expected):].lstrip("/")
+                return f"/static/images/{rel}" if rel else value
+    except Exception:
+        pass
+    return value
+
+
 def _static_image_path(url_or_path: str) -> Optional[Path]:
     """Resolve an app image URL/path to disk, returning None if not local/safe."""
     if not url_or_path:
         return None
     try:
         base = Path(get_settings().image_dir).resolve()
-        s = str(url_or_path)
+        s = _canonicalize_app_image_ref(str(url_or_path))
         path_part = s
         if s.startswith("http://") or s.startswith("https://"):
             parsed = urlparse(s)
@@ -330,7 +415,7 @@ def _static_image_path(url_or_path: str) -> Optional[Path]:
 
 def _image_asset(url: str, role: str, index: Optional[int] = None) -> Dict[str, Any]:
     """Return lightweight image metadata for agent reasoning without embedding bytes."""
-    item: Dict[str, Any] = {"role": role, "url": url}
+    item: Dict[str, Any] = {"role": role, **_image_url_fields(url)}
     if index is not None:
         item["index"] = index
     path = _static_image_path(url)
@@ -372,7 +457,13 @@ def _article_image_context(art: Article) -> Dict[str, Any]:
             "position": position,
             "role": item.get("role"),
             "url": item.get("url"),
+            "full_url": item.get("full_url") or item.get("url"),
+            "model_url": item.get("model_url") or item.get("url"),
         }
+        if item.get("public_url"):
+            visual_item["public_url"] = item["public_url"]
+        if item.get("stored_url"):
+            visual_item["stored_url"] = item["stored_url"]
         if "index" in item:
             visual_item["index"] = item["index"]
         visual_images.append(visual_item)
@@ -380,8 +471,9 @@ def _article_image_context(art: Article) -> Dict[str, Any]:
         "has_cover": bool(cover),
         "stored_has_cover": bool(stored_cover),
         "cover_image": cover,
+        "cover_image_full_url": _absolute_image_url(cover) if cover else "",
         "content_images": [
-            {"index": i, "url": url}
+            {"index": i, **_image_url_fields(url)}
             for i, url in enumerate(content_images)
         ],
         # 小红书真实展示语义：所有图片是一个队列，position=0 即首图/封面。
@@ -389,6 +481,8 @@ def _article_image_context(art: Article) -> Dict[str, Any]:
         "all_images": assets,
         "image_count": len(assets),
         "content_image_count": len(content_images),
+        "visual_queue": queue,
+        "visual_queue_full_urls": [_absolute_image_url(url) for url in queue],
         "notes": (
             "visual_images 按展示顺序排列，position=0 是首图/封面；"
             "content_images 按 index 从 0 开始，对应 visual position=index+1；"
@@ -405,6 +499,13 @@ def _article_payload(art: Article) -> Dict[str, Any]:
     # images 只包含首图之后的后续内容图，避免前端/Agent 再次判断旧数据形态。
     payload["cover_image"] = payload["image_context"]["cover_image"]
     payload["images"] = [x["url"] for x in payload["image_context"]["content_images"]]
+    payload["cover_image_full_url"] = payload["image_context"].get("cover_image_full_url") or payload["cover_image"]
+    payload["images_full_urls"] = [x.get("full_url") or x.get("url") for x in payload["image_context"]["content_images"]]
+    payload["visual_queue"] = payload["image_context"].get("visual_queue") or [payload["cover_image"], *payload["images"]]
+    payload["visual_queue_full_urls"] = payload["image_context"].get("visual_queue_full_urls") or [
+        payload["cover_image_full_url"],
+        *payload["images_full_urls"],
+    ]
     payload["content_stats"] = {
         "title_chars": len(art.title or ""),
         "body_chars": len(art.body or ""),
@@ -442,10 +543,14 @@ def _article_image_summary_text(art: Article) -> str:
         return f"（{ '，'.join(parts) }）" if parts else ""
 
     if ctx["cover_image"]:
-        lines.append(f"首图/封面：{ctx['cover_image']}{meta_text(assets_by_key.get(('cover', None)))}")
+        full = ctx.get("cover_image_full_url") or ctx["cover_image"]
+        suffix = f"（完整URL：{full}）" if full != ctx["cover_image"] else ""
+        lines.append(f"首图/封面：{ctx['cover_image']}{suffix}{meta_text(assets_by_key.get(('cover', None)))}")
     for img in ctx["content_images"][:12]:
         asset = assets_by_key.get(("content", img["index"]))
-        lines.append(f"后续内容图[{img['index']}]：{img['url']}{meta_text(asset)}")
+        full = img.get("full_url") or img.get("url")
+        suffix = f"（完整URL：{full}）" if full != img.get("url") else ""
+        lines.append(f"后续内容图[{img['index']}]：{img['url']}{suffix}{meta_text(asset)}")
     if ctx["content_image_count"] > 12:
         lines.append(f"其余内容图：{ctx['content_image_count'] - 12} 张未展开")
     return "\n".join(lines)
@@ -1217,6 +1322,182 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "article": _article_payload(art)}
 
 
+async def tool_imitate_article_style(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Imitate a reference note's writing/visual style into a target or new note."""
+    ref_id = int(args.get("reference_article_id") or args.get("source_article_id") or 0)
+    if ref_id <= 0:
+        return {"ok": False, "error": "reference_article_id is required"}
+
+    raw_target = args.get("target_article_id", args.get("article_id"))
+    target_id = int(raw_target) if str(raw_target or "").strip().isdigit() and int(raw_target) > 0 else None
+    topic = str(args.get("topic") or "").strip()
+    instruction = str(args.get("instruction") or "").strip()
+    generate_images_flag = bool(args.get("generate_images", False))
+    image_count = _safe_int(args.get("image_count", 3), 3, min_value=0, max_value=6)
+    image_mode = str(args.get("image_mode") or "edit_reference").strip().lower()
+    size = str(args.get("size") or "1024x1536")
+    quality = str(args.get("quality") or "high")
+
+    ref, err = await _get_article_for_user(ref_id)
+    if err:
+        return {"ok": False, "error": err}
+    assert ref is not None
+
+    target: Optional[Article] = None
+    if target_id:
+        target, err = await _get_article_for_user(target_id)
+        if err:
+            return {"ok": False, "error": err}
+        assert target is not None
+        await _snapshot_article(target_id, f"imitate_style:{ref_id}")
+
+    from .research_data import detect_category
+
+    seed_title = target.title if target else topic
+    seed_body = target.body if target else ""
+    seed_tags = (target.tags or "").split(",") if target else []
+    category = detect_category(seed_title or ref.title or topic, seed_body or ref.body or "", seed_tags)
+    playbook = _category_playbook_text(category)
+    ref_ctx = _article_image_context(ref)
+    ref_images = ref_ctx.get("visual_images") or []
+    ref_image_lines = "\n".join(
+        f"- position={x.get('position')} role={x.get('role')} stored={x.get('url')} full={x.get('full_url') or x.get('model_url') or x.get('url')}"
+        for x in ref_images[:8]
+    ) or "无"
+
+    emit_tool_progress(
+        f"正在提取参考笔记 #{ref_id} 的写法和视觉风格",
+        step="imitate_style_analyze",
+        data={"reference_article_id": ref_id, "target_article_id": target_id},
+    )
+    resp = await chat_completion(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "你是小红书风格仿写专家。你的任务不是复制原文，而是提取参考笔记的结构、语气、节奏、标题套路、"
+                    "信息组织和视觉风格，再生成一篇新的小红书笔记。避免照搬连续 12 个字以上的原句，避免虚构无法从主题推出的事实。\n"
+                    "严格按 JSON 返回："
+                    "{"
+                    '"style_profile":{"tone":"语气","structure":"结构","hook":"开头钩子套路","visual_style":"图片风格"},'
+                    '"title":"新标题",'
+                    '"body":"新正文",'
+                    '"tags":["#标签"],'
+                    '"image_plan":[{"source_position":0,"role":"cover/content","prompt":"基于参考图做同风格变体的图片编辑提示词","size":"1024x1536"}]'
+                    "}"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"【参考笔记】\n{_article_prompt_context(ref, body_limit=5000)}\n\n"
+                    f"【参考图片完整 URL】\n{ref_image_lines}\n\n"
+                    + (f"【要改写/仿写到的目标笔记】\n{_article_prompt_context(target, body_limit=5000)}\n\n" if target else "")
+                    + f"【新主题/要求】\n主题：{topic or '沿用目标笔记主题/参考笔记同赛道'}\n补充要求：{instruction or '保持信息真实、口语化、有收藏价值'}\n"
+                    f"{playbook}\n"
+                    "请输出可直接写入草稿箱的标题、正文、标签；如果需要生成图片，image_plan 要让 edit_image 基于参考图做同风格变体，而不是原图复制。"
+                ),
+            },
+        ],
+        temperature=0.78,
+    )
+    data = _safe_json(resp.choices[0].message.content or "")
+    title = str(data.get("title") or (target.title if target else topic or ref.title or "仿写笔记")).strip()[:255]
+    body = str(data.get("body") or (target.body if target else "")).strip()
+    fallback_tags = (target.tags or "").split(",") if target else (ref.tags or "").split(",")
+    tags = _normalize_tags(data.get("tags") or fallback_tags)
+    style_profile = data.get("style_profile") if isinstance(data.get("style_profile"), dict) else {}
+    image_plan = data.get("image_plan") if isinstance(data.get("image_plan"), list) else []
+
+    uid = get_tool_user_id()
+    async with SessionLocal() as s:
+        if target_id:
+            art = await s.get(Article, target_id)
+            if not art:
+                return {"ok": False, "error": f"article {target_id} not found"}
+            art.title = title or art.title
+            art.body = body or art.body
+            if tags:
+                art.tags = ",".join(tags)
+        else:
+            art = Article(title=title, body=body, tags=",".join(tags), status="draft", user_id=uid)
+            s.add(art)
+        art.score = _score_for_article(art)
+        await s.commit()
+        await s.refresh(art)
+        out_id = int(art.id)
+
+    image_results: List[Dict[str, Any]] = []
+    image_errors: List[Dict[str, Any]] = []
+    if generate_images_flag and image_count > 0:
+        emit_tool_progress(
+            f"开始参考笔记 #{ref_id} 的图片做同风格变体",
+            step="imitate_images_start",
+            data={"reference_article_id": ref_id, "target_article_id": out_id, "image_count": image_count, "mode": image_mode},
+        )
+        ref_queue = [str(x.get("url") or "").strip() for x in ref_images if str(x.get("url") or "").strip()]
+        ref_queue = ref_queue[:image_count]
+        if image_mode in {"edit_reference", "edit", "variation", "imitate"} and ref_queue:
+            for idx, src in enumerate(ref_queue):
+                plan = image_plan[idx] if idx < len(image_plan) and isinstance(image_plan[idx], dict) else {}
+                role = "cover" if idx == 0 else "content"
+                edit_prompt = str(plan.get("prompt") or "").strip() or (
+                    f"参考这张图的构图、色调、排版和小红书质感，为新笔记《{title}》生成同风格变体。"
+                    "保留风格，不复制原图具体内容；画面清晰，高级，有收藏转发感。"
+                )
+                r = await tool_edit_image(
+                    {
+                        "image_url": src,
+                        "source_article_id": ref_id,
+                        "article_id": out_id,
+                        "role": role,
+                        "replace_index": idx - 1 if idx > 0 else None,
+                        "prompt": edit_prompt,
+                        "size": str(plan.get("size") or size),
+                        "quality": quality,
+                    }
+                )
+                if r.get("ok"):
+                    image_results.append({"source_image": src, "role": role, "image": r.get("image"), "elapsed_ms": r.get("elapsed_ms")})
+                else:
+                    image_errors.append({"source_image": src, "role": role, "error": r.get("error")})
+        else:
+            ref_full = [str(x.get("model_url") or x.get("full_url") or x.get("url")) for x in ref_images[:3]]
+            prompt = (
+                f"小红书同风格图片，参考笔记 #{ref_id} 的视觉风格：{style_profile.get('visual_style') or '干净、高级、有生活感'}。"
+                f"新笔记标题：{title}。不要复制原图，生成新的同风格画面。"
+            )
+            r = await tool_generate_image(
+                {
+                    "prompt": prompt,
+                    "reference_images": ref_full,
+                    "article_id": out_id,
+                    "role": "cover",
+                    "n": image_count,
+                    "size": size,
+                    "quality": quality,
+                }
+            )
+            if r.get("ok"):
+                image_results.extend([{"role": "generated", "image": u} for u in (r.get("images") or [])])
+            else:
+                image_errors.append({"role": "generated", "error": r.get("error")})
+
+    final = await _refresh_article_local_score(out_id) or await _get_article(out_id)
+    return {
+        "ok": True,
+        "reference_article_id": ref_id,
+        "target_article_id": target_id,
+        "article_id": out_id,
+        "article": _article_payload(final) if final else None,
+        "style_profile": style_profile,
+        "image_plan": image_plan[:6],
+        "image_results": image_results,
+        "image_errors": image_errors,
+        "message": "已按参考笔记完成仿写；如启用图片，已用参考图做同风格变体并绑定到目标笔记。",
+    }
+
+
 async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
     aid = int(args["article_id"])
     focus = args.get("focus", "标题吸引力、开头钩子、情绪价值、标签")
@@ -1392,9 +1673,13 @@ async def tool_diagnose_article(args: Dict[str, Any]) -> Dict[str, Any]:
 
     tags = [t for t in (art.tags or "").split(",") if t.strip()]
     image_ctx = _article_image_context(art)
-    visual_images = [x["url"] for x in image_ctx.get("visual_images", []) if x.get("url")]
+    visual_images = [
+        str(x.get("model_url") or x.get("full_url") or x.get("url"))
+        for x in image_ctx.get("visual_images", [])
+        if x.get("url")
+    ]
     image_count = len(visual_images)
-    cover_image = str(image_ctx.get("cover_image") or "")
+    cover_image = str(image_ctx.get("cover_image_full_url") or image_ctx.get("cover_image") or "")
 
     result = await run_diagnosis(
         title=art.title or "",
@@ -1660,7 +1945,7 @@ def _dedupe_preserve_order(items: List[str]) -> List[str]:
 
 
 def _apply_article_visual_queue(art: Article, queue: List[str]) -> None:
-    queue = _dedupe_preserve_order(queue)
+    queue = _dedupe_preserve_order([_canonicalize_app_image_ref(x) for x in queue])
     art.cover_image = queue[0] if queue else ""
     art.images = queue[1:] if len(queue) > 1 else []
 
@@ -2175,7 +2460,9 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
     size = args.get("size", "1024x1024")
     quality = args.get("quality", "high")
     op_start = time.perf_counter()
-    access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
+    # source_article_id lets Agent imitate an image from one note and bind the
+    # edited/variant result to another note.  article_id remains the write target.
+    access_err = await _ensure_article_image_access(args.get("source_article_id") or args.get("article_id"), image_url)
     if access_err:
         return access_err
     try:
@@ -2478,6 +2765,25 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             required=["article_id"],
         ),
     },
+    "imitate_article_style": {
+        "fn": tool_imitate_article_style,
+        "schema": _fn_schema(
+            "imitate_article_style",
+            "参考某篇笔记的中文小红书写法/结构/视觉风格做仿写。可写回目标笔记或新建笔记；需要仿图时会用 edit_image 基于参考图生成同风格变体并绑定。",
+            {
+                "reference_article_id": {"type": "integer", "description": "作为风格参考的笔记 ID"},
+                "target_article_id": {"type": "integer", "description": "要写回的目标笔记 ID；不传则新建笔记"},
+                "topic": {"type": "string", "description": "新主题/选题；为空时沿用目标笔记或参考笔记同赛道"},
+                "instruction": {"type": "string", "description": "额外仿写要求、受众、禁用点等"},
+                "generate_images": {"type": "boolean", "description": "是否同时仿图，默认 false"},
+                "image_count": {"type": "integer", "description": "仿图数量 0-6"},
+                "image_mode": {"type": "string", "enum": ["edit_reference", "generate"], "description": "edit_reference=调用 edit_image 修改参考图做同风格变体；generate=参考图生图"},
+                "size": {"type": "string", "description": "仿图尺寸，默认 1024x1536"},
+                "quality": {"type": "string", "enum": ["high", "medium", "low", "auto"]},
+            },
+            required=["reference_article_id"],
+        ),
+    },
     "optimize_article": {
         "fn": tool_optimize_article,
         "schema": _fn_schema(
@@ -2737,7 +3043,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_edit_image,
         "schema": _fn_schema(
             "edit_image",
-            "整图风格化编辑（不带 mask）。",
+            "整图风格化编辑（不带 mask）。可用 source_article_id 指明原图归属，再把结果绑定到另一个 article_id。",
             {
                 "image_url": {"type": "string"},
                 "prompt": {"type": "string"},
@@ -2747,6 +3053,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                     "enum": ["high", "medium", "low", "auto"],
                     "description": "生成质量，默认 high（最高）",
                 },
+                "source_article_id": {"type": "integer", "description": "原图所属笔记 ID；用于跨笔记仿图/改图权限校验"},
                 "article_id": {"type": "integer"},
                 "role": {"type": "string", "enum": ["cover", "content"]},
                 "replace_index": {"type": "integer"},

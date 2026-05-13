@@ -144,22 +144,28 @@ export async function loadFromConversation(convId: number, key: string): Promise
 }
 
 function shouldAttachArticleImages(text: string): boolean {
-  return /(图片|图像|封面|配图|视觉|图文|画面|构图|排版|设计|海报|诊断|打分|匹配|裁剪|重绘|消除|编辑图|参考图)/i.test(text)
+  return /(图片|图像|封面|配图|视觉|图文|画面|构图|排版|设计|海报|诊断|打分|匹配|裁剪|重绘|消除|编辑图|参考图|仿图|模仿|仿写|参考)/i.test(text)
 }
 
 function buildContextPreface(article?: Article | null, latestText = ''): UiMessage[] {
   if (!article) return []
   const body = article.body || ''
   const preview = body.length > 1200 ? body.slice(0, 1200) + '…' : body
-  const contentImages = (article.images || []).filter(Boolean)
-  const articleImages = [article.cover_image, ...contentImages].filter(Boolean)
+  const visualItems: Array<{ position: number; role?: string; url: string; model_url?: string; full_url?: string }> = article.image_context?.visual_images?.length
+    ? article.image_context.visual_images
+    : [article.cover_image, ...(article.images || [])]
+      .filter(Boolean)
+      .map((url, position) => ({ position, role: position === 0 ? 'cover' : 'content', url }))
+  const articleImages = visualItems.map(x => x.model_url || x.full_url || x.url).filter(Boolean)
   const attachVisuals = shouldAttachArticleImages(latestText)
   const attachedImages = attachVisuals ? articleImages.slice(0, 5) : []
-  const imageLines = [
-    `首图/封面：${article.cover_image || '无'}`,
-    ...contentImages.slice(0, 12).map((url, i) => `后续内容图[${i}]：${url}`),
-    contentImages.length > 12 ? `其余后续内容图：${contentImages.length - 12} 张未展开` : '',
-  ].filter(Boolean).join('\n')
+  const imageLines = visualItems.length > 0
+    ? visualItems.slice(0, 12).map(item => {
+      const full = item.model_url || item.full_url || item.url
+      const role = item.position === 0 ? '首图/封面' : `第 ${item.position + 1} 张`
+      return `${role}：${item.url}${full && full !== item.url ? `（完整URL：${full}）` : ''}`
+    }).join('\n')
+    : '无'
   return [{
     role: 'user',
     content:
@@ -167,13 +173,14 @@ function buildContextPreface(article?: Article | null, latestText = ''): UiMessa
       `标题：${article.title}\n` +
       `状态：${article.status}\n` +
       `标签：${(article.tags || []).join(' ')}\n\n` +
-      `图片：共 ${articleImages.length} 张（小红书展示队列：第 1 张就是首图/封面）\n${imageLines}\n` +
+      `图片：共 ${articleImages.length} 张（小红书展示队列：第 1 张就是首图/封面；上方含完整 URL/model_url）\n${imageLines}\n` +
       (attachedImages.length > 0
         ? `本轮涉及视觉/图片，已随上下文附带前 ${attachedImages.length} 张图片供视觉理解。\n\n`
         : `本轮先提供图片 URL；如需视觉像素级分析，用户问题包含图片/视觉/封面/配图等意图时会自动附带图片。\n\n`) +
       `正文：\n${preview}\n\n` +
-      `---\n请把对「笔记 ${article.id}」的任何操作通过工具完成（read/update/rewrite/optimize/score/diagnose/generate_image/arrange_article_images/remove_image）。` +
-      `每次改写/优化前先 read_article 拿最新版；read_article 会返回有效首图 cover_image、后续 images 和 image_context。`,
+      `---\n当前编辑页默认操作「笔记 ${article.id}」，但对话不与笔记强绑定；如果用户明确指定其它笔记 ID 或多个笔记，请按用户指定 ID 操作。` +
+      `任何写入都通过工具完成（read/update/rewrite/imitate_article_style/optimize/score/diagnose/generate_image/arrange_article_images/remove_image）。` +
+      `每次改写/优化/仿写前先 read_article 拿最新版；read_article 会返回有效首图 cover_image、后续 images、完整图片 URL 和 image_context。`,
     images: attachedImages,
   }]
 }
@@ -182,6 +189,7 @@ const toolLabel: Record<string, string> = {
   generate_article: '生成笔记',
   create_complete_note_workflow: '一键成稿',
   rewrite_article: '改写',
+  imitate_article_style: '仿写',
   optimize_article: '优化',
   polish_paragraph: '润色',
   score_article: '打分',

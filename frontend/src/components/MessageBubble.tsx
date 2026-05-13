@@ -12,6 +12,7 @@ const toolNameZh: Record<string, string> = {
   generate_article: '生成笔记',
   create_complete_note_workflow: '一键成稿工作流',
   rewrite_article: '改写笔记',
+  imitate_article_style: '参考仿写',
   optimize_article: '优化笔记',
   polish_paragraph: '段落润色',
   score_article: '笔记打分',

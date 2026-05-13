@@ -48,8 +48,12 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
             content = article.body or ""
             tags = [t for t in (article.tags or "").split(",") if t.strip()]
             image_context = _article_image_context(article)
-            cover_image = str(image_context.get("cover_image") or "")
-            images = [x["url"] for x in image_context.get("visual_images", []) if x.get("url")]
+            cover_image = str(image_context.get("cover_image_full_url") or image_context.get("cover_image") or "")
+            images = [
+                str(x.get("model_url") or x.get("full_url") or x.get("url"))
+                for x in image_context.get("visual_images", [])
+                if x.get("url")
+            ]
             image_count = len(images)
 
     if not title and not content:

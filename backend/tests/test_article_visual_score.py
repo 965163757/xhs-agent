@@ -1,7 +1,9 @@
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from app.agents.tools import _article_image_context, _article_payload, _normalize_score_payload, _score_for_article
+from app.config import Settings
 from app.database import Article, ArticleDiagnosis
 from app.time_utils import beijing_iso, parse_beijing_datetime_to_naive
 
@@ -26,6 +28,27 @@ class ArticleVisualAndScoreTests(unittest.TestCase):
         self.assertEqual(ctx["visual_images"][0]["position"], 0)
         self.assertEqual(payload["cover_image"], "/static/images/a.png")
         self.assertEqual(payload["images"], ["/static/images/b.png"])
+
+    def test_article_payload_exposes_full_public_image_urls(self):
+        art = Article(
+            title="带图笔记",
+            body="正文",
+            tags="#测试",
+            cover_image="/static/images/a.png",
+            images=["/static/images/b.png"],
+        )
+
+        with patch("app.agents.tools.get_settings", return_value=Settings(public_base_url="https://xhs.example.com/app")):
+            ctx = _article_image_context(art)
+            payload = _article_payload(art)
+
+        self.assertEqual(ctx["cover_image"], "/static/images/a.png")
+        self.assertEqual(ctx["cover_image_full_url"], "https://xhs.example.com/app/static/images/a.png")
+        self.assertEqual(ctx["content_images"][0]["full_url"], "https://xhs.example.com/app/static/images/b.png")
+        self.assertEqual(ctx["visual_images"][0]["model_url"], "https://xhs.example.com/app/static/images/a.png")
+        self.assertEqual(payload["cover_image"], "/static/images/a.png")
+        self.assertEqual(payload["cover_image_full_url"], "https://xhs.example.com/app/static/images/a.png")
+        self.assertEqual(payload["images_full_urls"], ["https://xhs.example.com/app/static/images/b.png"])
 
     def test_score_for_article_always_has_five_dimensions(self):
         art = Article(

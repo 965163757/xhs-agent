@@ -34,7 +34,11 @@ export interface Article {
   body: string
   tags: string[]
   cover_image: string
+  cover_image_full_url?: string
   images: string[]
+  images_full_urls?: string[]
+  visual_queue?: string[]
+  visual_queue_full_urls?: string[]
   status: string
   score: Record<string, any>
   image_context?: ArticleImageContext
@@ -51,6 +55,12 @@ export interface Article {
 export interface ArticleImageAsset {
   role: 'cover' | 'content' | string
   url: string
+  full_url?: string
+  model_url?: string
+  public_url?: string
+  stored_url?: string
+  public_url_configured?: boolean
+  url_note?: string
   index?: number
   exists?: boolean
   bytes?: number
@@ -62,11 +72,14 @@ export interface ArticleImageAsset {
 export interface ArticleImageContext {
   has_cover: boolean
   cover_image: string
-  content_images: Array<{ index: number; url: string }>
-  visual_images?: Array<{ position: number; role: string; url: string; index?: number }>
+  cover_image_full_url?: string
+  content_images: Array<{ index: number; url: string; full_url?: string; model_url?: string; public_url?: string; stored_url?: string }>
+  visual_images?: Array<{ position: number; role: string; url: string; full_url?: string; model_url?: string; public_url?: string; stored_url?: string; index?: number }>
   all_images: ArticleImageAsset[]
   image_count: number
   content_image_count: number
+  visual_queue?: string[]
+  visual_queue_full_urls?: string[]
   notes?: string
 }
 

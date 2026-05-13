@@ -29,6 +29,7 @@ import AddIcon from '@mui/icons-material/Add'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import {
   getArticle,
+  listArticles,
   updateArticle,
   listConversations,
   deleteConversation,
@@ -340,6 +341,8 @@ export default function ArticleDetailPage() {
   const [sidebar, setSidebar] = useState(false)
   const [mobileChat, setMobileChat] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
+  const [articleOptions, setArticleOptions] = useState<Article[]>([])
+  const [articleMenuAnchor, setArticleMenuAnchor] = useState<HTMLElement | null>(null)
   const [versions, setVersions] = useState<ArticleVersion[]>([])
   const [showVersions, setShowVersions] = useState(false)
   const [bannedHits, setBannedHits] = useState<BannedWordHit[]>([])
@@ -352,17 +355,35 @@ export default function ArticleDetailPage() {
   const [dragImagePos, setDragImagePos] = useState<number | null>(null)
   const selectedCount = selectedConvoIds.length
   const allSelected = convos.length > 0 && selectedCount === convos.length
+  const selectedConversation = convId ? convos.find(c => c.id === Number(convId)) : undefined
 
   const refreshConvos = useCallback(() => {
     listConversations().then(all => {
-      const scoped = all.filter(c => c.article_id === Number(id))
-      setConvos(scoped)
-      setSelectedConvoIds(prev => prev.filter(cid => scoped.some(c => c.id === cid)))
+      const currentId = Number(id)
+      const sorted = [...all].sort((a, b) => {
+        const aCurrent = a.article_id === currentId ? 0 : 1
+        const bCurrent = b.article_id === currentId ? 0 : 1
+        if (aCurrent !== bCurrent) return aCurrent - bCurrent
+        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      })
+      setConvos(sorted)
+      setSelectedConvoIds(prev => prev.filter(cid => sorted.some(c => c.id === cid)))
     }).catch(() => {
       setConvos([])
       setSelectedConvoIds([])
     })
   }, [id])
+
+  const openArticleSwitcher = (anchor: HTMLElement) => {
+    setArticleMenuAnchor(anchor)
+    listArticles().then(setArticleOptions).catch(() => setArticleOptions([]))
+  }
+
+  const switchToArticle = (targetId: number, keepConversation = true) => {
+    const qs = keepConversation && convId ? `?c=${convId}` : ''
+    setArticleMenuAnchor(null)
+    nav(`/articles/${targetId}${qs}`)
+  }
 
   const newChat = () => {
     resetSession(currentSessionKey)
@@ -434,6 +455,10 @@ export default function ArticleDetailPage() {
     load()
   }, [load])
 
+  useEffect(() => {
+    refreshConvos()
+  }, [refreshConvos, convId])
+
   // Real-time banned word detection (debounced)
   useEffect(() => {
     if (!art) return
@@ -470,7 +495,8 @@ export default function ArticleDetailPage() {
       next.set('c', String(newConvId))
       return next
     }, { replace: true })
-  }, [currentSessionKey, setParams])
+    refreshConvos()
+  }, [currentSessionKey, setParams, refreshConvos])
 
   const isDirty = art && savedArt
     ? art.title !== savedArt.title || art.body !== savedArt.body || JSON.stringify(art.tags) !== JSON.stringify(savedArt.tags)
@@ -590,9 +616,16 @@ export default function ArticleDetailPage() {
               <MenuIcon sx={{ fontSize: 18 }} />
             </IconButton>
           </Tooltip>
-          <Typography noWrap sx={{ fontSize: 12, color: 'text.secondary', flex: 1 }}>
-            {convId ? `对话 #${convId}` : '新对话'}
-          </Typography>
+          <Stack sx={{ flex: 1, minWidth: 0 }} spacing={0.2}>
+            <Typography noWrap sx={{ fontSize: 12, color: 'text.secondary' }}>
+              {convId ? `对话 #${convId}` : '新对话'} · 当前上下文：笔记 #{art.id}
+            </Typography>
+            {selectedConversation?.article_id && selectedConversation.article_id !== art.id && (
+              <Typography noWrap sx={{ fontSize: 10.5, color: '#D97706' }}>
+                该对话原关联笔记 #{selectedConversation.article_id}，仍可在当前笔记继续；指定 ID 时 Agent 可跨笔记操作
+              </Typography>
+            )}
+          </Stack>
           <Tooltip title="新建对话">
             <IconButton size="small" onClick={newChat}>
               <AddIcon sx={{ fontSize: 18 }} />
@@ -607,6 +640,7 @@ export default function ArticleDetailPage() {
           showHeader={false}
           quickActions={[
             { label: '整体改写', prompt: '帮我整体改写这篇笔记，风格更有网感、更口语化' },
+            { label: '参考仿写', prompt: `参考笔记 #${art.id} 的中文小红书写法，仿写一篇同赛道新笔记；如果需要配图，就基于当前图片做同风格变体` },
             { label: '细节优化', prompt: '优化这篇笔记的标题吸引力、开头钩子、情绪价值和标签' },
             { label: '标题候选', prompt: '为这篇笔记生成 6 个候选标题' },
             { label: '段落润色', prompt: '帮我润色正文，让表达更自然流畅' },
@@ -633,6 +667,14 @@ export default function ArticleDetailPage() {
               label={art.status}
               sx={{ bgcolor: 'action.hover', fontSize: 11, height: 20 }}
             />
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={e => openArticleSwitcher(e.currentTarget)}
+              sx={{ fontSize: 12, borderColor: 'divider', color: 'text.secondary', maxWidth: 220 }}
+            >
+              切换笔记：{art.title?.slice(0, 12) || `#${art.id}`}
+            </Button>
             {getScoreValue(art.score, 'overall') > 0 && (
               <Chip
                 size="small"
@@ -674,6 +716,30 @@ export default function ArticleDetailPage() {
               保存
             </Button>
           </Stack>
+
+          <Menu anchorEl={articleMenuAnchor} open={!!articleMenuAnchor} onClose={() => setArticleMenuAnchor(null)}>
+            {articleOptions.length === 0 && (
+              <MenuItem disabled>正在加载笔记…</MenuItem>
+            )}
+            {articleOptions.map(item => (
+              <MenuItem
+                key={item.id}
+                selected={item.id === art.id}
+                onClick={() => switchToArticle(item.id, true)}
+                sx={{ minWidth: 300, alignItems: 'flex-start', gap: 1 }}
+              >
+                <Stack sx={{ minWidth: 0 }}>
+                  <Typography noWrap sx={{ fontSize: 13, fontWeight: item.id === art.id ? 700 : 500 }}>
+                    #{item.id} {item.title || '（无标题）'}
+                  </Typography>
+                  <Typography noWrap sx={{ fontSize: 11, color: 'text.secondary' }}>
+                    {item.status} · {item.content_stats?.image_count ?? ([item.cover_image, ...(item.images || [])].filter(Boolean).length)} 张图
+                    {convId ? ' · 保留当前对话' : ''}
+                  </Typography>
+                </Stack>
+              </MenuItem>
+            ))}
+          </Menu>
 
           <Stack spacing={2}>
             <Box>
@@ -851,7 +917,7 @@ export default function ArticleDetailPage() {
                         ].filter(Boolean).join(' · ')
                         return (
                           <Typography key={`${img.role}-${img.index ?? i}-${img.url}`} sx={{ fontSize: 11.5, color: img.exists === false ? '#B91C1C' : 'text.secondary' }} noWrap>
-                            {img.role === 'cover' ? '首图/封面' : `第 ${(img.index ?? 0) + 2} 张`}：{meta ? `${meta} · ` : ''}{img.url}
+                            {img.role === 'cover' ? '首图/封面' : `第 ${(img.index ?? 0) + 2} 张`}：{meta ? `${meta} · ` : ''}{img.full_url && img.full_url !== img.url ? `${img.url} → ${img.full_url}` : img.url}
                           </Typography>
                         )
                       })}
@@ -994,7 +1060,7 @@ export default function ArticleDetailPage() {
         <Box sx={{ width: 340, bgcolor: 'background.paper' }}>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
             <Typography variant="subtitle1" fontWeight={700}>
-              笔记对话记录
+              全部对话记录
             </Typography>
             <Box sx={{ flex: 1 }} />
             <Button
@@ -1011,7 +1077,7 @@ export default function ArticleDetailPage() {
                 {allSelected ? '取消全选' : '全选'}
               </Button>
               <Typography sx={{ flex: 1, fontSize: 12, color: 'text.secondary' }}>
-                {selectedCount > 0 ? `已选 ${selectedCount} 条` : '可勾选多条后批量删除'}
+                {selectedCount > 0 ? `已选 ${selectedCount} 条` : '可选择任意对话在当前笔记继续'}
               </Typography>
               {selectedCount > 0 && (
                 <Button
@@ -1028,44 +1094,85 @@ export default function ArticleDetailPage() {
           )}
           <Divider />
           <List dense>
-            {convos.map(c => (
-              <ListItemButton
-                key={c.id}
-                selected={convId === String(c.id)}
-                onClick={() => {
-                  if (selectedCount > 0) {
-                    toggleConvoSelection(c.id)
-                    return
-                  }
-                  setParams(prev => {
-                    const next = new URLSearchParams(prev)
-                    next.set('c', String(c.id))
-                    return next
-                  }, { replace: true })
-                  setSidebar(false)
-                }}
-              >
-                <Checkbox
-                  size="small"
-                  checked={selectedConvoIds.includes(c.id)}
-                  onClick={e => e.stopPropagation()}
-                  onChange={() => toggleConvoSelection(c.id)}
-                  sx={{ mr: 0.5, p: 0.5 }}
-                />
-                <ListItemText
-                  primary={c.title || '新对话'}
-                  secondary={formatBeijingDateTime(c.updated_at)}
-                  primaryTypographyProps={{ fontSize: 14, noWrap: true }}
-                  secondaryTypographyProps={{ fontSize: 11 }}
-                />
-                <IconButton
-                  size="small"
-                  onClick={e => { e.stopPropagation(); removeConvo(c.id) }}
+            {convos.map(c => {
+              const isCurrentArticle = c.article_id === art.id
+              const isOtherArticle = !!c.article_id && !isCurrentArticle
+              return (
+                <ListItemButton
+                  key={c.id}
+                  selected={convId === String(c.id)}
+                  onClick={() => {
+                    if (selectedCount > 0) {
+                      toggleConvoSelection(c.id)
+                      return
+                    }
+                    setParams(prev => {
+                      const next = new URLSearchParams(prev)
+                      next.set('c', String(c.id))
+                      return next
+                    }, { replace: true })
+                    setSidebar(false)
+                  }}
+                  sx={{ alignItems: 'flex-start', py: 1 }}
                 >
-                  <DeleteOutlineIcon fontSize="small" />
-                </IconButton>
-              </ListItemButton>
-            ))}
+                  <Checkbox
+                    size="small"
+                    checked={selectedConvoIds.includes(c.id)}
+                    onClick={e => e.stopPropagation()}
+                    onChange={() => toggleConvoSelection(c.id)}
+                    sx={{ mr: 0.5, p: 0.5, mt: 0.2 }}
+                  />
+                  <ListItemText
+                    primary={
+                      <Stack direction="row" spacing={0.6} alignItems="center" sx={{ minWidth: 0 }}>
+                        <Typography noWrap sx={{ fontSize: 14, fontWeight: 500, minWidth: 0 }}>
+                          {c.title || '新对话'}
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={isCurrentArticle ? '当前笔记' : isOtherArticle ? `笔记 #${c.article_id}` : '未绑定'}
+                          sx={{
+                            height: 18,
+                            fontSize: 10,
+                            bgcolor: isCurrentArticle ? '#E6F7EC' : isOtherArticle ? '#FFF7ED' : 'action.hover',
+                            color: isCurrentArticle ? '#0F8C3D' : isOtherArticle ? '#C2410C' : 'text.secondary',
+                          }}
+                        />
+                      </Stack>
+                    }
+                    secondary={
+                      <Stack spacing={0.3}>
+                        <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
+                          {formatBeijingDateTime(c.updated_at)}
+                        </Typography>
+                        {isOtherArticle && (
+                          <Button
+                            size="small"
+                            onClick={e => {
+                              e.stopPropagation()
+                              switchToArticle(Number(c.article_id), true)
+                              setSidebar(false)
+                            }}
+                            sx={{ alignSelf: 'flex-start', fontSize: 11, p: 0, minWidth: 0, color: '#C2410C' }}
+                          >
+                            切到关联笔记并保留此对话
+                          </Button>
+                        )}
+                      </Stack>
+                    }
+                    primaryTypographyProps={{ component: 'div' }}
+                    secondaryTypographyProps={{ component: 'div' }}
+                  />
+                  <IconButton
+                    size="small"
+                    onClick={e => { e.stopPropagation(); removeConvo(c.id) }}
+                    sx={{ mt: 0.3 }}
+                  >
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                </ListItemButton>
+              )
+            })}
             {convos.length === 0 && (
               <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1 }}>
                 暂无对话记录
@@ -1118,6 +1225,7 @@ export default function ArticleDetailPage() {
             showHeader={false}
             quickActions={[
               { label: '整体改写', prompt: '帮我整体改写这篇笔记，风格更有网感、更口语化' },
+              { label: '参考仿写', prompt: `参考笔记 #${art.id} 的中文小红书写法，仿写一篇同赛道新笔记；如果需要配图，就基于当前图片做同风格变体` },
               { label: '打分', prompt: '帮我从内容、视觉、增长、互动四个维度给这篇笔记打分' },
               { label: '生成封面', prompt: '为这篇笔记生成一张干净、有高级感的竖版封面' },
             ]}
