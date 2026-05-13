@@ -254,7 +254,7 @@ function ScoreRadar({ score }: { score: Record<string, any> }) {
     return [cx + r * value * Math.cos(angle), cy + r * value * Math.sin(angle)]
   }
   const polygon = (pts: number[][]) => pts.map(p => p.join(',')).join(' ')
-  const values = metrics.map(([key]) => Math.max(0, Math.min(100, Number(score?.[key] ?? 0))) / 100)
+  const values = metrics.map(([key]) => getScoreValue(score, key) / 100)
   const dataPoints = values.map((v, i) => point(i, v))
 
   return (
@@ -282,6 +282,32 @@ function ScoreRadar({ score }: { score: Record<string, any> }) {
       </svg>
     </Box>
   )
+}
+
+function getScoreValue(score: Record<string, any> | undefined, key: string) {
+  if (!score) return 0
+  const direct = Number(score[key])
+  if (Number.isFinite(direct)) return Math.max(0, Math.min(100, direct))
+  const dims = score.dimensions || score.model_a_score?.dimensions
+  if (dims) {
+    if (key === 'content') {
+      const title = Number(dims.title_quality)
+      const body = Number(dims.content_quality)
+      if (Number.isFinite(title) && Number.isFinite(body)) return Math.round(title * 0.45 + body * 0.55)
+    }
+    const map: Record<string, string> = {
+      visual: 'visual_quality',
+      growth: 'tag_strategy',
+      engagement: 'engagement_potential',
+    }
+    const mapped = Number(dims[map[key]])
+    if (Number.isFinite(mapped)) return Math.max(0, Math.min(100, mapped))
+  }
+  if (key === 'overall') {
+    const total = Number(score.total_score ?? score.overall_score ?? score.model_a_score?.total_score)
+    if (Number.isFinite(total)) return Math.max(0, Math.min(100, total))
+  }
+  return 0
 }
 
 function formatBytes(bytes?: number) {
@@ -606,10 +632,10 @@ export default function ArticleDetailPage() {
               label={art.status}
               sx={{ bgcolor: 'action.hover', fontSize: 11, height: 20 }}
             />
-            {typeof art.score?.overall === 'number' && (
+            {getScoreValue(art.score, 'overall') > 0 && (
               <Chip
                 size="small"
-                label={`评分 ${art.score.overall}`}
+                label={`评分 ${getScoreValue(art.score, 'overall')}`}
                 sx={{ bgcolor: '#E6F7EC', color: '#0F8C3D', fontSize: 11, height: 20 }}
               />
             )}
@@ -844,7 +870,7 @@ export default function ArticleDetailPage() {
             </Box>
 
             {/* score radar */}
-            {typeof art.score?.overall === 'number' && (
+            {getScoreValue(art.score, 'overall') > 0 && (
               <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2 }}>
                 <Stack direction="row" alignItems="center" spacing={1}>
                   <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
@@ -852,7 +878,7 @@ export default function ArticleDetailPage() {
                   </Typography>
                   <Chip
                     size="small"
-                    label={`综合 ${art.score.overall}`}
+                    label={`综合 ${getScoreValue(art.score, 'overall')}`}
                     sx={{ bgcolor: '#E6F7EC', color: '#0F8C3D', fontSize: 11, height: 20 }}
                   />
                 </Stack>

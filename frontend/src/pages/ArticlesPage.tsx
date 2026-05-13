@@ -35,6 +35,13 @@ const statusColors: Record<string, { bg: string; color: string }> = {
   scheduled: { bg: 'rgba(217,119,6,0.08)', color: '#D97706' },
 }
 
+function articleScore(a: Article) {
+  const direct = Number(a.score?.overall)
+  if (Number.isFinite(direct)) return Math.round(direct)
+  const total = Number(a.score?.total_score ?? a.score?.overall_score ?? a.score?.model_a_score?.total_score)
+  return Number.isFinite(total) ? Math.round(total) : 0
+}
+
 export default function ArticlesPage() {
   const [items, setItems] = useState<Article[]>([])
   const [loading, setLoading] = useState(true)
@@ -65,7 +72,7 @@ export default function ArticlesPage() {
       list = list.filter(a => a.status === statusFilter)
     }
     list = [...list].sort((a, b) => {
-      if (sortBy === 'score') return (b.score?.overall ?? 0) - (a.score?.overall ?? 0)
+      if (sortBy === 'score') return articleScore(b) - articleScore(a)
       if (sortBy === 'title') return a.title.localeCompare(b.title)
       return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
     })
@@ -233,10 +240,10 @@ export default function ArticlesPage() {
                     fontWeight: 500,
                   }}
                 />
-                {typeof a.score?.overall === 'number' && (
+                {articleScore(a) > 0 && (
                   <Chip
                     size="small"
-                    label={`${a.score.overall}分`}
+                    label={`${articleScore(a)}分`}
                     sx={{ bgcolor: 'rgba(22,163,74,0.08)', color: '#16A34A', fontSize: 11, height: 20, fontWeight: 600 }}
                   />
                 )}

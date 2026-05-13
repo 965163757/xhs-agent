@@ -354,8 +354,13 @@ def _image_asset(url: str, role: str, index: Optional[int] = None) -> Dict[str, 
 
 
 def _article_image_context(art: Article) -> Dict[str, Any]:
-    cover = (art.cover_image or "").strip()
-    content_images = [str(x).strip() for x in (art.images or []) if str(x or "").strip()]
+    stored_cover = (art.cover_image or "").strip()
+    raw_content_images = [str(x).strip() for x in (art.images or []) if str(x or "").strip()]
+    # 小红书没有“封面图”和“内容图”的强边界：展示队列的第 1 张就是首图/封面。
+    # 兼容旧数据：如果 DB 里 cover_image 为空但 images 有图，也把 images[0] 视为有效首图。
+    queue = _dedupe_preserve_order(([stored_cover] if stored_cover else []) + raw_content_images)
+    cover = queue[0] if queue else ""
+    content_images = queue[1:] if len(queue) > 1 else []
     assets: List[Dict[str, Any]] = []
     if cover:
         assets.append(_image_asset(cover, "cover"))
@@ -373,6 +378,7 @@ def _article_image_context(art: Article) -> Dict[str, Any]:
         visual_images.append(visual_item)
     return {
         "has_cover": bool(cover),
+        "stored_has_cover": bool(stored_cover),
         "cover_image": cover,
         "content_images": [
             {"index": i, "url": url}
@@ -385,7 +391,8 @@ def _article_image_context(art: Article) -> Dict[str, Any]:
         "content_image_count": len(content_images),
         "notes": (
             "visual_images 按展示顺序排列，position=0 是首图/封面；"
-            "content_images 按 index 从 0 开始，对应 visual position=index+1。"
+            "content_images 按 index 从 0 开始，对应 visual position=index+1；"
+            "如果历史数据没有单独 cover_image，系统会自动把第一张图片视为首图/封面。"
             "需要移动、设为首图、插入或重排时优先使用 arrange_article_images。"
         ),
     }
@@ -394,6 +401,10 @@ def _article_image_context(art: Article) -> Dict[str, Any]:
 def _article_payload(art: Article) -> Dict[str, Any]:
     payload = art.to_dict()
     payload["image_context"] = _article_image_context(art)
+    # 对外统一暴露“小红书展示队列”语义：cover_image 永远是有效首图；
+    # images 只包含首图之后的后续内容图，避免前端/Agent 再次判断旧数据形态。
+    payload["cover_image"] = payload["image_context"]["cover_image"]
+    payload["images"] = [x["url"] for x in payload["image_context"]["content_images"]]
     payload["content_stats"] = {
         "title_chars": len(art.title or ""),
         "body_chars": len(art.body or ""),
@@ -406,7 +417,7 @@ def _article_payload(art: Article) -> Dict[str, Any]:
 def _article_image_summary_text(art: Article) -> str:
     ctx = _article_image_context(art)
     lines = [
-        f"图片总数：{ctx['image_count']}（封面：{'有' if ctx['has_cover'] else '无'}，内容图：{ctx['content_image_count']}）"
+        f"图片总数：{ctx['image_count']}（首图/封面：{'有' if ctx['has_cover'] else '无'}，后续内容图：{ctx['content_image_count']}）"
     ]
     assets_by_key: Dict[tuple, Dict[str, Any]] = {
         (item.get("role"), item.get("index")): item
@@ -431,10 +442,10 @@ def _article_image_summary_text(art: Article) -> str:
         return f"（{ '，'.join(parts) }）" if parts else ""
 
     if ctx["cover_image"]:
-        lines.append(f"封面图：{ctx['cover_image']}{meta_text(assets_by_key.get(('cover', None)))}")
+        lines.append(f"首图/封面：{ctx['cover_image']}{meta_text(assets_by_key.get(('cover', None)))}")
     for img in ctx["content_images"][:12]:
         asset = assets_by_key.get(("content", img["index"]))
-        lines.append(f"内容图[{img['index']}]：{img['url']}{meta_text(asset)}")
+        lines.append(f"后续内容图[{img['index']}]：{img['url']}{meta_text(asset)}")
     if ctx["content_image_count"] > 12:
         lines.append(f"其余内容图：{ctx['content_image_count'] - 12} 张未展开")
     return "\n".join(lines)
@@ -638,6 +649,138 @@ def _article_quick_check(
         "issues": issues,
         "publish_ready": publish_ready,
     }
+
+
+SCORE_KEYS = ("content", "visual", "growth", "engagement", "overall")
+
+
+def _coerce_score_value(value: Any) -> Optional[int]:
+    try:
+        if value is None or isinstance(value, bool):
+            return None
+        n = float(value)
+        if n != n:
+            return None
+        return int(round(max(0, min(100, n))))
+    except Exception:
+        return None
+
+
+def _score_payload_from_quick_check(checks: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert the deterministic Model-A score into the app's five-dimension shape."""
+    model_a = checks.get("model_a_score") or {}
+    dims = model_a.get("dimensions") or {}
+
+    def dim(key: str, default: int = 60) -> int:
+        return _coerce_score_value(dims.get(key)) or default
+
+    content = int(round(dim("title_quality") * 0.45 + dim("content_quality") * 0.55))
+    visual = dim("visual_quality")
+    growth = dim("tag_strategy")
+    engagement = dim("engagement_potential")
+    overall = _coerce_score_value(model_a.get("total_score"))
+    if overall is None:
+        overall = int(round((content + visual + growth + engagement) / 4))
+    issues = [str(x) for x in (checks.get("issues") or []) if str(x).strip()]
+    return {
+        "content": content,
+        "visual": visual,
+        "growth": growth,
+        "engagement": engagement,
+        "overall": overall,
+        "advice": issues[:5] or ["当前基础结构可用，可继续优化首图点击率、标签精准度和互动引导。"],
+        "model": "local_model_a",
+        "category": checks.get("category"),
+        "category_cn": checks.get("category_cn"),
+        "publish_ready": bool(checks.get("publish_ready")),
+        "model_a_score": model_a,
+    }
+
+
+def _score_for_article(art: Article) -> Dict[str, Any]:
+    tags = [t for t in (art.tags or "").split(",") if t.strip()]
+    image_count = int(_article_image_context(art).get("image_count") or 0)
+    checks = _article_quick_check(art.title or "", art.body or "", tags, image_count=image_count)
+    return _score_payload_from_quick_check(checks)
+
+
+def _normalize_score_payload(raw: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarantee content/visual/growth/engagement/overall are present.
+
+    Some compatible LLM gateways occasionally return only an overall score or a
+    nested Model-A/diagnosis-like structure.  The UI radar and Agent follow-up
+    need a stable five-dimension object, so we merge any valid LLM numbers onto
+    the deterministic fallback instead of storing sparse score dicts.
+    """
+    data = raw if isinstance(raw, dict) else {}
+    candidates: List[Dict[str, Any]] = [data]
+    for key in ("radar_data", "score", "scores"):
+        if isinstance(data.get(key), dict):
+            candidates.append(data[key])
+
+    # Also understand the internal Model-A dimension names.
+    dimensions = data.get("dimensions")
+    if not isinstance(dimensions, dict) and isinstance(data.get("model_a_score"), dict):
+        dimensions = (data.get("model_a_score") or {}).get("dimensions")
+    if isinstance(dimensions, dict):
+        content_dim = None
+        title_q = _coerce_score_value(dimensions.get("title_quality"))
+        body_q = _coerce_score_value(dimensions.get("content_quality"))
+        if title_q is not None and body_q is not None:
+            content_dim = int(round(title_q * 0.45 + body_q * 0.55))
+        mapped = {
+            "content": content_dim,
+            "visual": dimensions.get("visual_quality"),
+            "growth": dimensions.get("tag_strategy"),
+            "engagement": dimensions.get("engagement_potential"),
+            "overall": data.get("total_score"),
+        }
+        candidates.append({k: v for k, v in mapped.items() if v is not None})
+
+    aliases = {
+        "content": ("content", "content_quality", "内容", "内容质量"),
+        "visual": ("visual", "visual_quality", "视觉", "视觉吸引", "视觉表现"),
+        "growth": ("growth", "growth_potential", "tag_strategy", "增长", "增长潜力"),
+        "engagement": ("engagement", "interaction", "interaction_potential", "user_reaction", "互动", "互动潜力", "用户反应"),
+        "overall": ("overall", "overall_score", "total", "total_score", "综合", "总分"),
+    }
+
+    out = dict(fallback)
+    for key, names in aliases.items():
+        value: Optional[int] = None
+        for cand in candidates:
+            for name in names:
+                value = _coerce_score_value(cand.get(name))
+                if value is not None:
+                    break
+            if value is not None:
+                break
+        if value is not None:
+            out[key] = value
+
+    if _coerce_score_value(out.get("overall")) is None:
+        out["overall"] = int(round(sum(int(out[k]) for k in SCORE_KEYS[:-1]) / 4))
+
+    advice = data.get("advice") or data.get("suggestions")
+    if isinstance(advice, str):
+        out["advice"] = [advice]
+    elif isinstance(advice, list) and advice:
+        out["advice"] = [str(x) for x in advice if str(x).strip()][:8]
+    if data and data is not fallback:
+        out["model"] = data.get("model") or "llm_score"
+    return out
+
+
+async def _refresh_article_local_score(article_id: int) -> Optional[Article]:
+    """Recalculate local five-dimension score after image/title/body changes."""
+    async with SessionLocal() as s:
+        art = await s.get(Article, int(article_id))
+        if not art:
+            return None
+        art.score = _score_for_article(art)
+        await s.commit()
+        await s.refresh(art)
+        return art
 
 
 # ---------- CRUD tools ----------
@@ -881,12 +1024,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             tags=",".join(tags),
             status="draft",
             user_id=uid,
-            score={
-                "overall": checks_after["model_a_score"].get("total_score"),
-                "model": "local_model_a",
-                "category": checks_after.get("category"),
-                "publish_ready": checks_after.get("publish_ready"),
-            },
+            score=_score_payload_from_quick_check(checks_after),
         )
         s.add(art)
         await s.commit()
@@ -982,21 +1120,30 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                 generated_content_images.append(str(item["url"]))
             elif item.get("error"):
                 image_errors.append({"role": "content", **item})
-        for idx, url in enumerate(generated_content_images):
-            await _bind_image_to_article(url, article_id, role="content", replace_index=idx)
+        if generated_content_images:
+            async with SessionLocal() as s:
+                art = await s.get(Article, article_id)
+                if art:
+                    queue = ([generated_cover] if generated_cover else []) + generated_content_images
+                    _apply_article_visual_queue(art, queue)
+                    await s.commit()
         if generated_content_images:
             emit_tool_progress(
-                f"已生成并绑定 {len(generated_content_images)} 张内容配图",
+                f"已生成并绑定 {len(generated_content_images)} 张图片，第 1 张已作为首图/封面",
                 step="content_images_bound",
                 data={
                     "article_id": article_id,
                     "count": len(generated_content_images),
+                    "first_image_is_cover": True,
                     "failed": len([x for x in image_errors if x.get("role") == "content"]),
                 },
             )
 
     emit_tool_progress("工作流完成，正在整理返回结果", step="workflow_done", data={"article_id": article_id})
-    final = await _get_article(article_id)
+    final = await _refresh_article_local_score(article_id) or await _get_article(article_id)
+    final_ctx = _article_image_context(final) if final else {}
+    generated_cover = str(final_ctx.get("cover_image") or generated_cover or "")
+    generated_content_images = [x["url"] for x in (final_ctx.get("content_images") or [])]
     return {
         "ok": True,
         "article": _article_payload(final) if final else {"id": article_id, "title": title, "body": body, "tags": tags},
@@ -1012,11 +1159,12 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             "changelog": changelog,
             "generated_cover": generated_cover,
             "generated_content_images": generated_content_images,
+            "first_image_is_cover": bool(generated_cover),
             "image_errors": image_errors,
             "image_concurrency": image_concurrency if generate_content_images else None,
             "next_actions": [
                 "打开笔记详情微调正文",
-                "生成或替换封面图",
+                "如需更强点击率，可继续重绘首图/封面",
                 "运行 diagnose_article 做深度发布前诊断",
             ],
         },
@@ -1150,23 +1298,31 @@ async def tool_score_article(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": f"article {aid} not found"}
     if uid is not None and art.user_id != uid:
         return {"ok": False, "error": "无权操作该笔记"}
-    resp = await chat_completion(
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "你是小红书数据专家，从五个维度打分（0-100）："
-                    "内容质量 content、视觉吸引 visual、增长潜力 growth、互动潜力 engagement、综合 overall。"
-                    "visual 必须结合封面/内容图数量、图片 URL/尺寸元数据和图文匹配度评估；没有图片时要明确扣分原因。"
-                    "严格按 JSON 返回："
-                    '{"content":90,"visual":80,"growth":75,"engagement":82,"overall":82,"advice":["..."]}'
-                ),
-            },
-            {"role": "user", "content": _article_prompt_context(art)},
-        ],
-        temperature=0.3,
-    )
-    data = _safe_json(resp.choices[0].message.content or "")
+    fallback = _score_for_article(art)
+    try:
+        resp = await chat_completion(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "你是小红书数据专家，从五个维度打分（0-100）："
+                        "内容质量 content、视觉吸引 visual、增长潜力 growth、互动潜力 engagement、综合 overall。"
+                        "visual 必须结合首图/封面、后续内容图数量、图片 URL/尺寸元数据和图文匹配度评估；"
+                        "没有图片时要明确扣分原因。即使你无法读取图片像素，也要基于 image_context、图片数量、尺寸和图文关系给出非零结构化评分。"
+                        "严格按 JSON 返回，五个数字字段必须完整："
+                        '{"content":90,"visual":80,"growth":75,"engagement":82,"overall":82,"advice":["..."]}'
+                    ),
+                },
+                {"role": "user", "content": _article_prompt_context(art)},
+            ],
+            temperature=0.3,
+        )
+        raw = _safe_json(resp.choices[0].message.content or "")
+        data = _normalize_score_payload(raw, fallback)
+    except Exception as e:
+        data = dict(fallback)
+        data["model"] = "local_model_a_fallback"
+        data["advice"] = [f"模型评分暂不可用，已使用本地五维规则评分：{str(e)[:160]}"] + list(data.get("advice") or [])[:4]
     async with SessionLocal() as s:
         art = await s.get(Article, aid)
         art.score = data
@@ -1188,9 +1344,10 @@ async def tool_diagnose_article(args: Dict[str, Any]) -> Dict[str, Any]:
     assert art is not None
 
     tags = [t for t in (art.tags or "").split(",") if t.strip()]
-    content_images = art.images or []
-    visual_images = ([art.cover_image] if art.cover_image else []) + content_images
+    image_ctx = _article_image_context(art)
+    visual_images = [x["url"] for x in image_ctx.get("visual_images", []) if x.get("url")]
     image_count = len(visual_images)
+    cover_image = str(image_ctx.get("cover_image") or "")
 
     result = await run_diagnosis(
         title=art.title or "",
@@ -1198,7 +1355,7 @@ async def tool_diagnose_article(args: Dict[str, Any]) -> Dict[str, Any]:
         tags=tags,
         image_count=image_count,
         images=visual_images,
-        cover_image=art.cover_image or "",
+        cover_image=cover_image,
     )
 
     return {
@@ -1398,29 +1555,13 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
     )
     bound_article: Optional[Dict[str, Any]] = None
     if aid:
-        async with SessionLocal() as s:
-            art = await s.get(Article, aid)
-            if art:
-                if role == "cover":
-                    art.cover_image = urls[0] if urls else art.cover_image
-                elif replace_index is not None and urls:
-                    imgs = list(art.images or [])
-                    idx = _safe_int(replace_index, len(imgs), min_value=0)
-                    if 0 <= idx < len(imgs):
-                        imgs[idx] = urls[0]
-                    else:
-                        imgs.extend(urls)
-                    art.images = imgs
-                else:
-                    art.images = (art.images or []) + urls
-                await s.commit()
-                await s.refresh(art)
-                bound_article = _article_payload(art)
-                emit_tool_progress(
-                    "图片已绑定到笔记",
-                    step="image_bound",
-                    data={"article_id": aid, "role": role, "count": len(urls)},
-                )
+        bound_article = await _bind_generated_urls_to_article(aid, urls, role=role, replace_index=replace_index)
+        if bound_article:
+            emit_tool_progress(
+                "图片已绑定到笔记，第 1 张按小红书首图/封面展示",
+                step="image_bound",
+                data={"article_id": aid, "role": role, "count": len(urls), "first_image_is_cover": True},
+            )
     result: Dict[str, Any] = {
         "ok": True,
         "images": urls,
@@ -1443,22 +1584,25 @@ async def tool_remove_image(args: Dict[str, Any]) -> Dict[str, Any]:
         uid = get_tool_user_id()
         if uid is not None and art.user_id != uid:
             return {"ok": False, "error": "无权操作该笔记"}
+        queue = _article_visual_queue(art)
         if role == "cover":
-            art.cover_image = ""
+            if queue:
+                queue.pop(0)
         else:
             idx = args.get("index")
-            imgs = list(art.images or [])
             if idx is None:
-                imgs = []
+                queue = queue[:1] if queue else []
             else:
                 idx = _safe_int(idx, -1)
                 if idx < 0:
                     return {"ok": False, "error": "index must be a non-negative integer"}
-                if 0 <= idx < len(imgs):
-                    imgs.pop(idx)
+                visual_pos = idx + 1
+                if 0 <= visual_pos < len(queue):
+                    queue.pop(visual_pos)
                 else:
                     return {"ok": False, "error": f"index {idx} out of range"}
-            art.images = imgs
+        _apply_article_visual_queue(art, queue)
+        art.score = _score_for_article(art)
         await s.commit()
         await s.refresh(art)
         return {"ok": True, "article": _article_payload(art)}
@@ -1470,7 +1614,7 @@ def _article_visual_queue(art: Article) -> List[str]:
     if (art.cover_image or "").strip():
         queue.append(str(art.cover_image).strip())
     queue.extend([str(x).strip() for x in (art.images or []) if str(x or "").strip()])
-    return queue
+    return _dedupe_preserve_order(queue)
 
 
 def _dedupe_preserve_order(items: List[str]) -> List[str]:
@@ -1640,6 +1784,7 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": err}
     assert art is not None
 
+    had_visuals_before = bool(_article_visual_queue(art))
     include_cover = bool(args.get("include_cover", False))
     raw_content_count = args.get("content_count", args.get("n"))
     if raw_content_count is None:
@@ -1761,26 +1906,49 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
             elif item.get("error"):
                 image_errors.append({"role": "content", **item})
 
-        for idx, url in enumerate(generated_content_images):
-            await _bind_image_to_article(
-                url,
-                aid,
-                role="content",
-                replace_index=idx if replace_existing else None,
-            )
+        if generated_content_images:
+            # 统一按小红书展示队列写入：队列第 1 张就是首图/封面。
+            async with SessionLocal() as s:
+                art = await s.get(Article, aid)
+                if art:
+                    queue = _article_visual_queue(art)
+                    if replace_existing:
+                        queue = (queue[:1] if queue else []) + generated_content_images
+                    else:
+                        queue.extend(generated_content_images)
+                    _apply_article_visual_queue(art, queue)
+                    await s.commit()
 
-    final = await _get_article(aid)
+    newly_generated_content_images = list(generated_content_images)
+    final = await _refresh_article_local_score(aid) or await _get_article(aid)
+    final_ctx = _article_image_context(final) if final else {}
+    cover_image = str(final_ctx.get("cover_image") or generated_cover or "")
+    if not generated_cover and not had_visuals_before and newly_generated_content_images:
+        generated_cover = newly_generated_content_images[0]
+        generated_content_images = newly_generated_content_images[1:]
+    else:
+        generated_cover = generated_cover or cover_image
+        generated_content_images = newly_generated_content_images
     elapsed = _elapsed_ms(total_start)
     emit_tool_progress(
-        f"笔记图片生成任务完成：成功 {len(generated_content_images) + (1 if generated_cover else 0)} 张，失败 {len(image_errors)} 项，用时 {_fmt_elapsed(elapsed)}",
+        f"笔记图片生成任务完成：首图/封面已就绪，当前共 {int(final_ctx.get('image_count') or 0)} 张，失败 {len(image_errors)} 项，用时 {_fmt_elapsed(elapsed)}",
         step="article_images_done",
-        data={"article_id": aid, "success": len(generated_content_images) + (1 if generated_cover else 0), "failed": len(image_errors), "elapsed_ms": elapsed},
+        data={
+            "article_id": aid,
+            "success": int(final_ctx.get("image_count") or (len(generated_content_images) + (1 if generated_cover else 0))),
+            "failed": len(image_errors),
+            "elapsed_ms": elapsed,
+            "first_image_is_cover": bool(generated_cover),
+        },
     )
     return {
         "ok": len(generated_content_images) > 0 or bool(generated_cover) or not image_errors,
         "article_id": aid,
+        "cover_image": cover_image,
         "generated_cover": generated_cover,
         "generated_content_images": generated_content_images,
+        "first_image_is_cover": bool(generated_cover),
+        "visual_queue": [x["url"] for x in (final_ctx.get("visual_images") or [])],
         "image_errors": image_errors,
         "concurrency": concurrency,
         "elapsed_ms": elapsed,
@@ -1799,28 +1967,54 @@ async def _bind_image_to_article(
 ) -> Optional[Dict[str, Any]]:
     if not article_id:
         return None
+    bound = await _bind_generated_urls_to_article(article_id, [url], role=role, replace_index=replace_index)
+    return None if bound else {"ok": False, "error": f"article {article_id} not found"}
+
+
+async def _bind_generated_urls_to_article(
+    article_id: int,
+    urls: List[str],
+    *,
+    role: str = "content",
+    replace_index: Optional[Any] = None,
+) -> Optional[Dict[str, Any]]:
+    """Bind generated image URLs using the single Xiaohongshu visual queue.
+
+    Invariant after binding:
+    - Article.cover_image is the first/cover image whenever any image exists.
+    - Article.images contains only images after the cover.
+    """
+    clean_urls = _dedupe_preserve_order([str(u).strip() for u in urls if str(u or "").strip()])
+    if not clean_urls:
+        return None
     async with SessionLocal() as s:
         art = await s.get(Article, int(article_id))
         if not art:
-            return {"ok": False, "error": f"article {article_id} not found"}
+            return None
         uid = get_tool_user_id()
         if uid is not None and art.user_id != uid:
-            return {"ok": False, "error": "无权操作该笔记"}
+            return None
+        queue = _article_visual_queue(art)
         if role == "cover":
-            art.cover_image = url
+            tail = queue[1:] if queue else []
+            queue = [clean_urls[0]] + tail + clean_urls[1:]
         else:
-            imgs = list(art.images or [])
             if replace_index is not None:
-                idx = _safe_int(replace_index, len(imgs), min_value=0)
-                if 0 <= idx < len(imgs):
-                    imgs[idx] = url
-                else:
-                    imgs.append(url)
+                idx = _safe_int(replace_index, 0, min_value=0)
+                visual_pos = idx + 1 if queue else 0
+                for offset, url in enumerate(clean_urls):
+                    pos = visual_pos + offset
+                    if 0 <= pos < len(queue):
+                        queue[pos] = url
+                    else:
+                        queue.append(url)
             else:
-                imgs.append(url)
-            art.images = imgs
+                queue.extend(clean_urls)
+        _apply_article_visual_queue(art, queue)
+        art.score = _score_for_article(art)
         await s.commit()
-    return None
+        await s.refresh(art)
+        return _article_payload(art)
 
 
 async def tool_crop_image(args: Dict[str, Any]) -> Dict[str, Any]:

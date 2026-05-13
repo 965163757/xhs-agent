@@ -66,6 +66,32 @@ function toAbs(url: string) {
   return url // same-origin /static/images/... works via vite proxy
 }
 
+function scoreValue(score: Record<string, any> | undefined, key: string) {
+  if (!score) return undefined
+  const direct = Number(score[key])
+  if (Number.isFinite(direct)) return Math.max(0, Math.min(100, Math.round(direct)))
+  const dims = score.dimensions || score.model_a_score?.dimensions
+  if (dims) {
+    if (key === 'content') {
+      const title = Number(dims.title_quality)
+      const body = Number(dims.content_quality)
+      if (Number.isFinite(title) && Number.isFinite(body)) return Math.round(title * 0.45 + body * 0.55)
+    }
+    const map: Record<string, string> = {
+      visual: 'visual_quality',
+      growth: 'tag_strategy',
+      engagement: 'engagement_potential',
+    }
+    const mapped = Number(dims[map[key]])
+    if (Number.isFinite(mapped)) return Math.max(0, Math.min(100, Math.round(mapped)))
+  }
+  if (key === 'overall') {
+    const total = Number(score.total_score ?? score.overall_score ?? score.model_a_score?.total_score)
+    if (Number.isFinite(total)) return Math.max(0, Math.min(100, Math.round(total)))
+  }
+  return undefined
+}
+
 function ToolCard({
   call,
   result,
@@ -423,16 +449,17 @@ function ToolCard({
       {score && (
         <Box sx={{ px: 1.4, pb: 1.4 }}>
           <Stack direction="row" spacing={0.8} sx={{ flexWrap: 'wrap', gap: 0.8 }}>
-            {['content', 'visual', 'growth', 'engagement', 'overall'].map(k =>
-              typeof score[k] === 'number' ? (
+            {['content', 'visual', 'growth', 'engagement', 'overall'].map(k => {
+              const v = scoreValue(score, k)
+              return typeof v === 'number' ? (
                 <Chip
                   key={k}
                   size="small"
-                  label={`${k} ${score[k]}`}
+                  label={`${k} ${v}`}
                   sx={{ bgcolor: 'action.hover', fontFamily: 'monospace' }}
                 />
               ) : null
-            )}
+            })}
           </Stack>
         </Box>
       )}

@@ -13,6 +13,7 @@ from ..auth import get_current_user
 from ..config import get_effective_settings
 from ..database import Article, SessionLocal, User
 from ..agents.diagnosis import run_diagnosis
+from ..agents.tools import _article_image_context
 
 router = APIRouter()
 
@@ -45,8 +46,9 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
             title = article.title or ""
             content = article.body or ""
             tags = [t for t in (article.tags or "").split(",") if t.strip()]
-            cover_image = article.cover_image or ""
-            images = ([cover_image] if cover_image else []) + (article.images or [])
+            image_ctx = _article_image_context(article)
+            cover_image = str(image_ctx.get("cover_image") or "")
+            images = [x["url"] for x in image_ctx.get("visual_images", []) if x.get("url")]
             image_count = len(images)
 
     if not title and not content:

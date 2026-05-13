@@ -1,0 +1,55 @@
+import unittest
+
+from app.agents.tools import _article_image_context, _article_payload, _normalize_score_payload, _score_for_article
+from app.database import Article
+
+
+class ArticleVisualAndScoreTests(unittest.TestCase):
+    def test_first_content_image_is_effective_cover(self):
+        art = Article(
+            title="北京3天不踩坑攻略",
+            body="第一天故宫天安门，第二天天坛胡同，第三天长城颐和园。",
+            tags="#北京,#旅游,#攻略,#故宫,#长城",
+            cover_image="",
+            images=["/static/images/a.png", "/static/images/b.png"],
+        )
+
+        ctx = _article_image_context(art)
+        payload = _article_payload(art)
+
+        self.assertTrue(ctx["has_cover"])
+        self.assertFalse(ctx["stored_has_cover"])
+        self.assertEqual(ctx["cover_image"], "/static/images/a.png")
+        self.assertEqual(ctx["visual_images"][0]["role"], "cover")
+        self.assertEqual(ctx["visual_images"][0]["position"], 0)
+        self.assertEqual(payload["cover_image"], "/static/images/a.png")
+        self.assertEqual(payload["images"], ["/static/images/b.png"])
+
+    def test_score_for_article_always_has_five_dimensions(self):
+        art = Article(
+            title="北京3天不踩坑攻略",
+            body="路线、交通、住宿、美食、拍照机位和避坑提醒都整理好了，适合第一次去北京的姐妹收藏。",
+            tags="#北京,#北京旅游,#旅游攻略,#故宫,#长城,#天坛",
+            cover_image="",
+            images=[
+                "/static/images/cover.png",
+                "/static/images/route.png",
+                "/static/images/food.png",
+                "/static/images/tips.png",
+            ],
+        )
+
+        score = _score_for_article(art)
+        for key in ("content", "visual", "growth", "engagement", "overall"):
+            self.assertIsInstance(score[key], int)
+            self.assertGreater(score[key], 0)
+            self.assertLessEqual(score[key], 100)
+
+        normalized = _normalize_score_payload({"overall": 88}, score)
+        self.assertEqual(normalized["overall"], 88)
+        for key in ("content", "visual", "growth", "engagement"):
+            self.assertGreater(normalized[key], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

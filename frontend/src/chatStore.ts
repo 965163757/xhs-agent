@@ -156,9 +156,9 @@ function buildContextPreface(article?: Article | null, latestText = ''): UiMessa
   const attachVisuals = shouldAttachArticleImages(latestText)
   const attachedImages = attachVisuals ? articleImages.slice(0, 5) : []
   const imageLines = [
-    `封面图：${article.cover_image || '无'}`,
-    ...contentImages.slice(0, 12).map((url, i) => `内容图[${i}]：${url}`),
-    contentImages.length > 12 ? `其余内容图：${contentImages.length - 12} 张未展开` : '',
+    `首图/封面：${article.cover_image || '无'}`,
+    ...contentImages.slice(0, 12).map((url, i) => `后续内容图[${i}]：${url}`),
+    contentImages.length > 12 ? `其余后续内容图：${contentImages.length - 12} 张未展开` : '',
   ].filter(Boolean).join('\n')
   return [{
     role: 'user',
@@ -167,13 +167,13 @@ function buildContextPreface(article?: Article | null, latestText = ''): UiMessa
       `标题：${article.title}\n` +
       `状态：${article.status}\n` +
       `标签：${(article.tags || []).join(' ')}\n\n` +
-      `图片：共 ${articleImages.length} 张\n${imageLines}\n` +
+      `图片：共 ${articleImages.length} 张（小红书展示队列：第 1 张就是首图/封面）\n${imageLines}\n` +
       (attachedImages.length > 0
         ? `本轮涉及视觉/图片，已随上下文附带前 ${attachedImages.length} 张图片供视觉理解。\n\n`
         : `本轮先提供图片 URL；如需视觉像素级分析，用户问题包含图片/视觉/封面/配图等意图时会自动附带图片。\n\n`) +
       `正文：\n${preview}\n\n` +
-      `---\n请把对「笔记 ${article.id}」的任何操作通过工具完成（read/update/rewrite/optimize/score/diagnose/generate_image/remove_image）。` +
-      `每次改写/优化前先 read_article 拿最新版；read_article 会返回 cover_image、images 和 image_context。`,
+      `---\n请把对「笔记 ${article.id}」的任何操作通过工具完成（read/update/rewrite/optimize/score/diagnose/generate_image/arrange_article_images/remove_image）。` +
+      `每次改写/优化前先 read_article 拿最新版；read_article 会返回有效首图 cover_image、后续 images 和 image_context。`,
     images: attachedImages,
   }]
 }
