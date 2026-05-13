@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -25,7 +26,13 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { toast } from 'sonner'
-import { getArticle, diagnoseStream, type DiagnosisReport, type DiagnoseEvent } from '../api/client'
+import {
+  applyDiagnosisReport,
+  diagnoseStream,
+  listDiagnosisReports,
+  type DiagnosisReport,
+  type DiagnoseEvent,
+} from '../api/client'
 
 const STEPS = [
   { key: 'detect', label: '品类检测' },
@@ -128,6 +135,15 @@ function CommentCard({ comment }: { comment: any }) {
   )
 }
 
+function fmtTime(value?: string | null) {
+  if (!value) return '-'
+  try {
+    return new Date(value).toLocaleString()
+  } catch {
+    return value
+  }
+}
+
 export default function DiagnosePage() {
   const { id } = useParams<{ id: string }>()
   const nav = useNavigate()
@@ -135,11 +151,22 @@ export default function DiagnosePage() {
   const [activeStep, setActiveStep] = useState(0)
   const [progressMsg, setProgressMsg] = useState('准备中...')
   const [report, setReport] = useState<DiagnosisReport | null>(null)
+  const [history, setHistory] = useState<DiagnosisReport[]>([])
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   const [error, setError] = useState('')
+  const [applying, setApplying] = useState(false)
   const [expandDebate, setExpandDebate] = useState(false)
   const [expandAgents, setExpandAgents] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const runSeqRef = useRef(0)
+
+  const loadHistory = useCallback(async () => {
+    if (!id) return [] as DiagnosisReport[]
+    const items = await listDiagnosisReports(Number(id))
+    setHistory(items)
+    setHistoryLoaded(true)
+    return items
+  }, [id])
 
   const startDiagnosis = useCallback(async () => {
     abortRef.current?.abort()
@@ -166,8 +193,10 @@ export default function DiagnosePage() {
           } else if (ev.type === 'result') {
             terminalEventReceived = true
             setReport(ev.data)
+            setHistory(prev => [ev.data, ...prev.filter(x => (x.id || x.diagnosis_id) !== (ev.data.id || ev.data.diagnosis_id))])
             setActiveStep(STEPS.length - 1)
             setLoading(false)
+            loadHistory().catch(() => {})
           } else if (ev.type === 'error') {
             terminalEventReceived = true
             setError(ev.message)
@@ -189,16 +218,56 @@ export default function DiagnosePage() {
         setLoading(false)
       }
     }
-  }, [id])
+  }, [id, loadHistory])
 
   useEffect(() => {
-    startDiagnosis()
+    let alive = true
+    ;(async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const items = await loadHistory()
+        if (!alive) return
+        if (items.length > 0) {
+          setReport(items[0])
+          setActiveStep(STEPS.length - 1)
+          setProgressMsg('已加载最近一次诊断结果')
+          setLoading(false)
+        } else {
+          await startDiagnosis()
+        }
+      } catch (e: any) {
+        if (!alive) return
+        setError(e.message || '加载诊断历史失败')
+        setLoading(false)
+      }
+    })()
     return () => { abortRef.current?.abort() }
-  }, [startDiagnosis])
+  }, [loadHistory, startDiagnosis])
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text)
     toast.success('已复制')
+  }
+
+  const applyOptimized = async () => {
+    if (!id || !report) return
+    const did = Number(report.id || report.diagnosis_id)
+    if (!did) {
+      toast.error('当前诊断结果尚未保存，无法应用')
+      return
+    }
+    setApplying(true)
+    try {
+      const r = await applyDiagnosisReport(Number(id), did)
+      setReport(r.diagnosis)
+      setHistory(prev => prev.map(x => (x.id || x.diagnosis_id) === did ? r.diagnosis : x))
+      toast.success(`已应用优化方案：${r.changed.join('、')}`)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || e?.message || '应用失败')
+    } finally {
+      setApplying(false)
+    }
   }
 
   if (error) {
@@ -224,6 +293,67 @@ export default function DiagnosePage() {
           />
         )}
       </Stack>
+
+      {historyLoaded && history.length > 0 && (
+        <Alert
+          severity="info"
+          sx={{ mb: 2, borderRadius: 2 }}
+          action={
+            <Stack direction="row" spacing={1}>
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => {
+                  setReport(history[0])
+                  setActiveStep(STEPS.length - 1)
+                  setLoading(false)
+                }}
+              >
+                查看最新结果
+              </Button>
+              <Button color="inherit" size="small" onClick={startDiagnosis} disabled={loading}>
+                重新诊断
+              </Button>
+            </Stack>
+          }
+        >
+          这篇笔记已有 {history.length} 次诊断记录，当前默认展示历史结果；如需更新评分和建议，请重新诊断。
+        </Alert>
+      )}
+
+      {history.length > 1 && (
+        <Card sx={{ mb: 2 }}>
+          <CardContent>
+            <Stack direction="row" alignItems="center" sx={{ mb: 1.2 }}>
+              <Typography fontWeight={700}>历史诊断结果</Typography>
+              <Box flex={1} />
+              <Chip size="small" label={`${history.length} 条`} />
+            </Stack>
+            <Stack direction="row" flexWrap="wrap" gap={1}>
+              {history.slice(0, 8).map((item, idx) => {
+                const selected = (report?.id || report?.diagnosis_id) === (item.id || item.diagnosis_id)
+                return (
+                  <Button
+                    key={item.id || idx}
+                    variant={selected ? 'contained' : 'outlined'}
+                    size="small"
+                    onClick={() => {
+                      abortRef.current?.abort()
+                      setReport(item)
+                      setLoading(false)
+                      setError('')
+                      setActiveStep(STEPS.length - 1)
+                    }}
+                    sx={selected ? { bgcolor: '#FF2741', '&:hover': { bgcolor: '#E0223A' } } : undefined}
+                  >
+                    {item.grade || '-'}级 · {item.overall_score || 0}分 · {fmtTime(item.created_at)}
+                  </Button>
+                )
+              })}
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Progress Stepper */}
       {loading && (
@@ -335,7 +465,26 @@ export default function DiagnosePage() {
           {/* Optimized Content */}
           <Card>
             <CardContent>
-              <Typography fontWeight={700} sx={{ mb: 1.5 }}>优化方案</Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ mb: 1.5 }}>
+                <Box flex={1}>
+                  <Typography fontWeight={700}>优化方案</Typography>
+                  <Typography fontSize={12} color="text.secondary">
+                    可一键写回标题、正文和标签；应用前会自动保存一个文章版本，方便回滚。
+                  </Typography>
+                </Box>
+                <Button
+                  variant="contained"
+                  onClick={applyOptimized}
+                  disabled={
+                    applying ||
+                    !Number(report.id || report.diagnosis_id) ||
+                    (!report.optimized_title && !report.optimized_content && !(report.optimized_tags || []).length)
+                  }
+                  sx={{ bgcolor: '#FF2741', '&:hover': { bgcolor: '#E0223A' } }}
+                >
+                  {report.applied_at ? '已应用，可再次应用' : applying ? '应用中...' : '应用优化方案'}
+                </Button>
+              </Stack>
               <Stack spacing={2}>
                 {report.optimized_title && (
                   <Box>

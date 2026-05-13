@@ -3,23 +3,34 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+from datetime import datetime
 from pathlib import Path
 import time
 import uuid
 from typing import Any, Dict, List, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select
 
 from ..agents.background import cancel_task, get_stream, is_running, spawn_agent_task
 from ..agents.runner import run_agent_stream
-from ..agents.tools import TOOLS, _article_payload, _image_retry_options, call_tool_for_user, openai_tool_schemas
+from ..agents.tools import (
+    TOOLS,
+    _article_payload,
+    _diagnosis_result_payload,
+    _image_retry_options,
+    _save_diagnosis_report,
+    _score_for_article,
+    call_tool_for_user,
+    openai_tool_schemas,
+)
 from ..auth import get_current_user, require_admin
 from ..config import get_settings, update_settings
-from ..database import Article, ArticleVersion, Conversation, SessionLocal, Task, Template, User, UserMemory
+from ..database import Article, ArticleDiagnosis, ArticleVersion, Conversation, SessionLocal, Task, Template, User, UserMemory
 from ..schemas import (
     ApplyTemplateRequest,
+    ApplyDiagnosisRequest,
     ArticleImageArrangeRequest,
     ArticleIn,
     ArticleUpdate,
@@ -42,6 +53,7 @@ from ..schemas import (
     RewriteRequest,
     ScoreRequest,
     SettingsUpdate,
+    StaticImagePublicTestRequest,
     SuggestTagsRequest,
     SuggestTitlesRequest,
     TemplateCreate,
@@ -117,6 +129,36 @@ def _save_user_upload(content: bytes, user_id: int, ext: str, suffix: str = "") 
     name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}{safe_suffix}{ext}"
     (user_dir / name).write_bytes(content)
     return f"/static/images/user_{user_id}/{name}"
+
+
+async def _snapshot_article_version(
+    session,
+    article: Article,
+    *,
+    user_id: int,
+    trigger: str,
+) -> ArticleVersion:
+    last = await session.execute(
+        select(ArticleVersion)
+        .where(ArticleVersion.article_id == article.id)
+        .order_by(ArticleVersion.version.desc())
+        .limit(1)
+    )
+    last_v = last.scalars().first()
+    next_ver = (last_v.version + 1) if last_v else 1
+    v = ArticleVersion(
+        article_id=article.id,
+        user_id=user_id,
+        version=next_ver,
+        title=article.title,
+        body=article.body,
+        tags=article.tags,
+        cover_image=article.cover_image,
+        images=article.images or [],
+        trigger=trigger,
+    )
+    session.add(v)
+    return v
 
 
 # ---------- chat ----------
@@ -254,6 +296,90 @@ async def api_score(payload: ScoreRequest, user: User = Depends(get_current_user
 @router.post("/articles/diagnose")
 async def api_diagnose(payload: DiagnoseRequest, user: User = Depends(get_current_user)):
     return await _call_user_tool("diagnose_article", payload.model_dump(), user)
+
+
+@router.get("/articles/{aid}/diagnoses")
+async def list_article_diagnoses(aid: int, user: User = Depends(get_current_user)):
+    async with SessionLocal() as s:
+        a = await s.get(Article, aid)
+        if not a or a.user_id != user.id:
+            raise HTTPException(404, "article not found")
+        res = await s.execute(
+            select(ArticleDiagnosis)
+            .where(ArticleDiagnosis.article_id == aid, ArticleDiagnosis.user_id == user.id)
+            .order_by(ArticleDiagnosis.created_at.desc(), ArticleDiagnosis.id.desc())
+            .limit(50)
+        )
+        return {"items": [d.to_dict() for d in res.scalars().all()]}
+
+
+@router.get("/articles/{aid}/diagnoses/latest")
+async def latest_article_diagnosis(aid: int, user: User = Depends(get_current_user)):
+    async with SessionLocal() as s:
+        a = await s.get(Article, aid)
+        if not a or a.user_id != user.id:
+            raise HTTPException(404, "article not found")
+        res = await s.execute(
+            select(ArticleDiagnosis)
+            .where(ArticleDiagnosis.article_id == aid, ArticleDiagnosis.user_id == user.id)
+            .order_by(ArticleDiagnosis.created_at.desc(), ArticleDiagnosis.id.desc())
+            .limit(1)
+        )
+        d = res.scalars().first()
+        return {"item": d.to_dict() if d else None}
+
+
+@router.get("/articles/{aid}/diagnoses/{did}")
+async def get_article_diagnosis(aid: int, did: int, user: User = Depends(get_current_user)):
+    async with SessionLocal() as s:
+        a = await s.get(Article, aid)
+        if not a or a.user_id != user.id:
+            raise HTTPException(404, "article not found")
+        d = await s.get(ArticleDiagnosis, did)
+        if not d or d.article_id != aid or d.user_id != user.id:
+            raise HTTPException(404, "diagnosis not found")
+        return d.to_dict()
+
+
+@router.post("/articles/{aid}/diagnoses/{did}/apply")
+async def apply_article_diagnosis(
+    aid: int,
+    did: int,
+    payload: ApplyDiagnosisRequest | None = None,
+    user: User = Depends(get_current_user),
+):
+    payload = payload or ApplyDiagnosisRequest()
+    fields = {str(x).strip().lower() for x in (payload.fields or [])}
+    allowed = {"title", "body", "tags"}
+    fields = fields & allowed or allowed
+    async with SessionLocal() as s:
+        a = await s.get(Article, aid)
+        if not a or a.user_id != user.id:
+            raise HTTPException(404, "article not found")
+        d = await s.get(ArticleDiagnosis, did)
+        if not d or d.article_id != aid or d.user_id != user.id:
+            raise HTTPException(404, "diagnosis not found")
+        report = d.report or {}
+        changed: List[str] = []
+        await _snapshot_article_version(s, a, user_id=user.id, trigger=f"diagnosis_apply:{did}")
+        if "title" in fields and str(report.get("optimized_title") or "").strip():
+            a.title = str(report.get("optimized_title")).strip()[:255]
+            changed.append("title")
+        if "body" in fields and str(report.get("optimized_content") or "").strip():
+            a.body = str(report.get("optimized_content")).strip()
+            changed.append("body")
+        tags = report.get("optimized_tags")
+        if "tags" in fields and isinstance(tags, list) and tags:
+            a.tags = ",".join(str(t).strip() for t in tags if str(t).strip())
+            changed.append("tags")
+        if not changed:
+            raise HTTPException(400, "诊断报告里没有可应用的优化标题、正文或标签")
+        a.score = _score_for_article(a)
+        d.applied_at = datetime.now()
+        await s.commit()
+        await s.refresh(a)
+        await s.refresh(d)
+        return {"ok": True, "changed": changed, "article": _article_payload(a), "diagnosis": d.to_dict()}
 
 
 @router.post("/articles/outline")
@@ -800,6 +926,68 @@ async def test_settings(user: User = Depends(get_current_user)):
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@router.post("/settings/static-image-test")
+async def test_static_image_public_access(
+    payload: StaticImagePublicTestRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    """Create a tiny static image and verify /static/images/... is reachable via a public URL."""
+    import httpx
+    from ..config import get_effective_settings
+
+    effective = await get_effective_settings(user.id)
+    image_dir = Path(effective.image_dir)
+    test_dir = image_dir / "_static_public_tests"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}.png"
+    # 1x1 transparent PNG. Keep it tiny but valid, so both browser and backend
+    # fetch can verify real image bytes without involving the image model.
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+        b"\x00\x00\x00\x0bIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4"
+        b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    (test_dir / name).write_bytes(png)
+    static_path = f"/static/images/_static_public_tests/{name}"
+
+    base = (payload.public_base_url if payload.public_base_url is not None else effective.public_base_url).strip().rstrip("/")
+    if not base:
+        base = str(request.base_url).rstrip("/")
+    public_url = f"{base}{static_path}"
+
+    start = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as hc:
+            r = await hc.get(public_url)
+        elapsed = int((time.perf_counter() - start) * 1000)
+        content_type = r.headers.get("content-type", "")
+        ok = r.status_code == 200 and r.content.startswith(b"\x89PNG") and "image" in content_type.lower()
+        return {
+            "ok": ok,
+            "public_url": public_url,
+            "static_path": static_path,
+            "status_code": r.status_code,
+            "content_type": content_type,
+            "bytes": len(r.content),
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+            "message": "静态图片公网访问正常" if ok else "请求到了 URL，但返回内容不是有效图片",
+        }
+    except Exception as e:
+        elapsed = int((time.perf_counter() - start) * 1000)
+        return {
+            "ok": False,
+            "public_url": public_url,
+            "static_path": static_path,
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+            "error": str(e),
+            "message": "静态图片公网访问失败，请检查 PUBLIC_BASE_URL、端口、防火墙、反向代理或 /static/images 挂载。",
+        }
 
 
 # ---------- stats ----------

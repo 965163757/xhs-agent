@@ -156,6 +156,9 @@ export type DiagnoseEvent =
   | { type: 'error'; message: string }
 
 export interface DiagnosisReport {
+  id?: number
+  diagnosis_id?: number
+  article_id?: number
   overall_score: number
   grade: string
   radar_data: Record<string, number>
@@ -174,6 +177,8 @@ export interface DiagnosisReport {
   category: string
   category_cn: string
   elapsed_ms: number
+  applied_at?: string | null
+  created_at?: string | null
 }
 
 function handleStreamAuth(res: Response, url: string) {
@@ -221,6 +226,22 @@ export async function diagnoseStream(
     }
   }
 }
+
+export async function listDiagnosisReports(articleId: number): Promise<DiagnosisReport[]> {
+  const r = await api.get(`/articles/${articleId}/diagnoses`)
+  return r.data.items || []
+}
+
+export async function getLatestDiagnosisReport(articleId: number): Promise<DiagnosisReport | null> {
+  const r = await api.get(`/articles/${articleId}/diagnoses/latest`)
+  return r.data.item || null
+}
+
+export async function applyDiagnosisReport(articleId: number, diagnosisId: number, fields = ['title', 'body', 'tags']) {
+  const r = await api.post(`/articles/${articleId}/diagnoses/${diagnosisId}/apply`, { fields })
+  return r.data as { ok: boolean; changed: string[]; article: Article; diagnosis: DiagnosisReport }
+}
+
 export async function outlineArticle(topic: string, audience?: string) {
   const r = await api.post('/articles/outline', { topic, audience })
   return r.data
@@ -488,6 +509,22 @@ export async function testSettings() {
     image_model?: string
     public_base_url?: string
     image_key_set?: boolean
+  }
+}
+
+export async function testStaticImagePublicAccess(publicBaseUrl?: string) {
+  const r = await api.post('/settings/static-image-test', { public_base_url: publicBaseUrl ?? undefined })
+  return r.data as {
+    ok: boolean
+    public_url: string
+    static_path: string
+    status_code?: number
+    content_type?: string
+    bytes?: number
+    elapsed_ms: number
+    elapsed_sec: number
+    message?: string
+    error?: string
   }
 }
 

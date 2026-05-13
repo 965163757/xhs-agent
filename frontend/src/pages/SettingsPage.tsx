@@ -34,6 +34,7 @@ import {
   setUserRole,
   getSystemConfig,
   updateSystemConfig,
+  testStaticImagePublicAccess,
   type PublicSettings,
   type MySettings,
   type AdminUser,
@@ -85,6 +86,7 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null)
   const [mcpTools, setMcpTools] = useState<Array<{ name: string; description: string }>>([])
+  const [staticTest, setStaticTest] = useState<Awaited<ReturnType<typeof testStaticImagePublicAccess>> | null>(null)
 
   const load = async () => {
     const cur = await getSettings()
@@ -172,6 +174,26 @@ export default function SettingsPage() {
       const r = await testSettings()
       if (r.ok) setMsg({ kind: 'success', text: `文本连接正常：${r.reply || ''}；生图配置：${r.image_model || '-'} @ ${r.image_base_url || '-'}；公网地址：${r.public_base_url || '未配置'}` })
       else setMsg({ kind: 'error', text: `连接失败：${r.error || ''}` })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const testStaticImages = async () => {
+    setBusy(true)
+    setStaticTest(null)
+    setMsg({ kind: 'info', text: '正在生成测试图片并检测 /static/images/... 可访问性...' })
+    try {
+      const r = await testStaticImagePublicAccess(publicBaseUrl.trim() || undefined)
+      setStaticTest(r)
+      setMsg({
+        kind: r.ok ? 'success' : 'error',
+        text: r.ok
+          ? `静态图片访问正常：HTTP ${r.status_code}，${r.bytes || 0} bytes，用时 ${r.elapsed_sec}s`
+          : `静态图片访问失败：${r.message || r.error || '未知错误'}`,
+      })
+    } catch (e: any) {
+      setMsg({ kind: 'error', text: e?.response?.data?.detail || e?.message || '静态图片测试失败' })
     } finally {
       setBusy(false)
     }
@@ -444,14 +466,63 @@ export default function SettingsPage() {
               <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mt: -1 }}>
                 当前浏览器访问地址：{currentOrigin || '-'}。本地开发经 Vite 代理时可不填；服务器直连 IP/域名部署时建议填写。
               </Typography>
-              <Button
-                variant="contained"
-                onClick={saveGlobal}
-                disabled={busy}
-                sx={{ alignSelf: 'flex-start', background: 'linear-gradient(135deg,#FF2442,#FF7A00)', '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' } }}
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  bgcolor: staticTest ? (staticTest.ok ? 'rgba(22,163,74,0.04)' : 'rgba(220,38,38,0.04)') : 'rgba(0,0,0,0.015)',
+                }}
               >
-                保存全局配置
-              </Button>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                  <Box flex={1}>
+                    <Typography sx={{ fontSize: 13, fontWeight: 700 }}>静态图片公网可访问测试</Typography>
+                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mt: 0.3 }}>
+                      自动写入一张 1×1 测试图，并从服务端请求完整 URL，确认 /static/images/... 部署后真的可访问。
+                    </Typography>
+                  </Box>
+                  <Button variant="outlined" onClick={testStaticImages} disabled={busy} sx={{ minWidth: 152 }}>
+                    测试静态图片
+                  </Button>
+                </Stack>
+                {staticTest && (
+                  <Box sx={{ mt: 1.2 }}>
+                    <Stack direction="row" spacing={0.6} flexWrap="wrap" sx={{ gap: 0.6, mb: 0.8 }}>
+                      <Chip
+                        size="small"
+                        label={staticTest.ok ? '可访问' : '不可访问'}
+                        color={staticTest.ok ? 'success' : 'error'}
+                        sx={{ height: 22, fontSize: 11 }}
+                      />
+                      {typeof staticTest.status_code === 'number' && (
+                        <Chip size="small" label={`HTTP ${staticTest.status_code}`} sx={{ height: 22, fontSize: 11 }} />
+                      )}
+                      {staticTest.content_type && (
+                        <Chip size="small" label={staticTest.content_type} sx={{ height: 22, fontSize: 11 }} />
+                      )}
+                      <Chip size="small" label={`${staticTest.elapsed_sec}s`} sx={{ height: 22, fontSize: 11 }} />
+                    </Stack>
+                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary', wordBreak: 'break-all' }}>
+                      URL：<a href={staticTest.public_url} target="_blank" rel="noreferrer">{staticTest.public_url}</a>
+                    </Typography>
+                    {!staticTest.ok && (
+                      <Typography sx={{ fontSize: 11.5, color: 'error.main', mt: 0.5 }}>
+                        {staticTest.error || staticTest.message}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Paper>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  onClick={saveGlobal}
+                  disabled={busy}
+                  sx={{ alignSelf: 'flex-start', background: 'linear-gradient(135deg,#FF2442,#FF7A00)', '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' } }}
+                >
+                  保存全局配置
+                </Button>
+              </Stack>
             </Stack>
           </Section>
 

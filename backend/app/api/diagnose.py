@@ -13,7 +13,7 @@ from ..auth import get_current_user
 from ..config import get_effective_settings
 from ..database import Article, SessionLocal, User
 from ..agents.diagnosis import run_diagnosis
-from ..agents.tools import _article_image_context
+from ..agents.tools import _article_image_context, _diagnosis_result_payload, _save_diagnosis_report
 
 router = APIRouter()
 
@@ -35,6 +35,7 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
     image_count = req.image_count
     images = req.images
     cover_image = ""
+    image_context: Dict[str, Any] = {}
 
     if req.article_id:
         async with SessionLocal() as s:
@@ -46,9 +47,9 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
             title = article.title or ""
             content = article.body or ""
             tags = [t for t in (article.tags or "").split(",") if t.strip()]
-            image_ctx = _article_image_context(article)
-            cover_image = str(image_ctx.get("cover_image") or "")
-            images = [x["url"] for x in image_ctx.get("visual_images", []) if x.get("url")]
+            image_context = _article_image_context(article)
+            cover_image = str(image_context.get("cover_image") or "")
+            images = [x["url"] for x in image_context.get("visual_images", []) if x.get("url")]
             image_count = len(images)
 
     if not title and not content:
@@ -72,26 +73,14 @@ async def diagnose_stream(req: DiagnoseStreamRequest, user: User = Depends(get_c
                 progress=progress_callback,
                 settings=effective_settings,
             )
-            await progress_queue.put({"type": "result", "data": {
-                "overall_score": result.overall_score,
-                "grade": result.grade,
-                "radar_data": result.radar_data,
-                "issues": result.issues,
-                "suggestions": result.suggestions,
-                "debate_summary": result.debate_summary,
-                "optimized_title": result.optimized_title,
-                "optimized_content": result.optimized_content,
-                "optimized_tags": result.optimized_tags,
-                "cover_direction": result.cover_direction,
-                "simulated_comments": result.simulated_comments,
-                "agent_opinions": result.agent_opinions,
-                "debate_results": result.debate_results,
-                "model_a_score": result.model_a_score,
-                "text_analysis": result.text_analysis,
-                "category": result.category,
-                "category_cn": result.category_cn,
-                "elapsed_ms": result.elapsed_ms,
-            }})
+            report = _diagnosis_result_payload(
+                result,
+                int(req.article_id or 0),
+                image_context=image_context,
+            )
+            if req.article_id:
+                report = await _save_diagnosis_report(req.article_id, report, user_id=user.id)
+            await progress_queue.put({"type": "result", "data": report})
         except Exception as e:
             await progress_queue.put({"type": "error", "message": f"诊断失败: {e}"})
         finally:

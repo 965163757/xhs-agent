@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from sqlalchemy import or_, select
 
 from ..config import get_settings
-from ..database import Article, ArticleVersion, Conversation, SessionLocal, Template
+from ..database import Article, ArticleDiagnosis, ArticleVersion, Conversation, SessionLocal, Template
 from ..services.llm import (
     chat_completion,
     crop_image,
@@ -1331,12 +1331,59 @@ async def tool_score_article(args: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "score": data, "article_id": aid}
 
 
+def _diagnosis_result_payload(
+    result: Any,
+    article_id: int,
+    *,
+    image_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Serialize a DiagnosisResult into the API/frontend shape."""
+    return {
+        "article_id": article_id,
+        "image_context": image_context or {},
+        "overall_score": getattr(result, "overall_score", 0),
+        "grade": getattr(result, "grade", ""),
+        "radar_data": getattr(result, "radar_data", {}),
+        "issues": getattr(result, "issues", []),
+        "suggestions": getattr(result, "suggestions", []),
+        "optimized_title": getattr(result, "optimized_title", ""),
+        "optimized_content": getattr(result, "optimized_content", ""),
+        "optimized_tags": getattr(result, "optimized_tags", []),
+        "cover_direction": getattr(result, "cover_direction", {}),
+        "simulated_comments": getattr(result, "simulated_comments", []),
+        "debate_summary": getattr(result, "debate_summary", ""),
+        "agent_opinions": getattr(result, "agent_opinions", []),
+        "debate_results": getattr(result, "debate_results", []),
+        "model_a_score": getattr(result, "model_a_score", {}),
+        "text_analysis": getattr(result, "text_analysis", {}),
+        "category": getattr(result, "category", ""),
+        "category_cn": getattr(result, "category_cn", ""),
+        "elapsed_ms": getattr(result, "elapsed_ms", 0),
+    }
+
+
+async def _save_diagnosis_report(
+    article_id: int,
+    report: Dict[str, Any],
+    *,
+    user_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Persist a diagnosis report and return its public payload."""
+    async with SessionLocal() as s:
+        diag = ArticleDiagnosis(
+            article_id=int(article_id),
+            user_id=user_id,
+            report=dict(report or {}),
+        )
+        s.add(diag)
+        await s.commit()
+        await s.refresh(diag)
+        return diag.to_dict()
+
+
 async def tool_diagnose_article(args: Dict[str, Any]) -> Dict[str, Any]:
     """Multi-agent diagnosis: 4 experts + debate + judge."""
     from .diagnosis import run_diagnosis
-    from .research_data import detect_category
-    from .text_analyzer import full_analysis
-
     aid = int(args["article_id"])
     art, err = await _get_article_for_user(aid)
     if err:
@@ -1358,26 +1405,9 @@ async def tool_diagnose_article(args: Dict[str, Any]) -> Dict[str, Any]:
         cover_image=cover_image,
     )
 
-    return {
-        "ok": True,
-        "article_id": aid,
-        "image_context": _article_image_context(art),
-        "overall_score": result.overall_score,
-        "grade": result.grade,
-        "radar_data": result.radar_data,
-        "issues": result.issues,
-        "suggestions": result.suggestions,
-        "optimized_title": result.optimized_title,
-        "optimized_content": result.optimized_content,
-        "optimized_tags": result.optimized_tags,
-        "cover_direction": result.cover_direction,
-        "simulated_comments": result.simulated_comments,
-        "debate_summary": result.debate_summary,
-        "agent_opinions": result.agent_opinions,
-        "debate_results": result.debate_results,
-        "category": result.category_cn,
-        "elapsed_ms": result.elapsed_ms,
-    }
+    payload = _diagnosis_result_payload(result, aid, image_context=image_ctx)
+    saved = await _save_diagnosis_report(aid, payload, user_id=get_tool_user_id())
+    return {"ok": True, **saved}
 
 
 # ---------- ideation ----------

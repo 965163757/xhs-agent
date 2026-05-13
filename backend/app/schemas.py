@@ -122,6 +122,10 @@ class DiagnoseRequest(BaseModel):
     article_id: int
 
 
+class ApplyDiagnosisRequest(BaseModel):
+    fields: List[str] = Field(default_factory=lambda: ["title", "body", "tags"])
+
+
 class GenerateArticleRequest(BaseModel):
     topic: str
     tone: str = "真诚、有温度"
@@ -292,6 +296,22 @@ class SettingsUpdate(BaseModel):
             return ""
         if not (value.startswith("http://") or value.startswith("https://")):
             raise ValueError("服务公网地址必须以 http:// 或 https:// 开头")
+        return value
+
+
+class StaticImagePublicTestRequest(BaseModel):
+    public_base_url: Optional[str] = None
+
+    @field_validator("public_base_url")
+    @classmethod
+    def public_base_url_valid(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        value = v.strip().rstrip("/")
+        if not value:
+            return ""
+        if not (value.startswith("http://") or value.startswith("https://")):
+            raise ValueError("测试地址必须以 http:// 或 https:// 开头")
         return value
 
 

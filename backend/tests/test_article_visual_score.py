@@ -1,7 +1,7 @@
 import unittest
 
 from app.agents.tools import _article_image_context, _article_payload, _normalize_score_payload, _score_for_article
-from app.database import Article
+from app.database import Article, ArticleDiagnosis
 
 
 class ArticleVisualAndScoreTests(unittest.TestCase):
@@ -49,6 +49,22 @@ class ArticleVisualAndScoreTests(unittest.TestCase):
         self.assertEqual(normalized["overall"], 88)
         for key in ("content", "visual", "growth", "engagement"):
             self.assertGreater(normalized[key], 0)
+
+    def test_diagnosis_to_dict_exposes_history_metadata(self):
+        diag = ArticleDiagnosis(
+            id=12,
+            article_id=34,
+            user_id=1,
+            report={"overall_score": 88, "grade": "A", "optimized_title": "新标题"},
+        )
+
+        data = diag.to_dict()
+
+        self.assertEqual(data["id"], 12)
+        self.assertEqual(data["diagnosis_id"], 12)
+        self.assertEqual(data["article_id"], 34)
+        self.assertEqual(data["overall_score"], 88)
+        self.assertEqual(data["optimized_title"], "新标题")
 
 
 if __name__ == "__main__":

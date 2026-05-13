@@ -143,6 +143,30 @@ class ArticleVersion(Base):
         }
 
 
+class ArticleDiagnosis(Base):
+    __tablename__ = "article_diagnoses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    article_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    report: Mapped[dict] = mapped_column(JSON, default=dict)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    def to_dict(self) -> dict:
+        data = dict(self.report or {})
+        data.update(
+            {
+                "id": self.id,
+                "diagnosis_id": self.id,
+                "article_id": self.article_id,
+                "applied_at": self.applied_at.isoformat() if self.applied_at else None,
+                "created_at": self.created_at.isoformat() if self.created_at else None,
+            }
+        )
+        return data
+
+
 class Template(Base):
     __tablename__ = "templates"
 
@@ -356,6 +380,10 @@ async def _backfill_ownership(conn) -> None:
         await conn.execute(
             text(f"UPDATE {table} SET user_id={first_id} WHERE user_id IS NULL")
         )
+    await conn.execute(
+        text("UPDATE article_diagnoses SET user_id=:uid WHERE user_id IS NULL"),
+        {"uid": first_id},
+    )
 
 
 async def _recover_interrupted_tasks(conn) -> None:
