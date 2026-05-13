@@ -119,18 +119,18 @@ def _friendly_tool_error(exc: BaseException, *, elapsed_ms: int = 0, action: str
 def _image_retry_options(prompt: str, size: str, quality: str, n: int = 1) -> List[Dict[str, Any]]:
     """Manual retry suggestions. Never silently lowers quality."""
     options: List[Dict[str, Any]] = []
-    if size not in {"1024x1024", "1024x1536", "1536x1024"}:
+    if size not in {"1024x1024", "1152x1536", "1536x2048", "2048x1536", "2048x2048", "2048x1152"}:
         if "x" in str(size):
             try:
                 w, h = [int(x) for x in str(size).lower().split("x", 1)]
                 if h >= w:
-                    smaller = "1024x1536" if h / max(w, 1) > 1.15 else "1024x1024"
+                    smaller = "1152x1536" if h / max(w, 1) > 1.15 else "1024x1024"
                 else:
                     smaller = "1536x1024" if w / max(h, 1) > 1.15 else "1024x1024"
             except Exception:
-                smaller = "1024x1536"
+                smaller = "1152x1536"
         else:
-            smaller = "1024x1536"
+            smaller = "1152x1536"
         options.append(
             {
                 "label": "保持最高质量，降低尺寸重试",
@@ -147,7 +147,7 @@ def _image_retry_options(prompt: str, size: str, quality: str, n: int = 1) -> Li
         {
             "label": "保持参数，直接重试",
             "reason": "适合 502/524/队列波动等临时失败。",
-            "arguments": {"prompt": prompt, "size": size, "quality": quality or "high", "n": n},
+            "arguments": {"prompt": prompt, "size": size, "quality": quality or "high", "n": _safe_int(n, 1, min_value=1, max_value=2)},
         }
     )
     simplified = re.sub(r"[，,。；;、]\\s*", "，", prompt or "")[:420]
@@ -598,7 +598,7 @@ XHS_WORKFLOW_SYSTEM = (
     "你是小红书端到端内容工作流总监。你不是只写一篇文案，而是要一次性交付"
     "选题定位、标题、正文、标签、封面方向、内容配图方向和自检结论。\n\n"
     "输出必须能直接进入草稿箱：标题≤20字，正文口语化、分段清晰、结尾有互动引导，"
-    "标签 5-10 个且都以 # 开头。\n"
+    "标签 5-10 个，可带 #；系统入库时会统一规范为单个 # 展示。\n"
     "避免广告法绝对化、医疗承诺、收益承诺和站外引流表达。\n\n"
     "严格按 JSON 返回，不要包 markdown：\n"
     "{"
@@ -607,8 +607,8 @@ XHS_WORKFLOW_SYSTEM = (
     '"title_candidates":["备选标题1","备选标题2","备选标题3","备选标题4","备选标题5","备选标题6"],'
     '"body":"完整正文",'
     '"tags":["#标签1","#标签2"],'
-    '"cover_prompt":{"prompt":"中文封面图生成提示词","size":"1024x1536","quality":"high"},'
-    '"content_image_prompts":[{"scene":"场景名","prompt":"中文配图提示词","size":"1024x1024","quality":"high"}],'
+    '"cover_prompt":{"prompt":"中文封面图生成提示词","size":"1152x1536","quality":"high"},'
+    '"content_image_prompts":[{"scene":"场景名","prompt":"中文配图提示词","size":"1152x1536","quality":"high"}],'
     '"self_check":{"strengths":["亮点"],"risks":["风险"],"next_actions":["下一步建议"]}'
     "}"
 )
@@ -691,17 +691,118 @@ def _normalize_tags(tags: Any, limit: int = 10) -> List[str]:
     out: List[str] = []
     seen = set()
     for raw in tags:
-        t = str(raw or "").strip()
+        t = str(raw or "").strip().lstrip("#＃").strip()
         if not t:
             continue
-        if not t.startswith("#"):
-            t = "#" + t.lstrip("#")
-        if t not in seen:
+        key = t.lower()
+        if key not in seen:
             out.append(t)
-            seen.add(t)
+            seen.add(key)
         if len(out) >= limit:
             break
     return out
+
+
+_DEFAULT_IMAGE_SIZE = "1152x1536"  # 1.5K long side, default 3:4 portrait.
+_OLD_DEFAULT_IMAGE_SIZES = {"1024x1536", "1024x1024", _DEFAULT_IMAGE_SIZE}
+_COMMON_IMAGE_RATIOS: Dict[str, tuple[int, int]] = {
+    "1:1": (1, 1),
+    "3:4": (3, 4),
+    "4:3": (4, 3),
+    "2:3": (2, 3),
+    "3:2": (3, 2),
+    "9:16": (9, 16),
+    "16:9": (16, 9),
+}
+
+
+def _round_to_multiple(value: float, base: int = 64) -> int:
+    return max(base, int(round(value / base) * base))
+
+
+def _image_ratio_from_text(text: str) -> tuple[int, int]:
+    value = str(text or "").lower()
+    for m in re.finditer(r"(?<!\d)(1|2|3|4|9|16)\s*[:：]\s*(1|2|3|4|9|16)(?!\d)", value):
+        key = f"{int(m.group(1))}:{int(m.group(2))}"
+        if key in _COMMON_IMAGE_RATIOS:
+            return _COMMON_IMAGE_RATIOS[key]
+    if any(x in value for x in ("横版", "横图", "landscape", "宽屏")):
+        return (16, 9)
+    if any(x in value for x in ("方图", "正方形", "square")):
+        return (1, 1)
+    # 小红书默认竖版图文更常用 3:4；用户明确指定比例时再覆盖。
+    return (3, 4)
+
+
+def _image_long_side_from_text(text: str) -> int:
+    value = str(text or "").lower().replace("２", "2").replace("４", "4")
+    # Prefer explicit 4K/2K/1.5K wording over generic dimensions.
+    if re.search(r"(?<!\d)4\s*k\b|4k|4\s*Ｋ|4\s*千", value, re.I):
+        return 4096
+    if re.search(r"(?<!\d)2\s*k\b|2k|2\s*Ｋ|2\s*千", value, re.I):
+        return 2048
+    if re.search(r"1[.．]5\s*k|1[.．]5\s*千|1536", value, re.I):
+        return 1536
+    return 1536
+
+
+def _explicit_size_from_text(text: str) -> Optional[str]:
+    m = re.search(r"(?<!\d)(\d{3,5})\s*[x×]\s*(\d{3,5})(?!\d)", str(text or ""), re.I)
+    if not m:
+        return None
+    w, h = int(m.group(1)), int(m.group(2))
+    if 64 <= w <= 4096 and 64 <= h <= 4096 and w * h <= 4096 * 4096:
+        return f"{w}x{h}"
+    return None
+
+
+def _size_from_long_side_and_ratio(long_side: int, ratio: tuple[int, int]) -> str:
+    rw, rh = ratio
+    long_side = max(64, min(4096, int(long_side or 1536)))
+    if rw >= rh:
+        w = long_side
+        h = _round_to_multiple(long_side * rh / rw)
+    else:
+        h = long_side
+        w = _round_to_multiple(long_side * rw / rh)
+    w = max(64, min(4096, w))
+    h = max(64, min(4096, h))
+    return f"{w}x{h}"
+
+
+def _infer_image_size_from_request(
+    text: str,
+    requested_size: Any = None,
+    *,
+    default_size: str = _DEFAULT_IMAGE_SIZE,
+) -> str:
+    """Respect user-requested resolution/ratio even if the LLM omitted size.
+
+    Examples:
+    - "2K 3:4 竖版" -> 1536x2048
+    - "4K 16:9 横版" -> 4096x2304
+    - "2048x1152" -> 2048x1152
+    """
+    raw_size = str(requested_size or "").strip().lower()
+    has_user_size_hint = bool(
+        re.search(r"\d{3,5}\s*[x×]\s*\d{3,5}|(?<!\d)(1[.．]5|2|4)\s*k\b|[124]\s*Ｋ|分辨率|清晰度", str(text or ""), re.I)
+    )
+    has_ratio_hint = bool(
+        re.search(r"(?<!\d)(1|2|3|4|9|16)\s*[:：]\s*(1|2|3|4|9|16)(?!\d)|横版|横图|竖版|竖图|方图|正方形", str(text or ""), re.I)
+    )
+    explicit = _explicit_size_from_text(text)
+    if explicit and (not raw_size or raw_size in _OLD_DEFAULT_IMAGE_SIZES):
+        return explicit
+    if raw_size and raw_size not in _OLD_DEFAULT_IMAGE_SIZES and re.match(r"^\d{2,5}x\d{2,5}$", raw_size):
+        return raw_size
+    if has_user_size_hint or has_ratio_hint or not raw_size:
+        return _size_from_long_side_and_ratio(
+            _image_long_side_from_text(text),
+            _image_ratio_from_text(text),
+        )
+    if raw_size in _OLD_DEFAULT_IMAGE_SIZES:
+        return default_size
+    return raw_size or default_size
 
 
 def _normalize_shots(shots: Any, limit: int = 4) -> List[Dict[str, str]]:
@@ -718,7 +819,7 @@ def _normalize_shots(shots: Any, limit: int = 4) -> List[Dict[str, str]]:
             {
                 "scene": str(item.get("scene") or f"配图{len(out) + 1}"),
                 "prompt": prompt,
-                "size": str(item.get("size") or "1024x1024"),
+                "size": str(item.get("size") or _DEFAULT_IMAGE_SIZE),
                 "quality": str(item.get("quality") or "high"),
             }
         )
@@ -1028,6 +1129,24 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     generate_content_images = bool(args.get("generate_content_images", False))
     image_count = _safe_int(args.get("image_count", 4), 4, min_value=1, max_value=6)
     image_concurrency = _safe_int(args.get("image_concurrency", 3), 3, min_value=1, max_value=4)
+    image_request_text = " ".join(
+        str(x or "")
+        for x in (
+            topic,
+            audience,
+            tone,
+            length,
+            extra,
+            args.get("image_size"),
+            args.get("image_ratio"),
+            args.get("size"),
+            args.get("cover_size"),
+        )
+    )
+    preferred_image_size = _infer_image_size_from_request(
+        image_request_text,
+        args.get("image_size") or args.get("size") or args.get("cover_size"),
+    )
     from .research_data import detect_category
     category = detect_category(str(topic), str(extra), [])
     playbook = _category_playbook_text(category)
@@ -1040,6 +1159,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         f"补充信息：{extra}\n"
         f"{playbook}\n"
         f"是否需要视觉方向：{include_visual_prompts}\n"
+        f"图片规格：默认小红书 3:4 竖版，当前解析为 {preferred_image_size}；如果用户指定 2K/4K/16:9/1:1 等，必须按该规格输出所有图片 size。\n"
         "请一次性交付完整小红书笔记工作流结果。"
     )
     emit_tool_progress("正在规划内容策略、正文结构、标题候选和视觉方向", step="planning")
@@ -1067,14 +1187,23 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     cover_prompt = data.get("cover_prompt") if isinstance(data.get("cover_prompt"), dict) else {}
     if not cover_prompt:
         cover_prompt = {
-            "prompt": f"小红书封面，主题：{topic}，干净高级感，竖图 2:3，主体明确，预留标题区域",
-            "size": "1024x1536",
+            "prompt": f"小红书封面，主题：{topic}，干净高级感，竖版 3:4，主体明确，预留标题区域",
+            "size": preferred_image_size,
             "quality": "high",
         }
+    cover_prompt["size"] = _infer_image_size_from_request(
+        image_request_text + " " + str(cover_prompt.get("prompt") or ""),
+        cover_prompt.get("size") or preferred_image_size,
+    )
     content_shots = _normalize_shots(
         data.get("content_image_prompts") or data.get("shots") or [],
         limit=image_count,
     )
+    for shot in content_shots:
+        shot["size"] = _infer_image_size_from_request(
+            image_request_text + " " + str(shot.get("prompt") or ""),
+            shot.get("size") or preferred_image_size,
+        )
 
     initial = {"title": title, "body": body, "tags": tags}
     emit_tool_progress("正在做本地发布前自检：标题长度、标签、敏感词、基础评分", step="self_check")
@@ -1147,7 +1276,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             urls = await _await_with_progress(
                 generate_image(
                     prompt=str(cover_prompt.get("prompt") or ""),
-                    size=str(cover_prompt.get("size") or "1024x1536"),
+                    size=str(cover_prompt.get("size") or preferred_image_size),
                     quality=str(cover_prompt.get("quality") or "high"),
                     n=1,
                 ),
@@ -1191,7 +1320,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                     urls = await _await_with_progress(
                         generate_image(
                             prompt=shot["prompt"],
-                            size=shot.get("size", "1024x1024"),
+                            size=shot.get("size", preferred_image_size),
                             quality=shot.get("quality", "high"),
                             n=1,
                         ),
@@ -1335,7 +1464,7 @@ async def tool_imitate_article_style(args: Dict[str, Any]) -> Dict[str, Any]:
     generate_images_flag = bool(args.get("generate_images", False))
     image_count = _safe_int(args.get("image_count", 3), 3, min_value=0, max_value=6)
     image_mode = str(args.get("image_mode") or "edit_reference").strip().lower()
-    size = str(args.get("size") or "1024x1536")
+    size = _infer_image_size_from_request(" ".join([topic, instruction, str(args.get("size") or "")]), args.get("size"))
     quality = str(args.get("quality") or "high")
 
     ref, err = await _get_article_for_user(ref_id)
@@ -1383,7 +1512,7 @@ async def tool_imitate_article_style(args: Dict[str, Any]) -> Dict[str, Any]:
                     '"title":"新标题",'
                     '"body":"新正文",'
                     '"tags":["#标签"],'
-                    '"image_plan":[{"source_position":0,"role":"cover/content","prompt":"基于参考图做同风格变体的图片编辑提示词","size":"1024x1536"}]'
+                    '"image_plan":[{"source_position":0,"role":"cover/content","prompt":"基于参考图做同风格变体的图片编辑提示词","size":"1152x1536"}]'
                     "}"
                 ),
             },
@@ -1787,8 +1916,8 @@ async def tool_cover_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
                     "- 清单类：多图拼贴/网格排列/数字标注\n"
                     "- 对比类：左右分屏/前后对比/色彩反差\n\n"
                     "prompt 用中文描述，要具体到：主体内容、构图方式、光线氛围、色彩基调、画面风格。\n"
-                    "竖图比例 2:3。\n"
-                    '严格 JSON：{"prompt":"中文描述...","size":"1024x1536","quality":"high"}'
+                    "默认竖图比例 3:4；如果用户明确指定 2K/4K/16:9/1:1 等分辨率或比例，size 必须匹配。\n"
+                    '严格 JSON：{"prompt":"中文描述...","size":"1152x1536","quality":"high"}'
                 ),
             },
             {"role": "user", "content": f"标题：{title}\n主题：{topic}\n风格偏好：{style}\n{playbook}"},
@@ -1805,7 +1934,7 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
     prompt = (args.get("prompt") or "").strip()
     if not prompt:
         return {"ok": False, "error": "prompt is required"}
-    size = args.get("size", "1024x1536")
+    size = _infer_image_size_from_request(prompt, args.get("size"))
     quality = args.get("quality", "high")
     n = _safe_int(args.get("n", 1), 1, min_value=1, max_value=4)
     raw_aid = args.get("article_id")
@@ -1856,7 +1985,7 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
             "elapsed_ms": elapsed,
             "elapsed_sec": round(elapsed / 1000, 2),
             "suggestions": [
-                "降低 size，例如 1536x2048 → 1024x1365",
+                "降低 size，例如 1536x2048 → 1152x1536",
                 "将 quality 从 high 改为 medium/auto",
                 "减少中文密集文字和分区数量，先生成背景再用编辑器叠字",
             ],
@@ -2074,9 +2203,9 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
                     "- 色彩基调：与整组图保持一致\n"
                     "- 拍摄视角：俯拍/平视/特写/远景\n"
                     "- 画面风格：清新/复古/极简/日系等\n\n"
-                    "正方形比例 1:1。prompt 用中文。\n"
+                    "默认竖版比例 3:4。若用户指定 2K/4K/16:9/1:1 等，必须按用户比例和分辨率写 size。prompt 用中文。\n"
                     '严格按 JSON 返回：'
-                    '{"shots":[{"scene":"场景标题","prompt":"中文描述","size":"1024x1024","quality":"high"}]}'
+                    '{"shots":[{"scene":"场景标题","prompt":"中文描述","size":"1152x1536","quality":"high"}]}'
                 ),
             },
             {
@@ -2107,7 +2236,8 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
     content_count = _safe_int(raw_content_count, 0 if include_cover else 4, min_value=0, max_value=8)
     concurrency = _safe_int(args.get("concurrency", args.get("image_concurrency", 3)), 3, min_value=1, max_value=4)
     replace_existing = bool(args.get("replace_existing", False))
-    default_size = args.get("size", "1024x1024")
+    size_hint_text = " ".join(str(x or "") for x in (args.get("style"), args.get("size"), args.get("cover_size"), art.title, art.body))
+    default_size = _infer_image_size_from_request(size_hint_text, args.get("size"))
     default_quality = args.get("quality", "high")
     style = args.get("style", "小红书风、统一色调、干净高级、有生活感")
     image_errors: List[Dict[str, Any]] = []
@@ -2126,7 +2256,7 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
         if not cover_prompt:
             cover_resp = await tool_cover_prompt({"topic": art.title or "", "title": art.title or "", "style": style})
             cover_prompt = (cover_resp.get("cover") or {}).get("prompt") or f"小红书封面图，主题：{art.title}，{style}"
-        cover_size = args.get("cover_size", "1024x1536")
+        cover_size = _infer_image_size_from_request(size_hint_text, args.get("cover_size") or default_size)
         cover_start = time.perf_counter()
         emit_tool_progress("正在生成笔记封面图", step="article_cover_start", data={"article_id": aid})
         try:
@@ -2164,7 +2294,10 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
             shots = prompt_resp.get("shots") or []
     shots = _normalize_shots(shots or [], limit=content_count or 0)
     for shot in shots:
-        shot.setdefault("size", default_size)
+        shot["size"] = _infer_image_size_from_request(
+            size_hint_text + " " + str(shot.get("prompt") or ""),
+            shot.get("size") or default_size,
+        )
         shot.setdefault("quality", default_quality)
 
     if shots:
@@ -2748,6 +2881,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "generate_content_images": {"type": "boolean", "description": "是否直接生成正文配图，默认 false"},
                 "image_count": {"type": "integer", "description": "配图 prompt/生成数量，1-6"},
                 "image_concurrency": {"type": "integer", "description": "正文配图并发生成数量，1-4，默认 3"},
+                "image_size": {"type": "string", "description": "用户指定的图片尺寸/分辨率，如 1536x2048、2K、4K；未指定默认 1152x1536"},
+                "image_ratio": {"type": "string", "description": "用户指定比例，如 3:4、16:9、1:1；未指定默认 3:4"},
             },
             required=["topic"],
         ),
@@ -2778,7 +2913,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "generate_images": {"type": "boolean", "description": "是否同时仿图，默认 false"},
                 "image_count": {"type": "integer", "description": "仿图数量 0-6"},
                 "image_mode": {"type": "string", "enum": ["edit_reference", "generate"], "description": "edit_reference=调用 edit_image 修改参考图做同风格变体；generate=参考图生图"},
-                "size": {"type": "string", "description": "仿图尺寸，默认 1024x1536"},
+                "size": {"type": "string", "description": "仿图尺寸，默认 1152x1536；可按用户 2K/4K/3:4/16:9 要求推断"},
                 "quality": {"type": "string", "enum": ["high", "medium", "low", "auto"]},
             },
             required=["reference_article_id"],
@@ -2882,7 +3017,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "独立生成图片，不会创建笔记/帖子。只有在显式传 article_id 时才绑定到笔记（role=cover|content）；若指定 replace_index，则替换该位置的配图。",
             {
                 "prompt": {"type": "string"},
-                "size": {"type": "string", "description": "如 1024x1536 / 1024x1024"},
+                "size": {"type": "string", "description": "如 1152x1536 / 1536x2048 / 2048x1152；不传时会从 prompt 的 2K/4K/比例推断，默认 3:4"},
                 "quality": {
                     "type": "string",
                     "enum": ["high", "medium", "low", "auto"],
@@ -2956,8 +3091,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "content_count": {"type": "integer", "description": "内容配图数量，0-8，默认 4"},
                 "concurrency": {"type": "integer", "description": "并发数量，1-4，默认 3"},
                 "replace_existing": {"type": "boolean", "description": "是否从第 0 张开始替换已有内容图；false 为追加"},
-                "size": {"type": "string", "description": "内容图尺寸，默认 1024x1024"},
-                "cover_size": {"type": "string", "description": "封面尺寸，默认 1024x1536"},
+                "size": {"type": "string", "description": "内容图尺寸，默认 1152x1536；可从 2K/4K/比例推断"},
+                "cover_size": {"type": "string", "description": "封面尺寸，默认 1152x1536；可从 2K/4K/比例推断"},
                 "quality": {"type": "string", "enum": ["high", "medium", "low", "auto"]},
                 "style": {"type": "string"},
                 "cover_prompt": {"type": "string"},

@@ -513,7 +513,7 @@ export default function DiagnosePage() {
                     <Typography fontSize={13} fontWeight={600} color="text.secondary" sx={{ mb: 0.5 }}>推荐标签</Typography>
                     <Stack direction="row" flexWrap="wrap" gap={0.5}>
                       {report.optimized_tags.map((t, i) => (
-                        <Chip key={i} label={t} size="small" onClick={() => copyText(t)} sx={{ cursor: 'pointer' }} />
+                        <Chip key={i} label={`#${String(t).replace(/^[#＃]+/, '')}`} size="small" onClick={() => copyText(`#${String(t).replace(/^[#＃]+/, '')}`)} sx={{ cursor: 'pointer' }} />
                       ))}
                     </Stack>
                   </Box>

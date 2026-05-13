@@ -370,7 +370,11 @@ async def apply_article_diagnosis(
             changed.append("body")
         tags = report.get("optimized_tags")
         if "tags" in fields and isinstance(tags, list) and tags:
-            a.tags = ",".join(str(t).strip() for t in tags if str(t).strip())
+            a.tags = ",".join(
+                str(t).strip().lstrip("#＃").strip()
+                for t in tags
+                if str(t).strip().lstrip("#＃").strip()
+            )
             changed.append("tags")
         if not changed:
             raise HTTPException(400, "诊断报告里没有可应用的优化标题、正文或标签")

@@ -30,6 +30,7 @@ import {
   getMcpTools,
   getMySettings,
   updateMySettings,
+  changePassword,
   listUsers,
   setUserRole,
   getSystemConfig,
@@ -80,6 +81,10 @@ export default function SettingsPage() {
   const [useOwnKey, setUseOwnKey] = useState(false)
   const [showMyChatKey, setShowMyChatKey] = useState(false)
   const [showMyImageKey, setShowMyImageKey] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPasswords, setShowPasswords] = useState(false)
 
   const [users, setUsers] = useState<AdminUser[]>([])
   const [regOpen, setRegOpen] = useState(true)
@@ -163,6 +168,34 @@ export default function SettingsPage() {
       setMsg({ kind: 'success', text: '个人设置已保存。' })
     } catch (e: any) {
       setMsg({ kind: 'error', text: e?.message || '保存失败' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const savePassword = async () => {
+    if (!currentPassword || !newPassword) {
+      setMsg({ kind: 'error', text: '请输入当前密码和新密码。' })
+      return
+    }
+    if (newPassword.length < 4) {
+      setMsg({ kind: 'error', text: '新密码至少 4 位。' })
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setMsg({ kind: 'error', text: '两次输入的新密码不一致。' })
+      return
+    }
+    setBusy(true)
+    setMsg(null)
+    try {
+      await changePassword({ current_password: currentPassword, new_password: newPassword })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setMsg({ kind: 'success', text: '密码已修改，下次登录请使用新密码。' })
+    } catch (e: any) {
+      setMsg({ kind: 'error', text: e?.response?.data?.detail || e?.message || '修改密码失败' })
     } finally {
       setBusy(false)
     }
@@ -331,6 +364,47 @@ export default function SettingsPage() {
             </Button>
             <Button variant="outlined" onClick={test} disabled={busy}>
               测试连接
+            </Button>
+          </Stack>
+        </Section>
+      )}
+
+      {s && (
+        <Section title="账号安全" desc="修改当前登录账号的密码。">
+          <Stack spacing={2}>
+            <TextField
+              label="当前密码"
+              fullWidth
+              type={showPasswords ? 'text' : 'password'}
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton onClick={() => setShowPasswords(v => !v)} edge="end" size="small">
+                      {showPasswords ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <TextField
+              label="新密码"
+              fullWidth
+              type={showPasswords ? 'text' : 'password'}
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              helperText="至少 4 位，修改后当前登录不会被强制退出。"
+            />
+            <TextField
+              label="确认新密码"
+              fullWidth
+              type={showPasswords ? 'text' : 'password'}
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+            />
+            <Button variant="outlined" onClick={savePassword} disabled={busy} sx={{ alignSelf: 'flex-start' }}>
+              修改密码
             </Button>
           </Stack>
         </Section>

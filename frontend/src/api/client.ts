@@ -600,6 +600,14 @@ export async function updateMySettings(payload: {
   return r.data
 }
 
+export async function changePassword(payload: {
+  current_password: string
+  new_password: string
+}): Promise<{ ok: boolean }> {
+  const r = await api.post('/auth/change-password', payload)
+  return r.data
+}
+
 // ---------- admin ----------
 
 export interface AdminUser {

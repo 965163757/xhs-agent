@@ -13,6 +13,9 @@ import {
   ListItemText,
   Divider,
   Checkbox,
+  Chip,
+  Menu,
+  MenuItem,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import AddIcon from '@mui/icons-material/Add'
@@ -22,6 +25,7 @@ import {
   deleteConversation,
   deleteConversations,
   getArticle,
+  listArticles,
   type Conversation,
   type Article,
 } from '../api/client'
@@ -45,9 +49,12 @@ export default function ChatPage() {
   const [article, setArticle] = useState<Article | null>(null)
   const [sidebar, setSidebar] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
+  const [articleOptions, setArticleOptions] = useState<Article[]>([])
+  const [articleMenuAnchor, setArticleMenuAnchor] = useState<HTMLElement | null>(null)
   const [deleteConvoId, setDeleteConvoId] = useState<number | null>(null)
   const [selectedConvoIds, setSelectedConvoIds] = useState<number[]>([])
   const [batchDeleteIds, setBatchDeleteIds] = useState<number[] | null>(null)
+  const [batchMode, setBatchMode] = useState(false)
   const justCreatedRef = useRef(false)
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(articleId ? Number(articleId) : null)
   const selectedCount = selectedConvoIds.length
@@ -92,7 +99,22 @@ export default function ChatPage() {
 
   const newChat = () => {
     resetSession(currentSessionKey)
+    setBatchMode(false)
+    setSelectedConvoIds([])
     setParams({})
+  }
+
+  const openArticleMenu = (anchor: HTMLElement) => {
+    setArticleMenuAnchor(anchor)
+    listArticles().then(setArticleOptions).catch(() => setArticleOptions([]))
+  }
+
+  const selectArticleContext = (nextArticleId: number | null) => {
+    const next: Record<string, string> = {}
+    if (convId) next.c = convId
+    if (nextArticleId) next.article = String(nextArticleId)
+    setArticleMenuAnchor(null)
+    setParams(next, { replace: true })
   }
 
   const handleConversationCreated = useCallback((id: number) => {
@@ -134,6 +156,7 @@ export default function ChatPage() {
     if (convId && ids.includes(Number(convId))) newChat()
     setSelectedConvoIds([])
     setBatchDeleteIds(null)
+    setBatchMode(false)
     refreshConvos()
   }
 
@@ -180,6 +203,22 @@ export default function ChatPage() {
             新对话
           </Typography>
         )}
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={e => openArticleMenu(e.currentTarget)}
+          sx={{ fontSize: 12, borderColor: 'divider', color: 'text.secondary', maxWidth: 220 }}
+        >
+          {article ? '切换参考笔记' : '选择库中笔记'}
+        </Button>
+        {article && (
+          <Chip
+            size="small"
+            label="清除上下文"
+            onClick={() => selectArticleContext(null)}
+            sx={{ height: 22, fontSize: 11 }}
+          />
+        )}
         <Box sx={{ flex: 1 }} />
         <Button
           size="small"
@@ -190,6 +229,30 @@ export default function ChatPage() {
           新对话
         </Button>
       </Stack>
+
+      <Menu anchorEl={articleMenuAnchor} open={!!articleMenuAnchor} onClose={() => setArticleMenuAnchor(null)}>
+        <MenuItem onClick={() => selectArticleContext(null)} selected={!articleId}>
+          不绑定笔记，直接新创作
+        </MenuItem>
+        {articleOptions.map(item => (
+          <MenuItem
+            key={item.id}
+            selected={String(item.id) === articleId}
+            onClick={() => selectArticleContext(item.id)}
+            sx={{ minWidth: 320 }}
+          >
+            <Stack sx={{ minWidth: 0 }}>
+              <Typography noWrap sx={{ fontSize: 13, fontWeight: 600 }}>
+                #{item.id} {item.title || '（无标题）'}
+              </Typography>
+              <Typography noWrap sx={{ fontSize: 11, color: 'text.secondary' }}>
+                {item.status} · {(item.tags || []).slice(0, 3).map(t => `#${String(t).replace(/^[#＃]+/, '')}`).join(' ')}
+              </Typography>
+            </Stack>
+          </MenuItem>
+        ))}
+        {articleOptions.length === 0 && <MenuItem disabled>暂无可选笔记</MenuItem>}
+      </Menu>
 
       {/* Chat area */}
       <Box sx={{ flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center' }}>
@@ -207,11 +270,16 @@ export default function ChatPage() {
                 ? [
                     { label: '加强钩子', prompt: '开头钩子不够戳人，帮我改得更痛一点' },
                     { label: '整体改写', prompt: '把整篇改写得更有网感、更口语化' },
+                    { label: '参考仿写', prompt: `参考笔记 #${article.id} 的中文小红书风格，仿写一篇同赛道新笔记；如果需要图片，调用图片编辑模仿参考图风格` },
                     { label: '打分', prompt: '先读一次当前正文，然后给它做五维打分' },
                     { label: '诊断', prompt: '做发布前诊断，重点查违禁词和 CTA' },
                     { label: '生成封面', prompt: '为这篇笔记生成一张干净、高级感的竖版封面' },
                   ]
-                : undefined
+                : [
+                    { label: '参考仿写', prompt: '我想从库里选一篇笔记做参考仿写，请先让我选择参考笔记，或告诉你参考笔记 ID' },
+                    { label: '一键成稿', prompt: '帮我一键成稿：主题是「」，默认生成 3:4 竖版图片；如果我写 2K/4K 或 16:9，请按我的分辨率和比例来' },
+                    { label: '生成图片', prompt: '生成一张小红书风格图片，默认 3:4 竖版；如我指定 2K/4K/比例请严格按指定 size' },
+                  ]
             }
           />
         </Box>
@@ -239,13 +307,19 @@ export default function ChatPage() {
           </Stack>
           {convos.length > 0 && (
             <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 2.5, pb: 1.5 }}>
-              <Button size="small" onClick={toggleSelectAll} sx={{ fontSize: 12 }}>
-                {allSelected ? '取消全选' : '全选'}
-              </Button>
+              {!batchMode ? (
+                <Button size="small" onClick={() => { setBatchMode(true); setSelectedConvoIds([]) }} sx={{ fontSize: 12 }}>
+                  批量管理
+                </Button>
+              ) : (
+                <Button size="small" onClick={toggleSelectAll} sx={{ fontSize: 12 }}>
+                  {allSelected ? '取消全选' : '全选'}
+                </Button>
+              )}
               <Typography sx={{ flex: 1, fontSize: 12, color: 'text.secondary' }}>
-                {selectedCount > 0 ? `已选 ${selectedCount} 条` : '可勾选多条后批量删除'}
+                {batchMode ? (selectedCount > 0 ? `已选 ${selectedCount} 条` : '选择要删除的对话') : '点击对话继续'}
               </Typography>
-              {selectedCount > 0 && (
+              {batchMode && selectedCount > 0 && (
                 <Button
                   size="small"
                   color="error"
@@ -256,6 +330,11 @@ export default function ChatPage() {
                   批量删除
                 </Button>
               )}
+              {batchMode && (
+                <Button size="small" onClick={() => { setBatchMode(false); setSelectedConvoIds([]) }} sx={{ fontSize: 12 }}>
+                  取消
+                </Button>
+              )}
             </Stack>
           )}
           <Divider />
@@ -264,7 +343,7 @@ export default function ChatPage() {
               <ListItemButton
                 key={c.id}
                 onClick={() => {
-                  if (selectedCount > 0) {
+                  if (batchMode) {
                     toggleConvoSelection(c.id)
                     return
                   }
@@ -275,13 +354,15 @@ export default function ChatPage() {
                 }}
                 sx={{ borderRadius: 2, mb: 0.3 }}
               >
-                <Checkbox
-                  size="small"
-                  checked={selectedConvoIds.includes(c.id)}
-                  onClick={e => e.stopPropagation()}
-                  onChange={() => toggleConvoSelection(c.id)}
-                  sx={{ mr: 0.5, p: 0.5 }}
-                />
+                {batchMode && (
+                  <Checkbox
+                    size="small"
+                    checked={selectedConvoIds.includes(c.id)}
+                    onClick={e => e.stopPropagation()}
+                    onChange={() => toggleConvoSelection(c.id)}
+                    sx={{ mr: 0.5, p: 0.5 }}
+                  />
+                )}
                 <ListItemText
                   primary={c.title || '新对话'}
                   secondary={formatBeijingDateTime(c.updated_at)}

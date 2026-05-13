@@ -24,16 +24,18 @@ export default function TagInput({
   const [activeIdx, setActiveIdx] = useState(-1)
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
   const containerRef = useRef<HTMLDivElement>(null)
-  const tagsRef = useRef(tags)
-  tagsRef.current = tags
+  const normalizeTag = (raw: string) => raw.trim().replace(/^[#＃]+/, '').trim()
+  const normalizedTags = tags.map(t => normalizeTag(t)).filter(Boolean)
+  const tagsRef = useRef(normalizedTags)
+  tagsRef.current = normalizedTags
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
     if (!input.trim() && !showSuggestions) return
     timerRef.current = setTimeout(async () => {
       try {
-        const items = await suggestHotTags(input.replace(/^#/, ''), category || '', 12)
-        setSuggestions(items.filter(t => !tagsRef.current.includes(t.tag.replace(/^#/, ''))))
+        const items = await suggestHotTags(input.replace(/^[#＃]+/, ''), category || '', 12)
+        setSuggestions(items.filter(t => !tagsRef.current.includes(normalizeTag(t.tag))))
         setShowSuggestions(true)
         setActiveIdx(-1)
       } catch { /* ignore */ }
@@ -52,9 +54,9 @@ export default function TagInput({
   }, [])
 
   function addTag(raw: string) {
-    const tag = raw.trim().replace(/^#/, '')
-    if (tag && !tags.includes(tag)) {
-      onChange([...tags, tag])
+    const tag = normalizeTag(raw)
+    if (tag && !normalizedTags.includes(tag)) {
+      onChange([...normalizedTags, tag])
     }
     setInput('')
     setShowSuggestions(false)
@@ -84,8 +86,8 @@ export default function TagInput({
       setShowSuggestions(false)
       return
     }
-    if (e.key === 'Backspace' && !input && tags.length > 0) {
-      onChange(tags.slice(0, -1))
+    if (e.key === 'Backspace' && !input && normalizedTags.length > 0) {
+      onChange(normalizedTags.slice(0, -1))
     }
   }
 
@@ -111,22 +113,22 @@ export default function TagInput({
           transition: 'border-color .15s',
         }}
       >
-        {tags.map((t, i) => (
+        {normalizedTags.map((t, i) => (
           <Chip
             key={t}
             label={`#${t}`}
             size="small"
-            onDelete={() => onChange(tags.filter((_, idx) => idx !== i))}
+            onDelete={() => onChange(normalizedTags.filter((_, idx) => idx !== i))}
             sx={{ fontSize: 12, height: 26 }}
           />
         ))}
         <TextField
           variant="standard"
-          placeholder={tags.length === 0 ? '输入标签，回车添加' : ''}
+          placeholder={normalizedTags.length === 0 ? '输入标签，回车添加' : ''}
           value={input}
           onChange={e => { setInput(e.target.value); setShowSuggestions(true) }}
           onKeyDown={handleKeyDown}
-          onFocus={() => { if (suggestions.length || !input) { suggestHotTags(input.replace(/^#/, ''), category || '', 12).then(items => { setSuggestions(items.filter(t => !tags.includes(t.tag.replace(/^#/, '')))); setShowSuggestions(true) }).catch(() => {}) } }}
+          onFocus={() => { if (suggestions.length || !input) { suggestHotTags(input.replace(/^[#＃]+/, ''), category || '', 12).then(items => { setSuggestions(items.filter(t => !normalizedTags.includes(normalizeTag(t.tag)))); setShowSuggestions(true) }).catch(() => {}) } }}
           onBlur={() => { setTimeout(() => { if (input.trim() && !showSuggestions) addTag(input) }, 150) }}
           InputProps={{ disableUnderline: true, sx: { fontSize: 13, py: 0 } }}
           sx={{ flex: 1, minWidth: 80 }}
@@ -163,7 +165,7 @@ export default function TagInput({
                 '&:hover': { bgcolor: 'action.hover' },
               }}
             >
-              <Typography sx={{ fontSize: 13 }}>{s.tag}</Typography>
+              <Typography sx={{ fontSize: 13 }}>#{normalizeTag(s.tag)}</Typography>
               <Stack direction="row" spacing={0.5} alignItems="center">
                 <Box
                   sx={{

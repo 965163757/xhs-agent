@@ -130,36 +130,43 @@ _CATEGORY_MAP = [
 
 
 def check_banned_words(text: str) -> BanCheckResult:
-    """检测文本中的违禁词，返回所有命中项。"""
+    """检测文本中的违禁词，按词去重返回命中项。
+
+    同一个违禁词在正文里重复出现时，编辑页只需要提示一次，否则会把
+    「最好」这类重复词刷成很多条，用户很难判断真正要改哪些表达。
+    position 保留首次出现位置。
+    """
     if not text:
         return BanCheckResult(safe=True, summary="文本为空")
 
     hits: List[BannedWordHit] = []
     text_lower = text.lower()
 
+    seen: set[tuple[str, str]] = set()
     for word_list, category, severity in _CATEGORY_MAP:
         for word in word_list:
             word_lower = word.lower()
-            start = 0
-            while True:
-                pos = text_lower.find(word_lower, start)
-                if pos == -1:
-                    break
-                hits.append(BannedWordHit(
-                    word=word,
-                    category=category,
-                    position=pos,
-                    replacement=REPLACEMENTS.get(word, ""),
-                    severity=severity,
-                ))
-                start = pos + len(word)
+            pos = text_lower.find(word_lower)
+            if pos == -1:
+                continue
+            key = (word_lower, category)
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append(BannedWordHit(
+                word=word,
+                category=category,
+                position=pos,
+                replacement=REPLACEMENTS.get(word, ""),
+                severity=severity,
+            ))
 
     safe = len(hits) == 0
     if safe:
         summary = "未检测到违禁词"
     else:
         categories = list(set(h.category for h in hits))
-        summary = f"检测到 {len(hits)} 个违禁词，涉及：{'、'.join(categories)}"
+        summary = f"检测到 {len(hits)} 类违禁/敏感词，涉及：{'、'.join(categories)}"
 
     return BanCheckResult(hits=hits, safe=safe, summary=summary)
 

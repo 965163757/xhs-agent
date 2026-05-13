@@ -332,6 +332,27 @@ export default function ChatPanel({
 
       <Box sx={{ px: { xs: 2, md: 3 }, pb: 2.5, pt: 1.2 }}>
         <Box sx={{ maxWidth: 760, mx: 'auto' }}>
+          {messages.length > 0 && quickActions && quickActions.length > 0 && (
+            <Stack direction="row" spacing={0.6} sx={{ mb: 1, flexWrap: 'wrap', gap: 0.6 }}>
+              {quickActions.map(q => (
+                <Chip
+                  key={q.label}
+                  label={q.label}
+                  size="small"
+                  clickable={!streaming}
+                  onClick={() => { if (!streaming) handleSend(q.prompt) }}
+                  sx={{
+                    bgcolor: 'background.default',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    fontSize: 11.5,
+                    height: 24,
+                    '&:hover': { bgcolor: 'background.paper', borderColor: 'text.secondary' },
+                  }}
+                />
+              ))}
+            </Stack>
+          )}
           {pendingImages.length > 0 && (
             <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap', gap: 1 }}>
               {pendingImages.map((u, i) => (

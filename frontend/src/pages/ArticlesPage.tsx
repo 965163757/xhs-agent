@@ -266,7 +266,7 @@ export default function ArticlesPage() {
                 {(a.tags || []).slice(0, 5).map(t => (
                   <Chip
                     key={t}
-                    label={t}
+                    label={`#${String(t).replace(/^[#＃]+/, '')}`}
                     size="small"
                     sx={{
                       fontSize: 10.5,

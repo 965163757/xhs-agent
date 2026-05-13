@@ -330,7 +330,7 @@ function ToolCard({
             {Array.isArray(article.tags) && article.tags.length > 0 && (
               <Stack direction="row" spacing={0.5} sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}>
                 {article.tags.map((t: string) => (
-                  <Chip key={t} label={t} size="small" sx={{ bgcolor: 'action.hover', fontSize: 11 }} />
+                  <Chip key={t} label={`#${String(t).replace(/^[#＃]+/, '')}`} size="small" sx={{ bgcolor: 'action.hover', fontSize: 11 }} />
                 ))}
               </Stack>
             )}
@@ -385,7 +385,7 @@ function ToolCard({
         <Box sx={{ px: 1.4, pb: 1.4 }}>
           <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
             {tags.map(t => (
-              <Chip key={t} label={t} size="small" sx={{ bgcolor: 'action.hover' }} />
+              <Chip key={t} label={`#${String(t).replace(/^[#＃]+/, '')}`} size="small" sx={{ bgcolor: 'action.hover' }} />
             ))}
           </Stack>
         </Box>

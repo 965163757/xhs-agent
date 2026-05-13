@@ -16,6 +16,11 @@ class AuthRequest(BaseModel):
     password: str = Field(min_length=4, max_length=128)
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=4, max_length=128)
+
+
 class TokenResponse(BaseModel):
     token: str
     user: dict
@@ -67,3 +72,18 @@ async def login(req: AuthRequest):
 @router.get("/me")
 async def me(user: User = Depends(get_current_user)):
     return user.to_dict()
+
+
+@router.post("/change-password")
+async def change_password(req: ChangePasswordRequest, user: User = Depends(get_current_user)):
+    async with SessionLocal() as s:
+        db_user = await s.get(User, user.id)
+        if not db_user:
+            raise HTTPException(404, "用户不存在")
+        if not verify_password(req.current_password, db_user.hashed_password):
+            raise HTTPException(400, "当前密码不正确")
+        if verify_password(req.new_password, db_user.hashed_password):
+            raise HTTPException(400, "新密码不能与当前密码相同")
+        db_user.hashed_password = hash_password(req.new_password)
+        await s.commit()
+    return {"ok": True}

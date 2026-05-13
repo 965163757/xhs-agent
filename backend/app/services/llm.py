@@ -115,10 +115,10 @@ def _normalize_image_quality(quality: Optional[str], model: str = "") -> str:
 
 
 def _normalize_image_size(size: Optional[str]) -> str:
-    value = str(size or "1024x1536").strip().lower()
+    value = str(size or "1152x1536").strip().lower()
     m = IMAGE_SIZE_RE.match(value)
     if not m:
-        raise ValueError(f"图片尺寸格式无效：{size!r}，应为 1024x1536 这类 宽x高")
+        raise ValueError(f"图片尺寸格式无效：{size!r}，应为 1152x1536 这类 宽x高")
     w, h = int(m.group(1)), int(m.group(2))
     if w < IMAGE_MIN_SIDE or h < IMAGE_MIN_SIDE:
         raise ValueError(f"图片尺寸过小：{w}x{h}，单边不能小于 {IMAGE_MIN_SIDE}")
@@ -549,7 +549,7 @@ async def chat_completion_stream(
 
 async def generate_image(
     prompt: str,
-    size: str = "1024x1536",
+    size: str = "1152x1536",
     n: int = 1,
     quality: str = "high",
     reference_images: Optional[List[str]] = None,

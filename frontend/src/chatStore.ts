@@ -180,6 +180,7 @@ function buildContextPreface(article?: Article | null, latestText = ''): UiMessa
       `正文：\n${preview}\n\n` +
       `---\n当前编辑页默认操作「笔记 ${article.id}」，但对话不与笔记强绑定；如果用户明确指定其它笔记 ID 或多个笔记，请按用户指定 ID 操作。` +
       `任何写入都通过工具完成（read/update/rewrite/imitate_article_style/optimize/score/diagnose/generate_image/arrange_article_images/remove_image）。` +
+      `图片默认 3:4 竖版 1152x1536；用户指定 2K/4K/16:9/1:1/横版/竖版时，必须把规格传给工具，不能固定默认尺寸。` +
       `每次改写/优化/仿写前先 read_article 拿最新版；read_article 会返回有效首图 cover_image、后续 images、完整图片 URL 和 image_context。`,
     images: attachedImages,
   }]

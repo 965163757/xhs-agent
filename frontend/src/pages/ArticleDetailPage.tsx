@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
   Dialog,
   Divider,
   Drawer,
@@ -351,6 +352,9 @@ export default function ArticleDetailPage() {
   const [deleteConvoId, setDeleteConvoId] = useState<number | null>(null)
   const [selectedConvoIds, setSelectedConvoIds] = useState<number[]>([])
   const [batchDeleteIds, setBatchDeleteIds] = useState<number[] | null>(null)
+  const [batchMode, setBatchMode] = useState(false)
+  const [extractingTemplate, setExtractingTemplate] = useState(false)
+  const [publishing, setPublishing] = useState(false)
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
   const [dragImagePos, setDragImagePos] = useState<number | null>(null)
   const selectedCount = selectedConvoIds.length
@@ -387,6 +391,8 @@ export default function ArticleDetailPage() {
 
   const newChat = () => {
     resetSession(currentSessionKey)
+    setBatchMode(false)
+    setSelectedConvoIds([])
     setParams(prev => {
       const next = new URLSearchParams(prev)
       next.delete('c')
@@ -424,6 +430,7 @@ export default function ArticleDetailPage() {
     if (convId && ids.includes(Number(convId))) newChat()
     setSelectedConvoIds([])
     setBatchDeleteIds(null)
+    setBatchMode(false)
     refreshConvos()
   }
 
@@ -592,6 +599,50 @@ export default function ArticleDetailPage() {
     setSaving(false)
   }
 
+  const handlePublish = async () => {
+    setPublishing(true)
+    try {
+      const next = await updateArticle(art.id, {
+        title: art.title,
+        body: art.body,
+        tags: art.tags,
+        status: 'published',
+      } as any)
+      setArt(next)
+      setSavedArt(next)
+      toast.success('已推到已发布状态')
+    } catch (e: any) {
+      toast.error(e?.message || '发布失败')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  const scorePanel = getScoreValue(art.score, 'overall') > 0 ? (
+    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2, bgcolor: 'background.paper', width: 340 }}>
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
+          五维评分
+        </Typography>
+        <Chip
+          size="small"
+          label={`综合 ${getScoreValue(art.score, 'overall')}`}
+          sx={{ bgcolor: '#E6F7EC', color: '#0F8C3D', fontSize: 11, height: 20 }}
+        />
+      </Stack>
+      <ScoreRadar score={art.score || {}} />
+      {art.score?.advice && (
+        <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+          {(art.score.advice as string[]).slice(0, 3).map((x, i) => (
+            <Typography key={i} sx={{ fontSize: 12, color: 'text.secondary' }}>
+              · {x}
+            </Typography>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  ) : null
+
   return (
     <Box sx={{ height: 'calc(100vh - 56px)', display: 'flex', bgcolor: 'background.paper' }}>
       {/* left: chat panel */}
@@ -645,7 +696,7 @@ export default function ArticleDetailPage() {
             { label: '标题候选', prompt: '为这篇笔记生成 6 个候选标题' },
             { label: '段落润色', prompt: '帮我润色正文，让表达更自然流畅' },
             { label: '生成封面', prompt: '为这篇笔记生成一张干净、有高级感的竖版封面' },
-            { label: '内容配图', prompt: '根据这篇笔记按段落生成 4 张 1:1 的内容配图' },
+            { label: '内容配图', prompt: '根据这篇笔记按段落生成 4 张 3:4 竖版内容配图；如我指定 2K/4K/比例，按指定尺寸来' },
             { label: '打分', prompt: '帮我从内容、视觉、增长、互动四个维度给这篇笔记打分' },
             { label: '发布前诊断', prompt: '帮我诊断一下能不能发，重点检查违禁词和 CTA' },
           ]}
@@ -664,7 +715,7 @@ export default function ArticleDetailPage() {
             </Typography>
             <Chip
               size="small"
-              label={art.status}
+              label={art.status === 'published' ? '已发布' : art.status === 'draft' ? '草稿' : art.status}
               sx={{ bgcolor: 'action.hover', fontSize: 11, height: 20 }}
             />
             <Button
@@ -685,18 +736,23 @@ export default function ArticleDetailPage() {
             <Box sx={{ flex: 1 }} />
             <Button
               onClick={async () => {
+                setExtractingTemplate(true)
                 try {
                   await extractTemplate(art.id)
                   toast.success('模板已提取，前往模板库查看')
                 } catch (e: any) {
                   toast.error(e?.message || '提取失败')
+                } finally {
+                  setExtractingTemplate(false)
                 }
               }}
               variant="outlined"
               size="small"
+              disabled={extractingTemplate}
+              startIcon={extractingTemplate ? <CircularProgress size={14} /> : undefined}
               sx={{ mr: 1 }}
             >
-              提取模板
+              {extractingTemplate ? '提取中' : '提取模板'}
             </Button>
             <Button
               onClick={() => nav(`/articles/${art.id}/diagnose`)}
@@ -705,6 +761,19 @@ export default function ArticleDetailPage() {
               sx={{ mr: 1, borderColor: '#FF7A00', color: '#FF7A00', '&:hover': { borderColor: '#E06800', bgcolor: '#FFF8F0' } }}
             >
               诊断
+            </Button>
+            <Button
+              onClick={handlePublish}
+              variant={art.status === 'published' ? 'outlined' : 'contained'}
+              size="small"
+              disabled={publishing || art.status === 'published'}
+              sx={{
+                mr: 1,
+                bgcolor: art.status === 'published' ? undefined : '#16A34A',
+                '&:hover': { bgcolor: art.status === 'published' ? undefined : '#15803D' },
+              }}
+            >
+              {art.status === 'published' ? '已发布' : publishing ? '发布中' : '发布'}
             </Button>
             <Button
               onClick={handleSave}
@@ -936,32 +1005,6 @@ export default function ArticleDetailPage() {
               )}
             </Box>
 
-            {/* score radar */}
-            {getScoreValue(art.score, 'overall') > 0 && (
-              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2 }}>
-                <Stack direction="row" alignItems="center" spacing={1}>
-                  <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
-                    五维评分
-                  </Typography>
-                  <Chip
-                    size="small"
-                    label={`综合 ${getScoreValue(art.score, 'overall')}`}
-                    sx={{ bgcolor: '#E6F7EC', color: '#0F8C3D', fontSize: 11, height: 20 }}
-                  />
-                </Stack>
-                <ScoreRadar score={art.score || {}} />
-                {art.score?.advice && (
-                  <Stack spacing={0.5} sx={{ mt: 0.5 }}>
-                    {(art.score.advice as string[]).slice(0, 3).map((x, i) => (
-                      <Typography key={i} sx={{ fontSize: 12, color: 'text.secondary' }}>
-                        · {x}
-                      </Typography>
-                    ))}
-                  </Stack>
-                )}
-              </Box>
-            )}
-
             {/* version history */}
             <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ cursor: 'pointer' }} onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}>
@@ -1009,19 +1052,22 @@ export default function ArticleDetailPage() {
           borderColor: 'divider',
           display: { xs: 'none', lg: 'flex' },
           alignItems: 'center',
-          justifyContent: 'center',
+          justifyContent: 'flex-start',
           bgcolor: 'background.default',
           overflow: 'auto',
           py: 3,
         }}
       >
-        <PhonePreview
-          title={art.title}
-          body={art.body}
-          tags={art.tags || []}
-          coverImage={art.cover_image || undefined}
-          images={art.images || undefined}
-        />
+        <Stack spacing={2} alignItems="center">
+          <PhonePreview
+            title={art.title}
+            body={art.body}
+            tags={art.tags || []}
+            coverImage={art.cover_image || undefined}
+            images={art.images || undefined}
+          />
+          {scorePanel}
+        </Stack>
       </Box>
 
       {/* Lightbox */}
@@ -1073,13 +1119,19 @@ export default function ArticleDetailPage() {
           </Stack>
           {convos.length > 0 && (
             <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 2, pb: 1.5 }}>
-              <Button size="small" onClick={toggleSelectAllConvos}>
-                {allSelected ? '取消全选' : '全选'}
-              </Button>
+              {!batchMode ? (
+                <Button size="small" onClick={() => { setBatchMode(true); setSelectedConvoIds([]) }}>
+                  批量管理
+                </Button>
+              ) : (
+                <Button size="small" onClick={toggleSelectAllConvos}>
+                  {allSelected ? '取消全选' : '全选'}
+                </Button>
+              )}
               <Typography sx={{ flex: 1, fontSize: 12, color: 'text.secondary' }}>
-                {selectedCount > 0 ? `已选 ${selectedCount} 条` : '可选择任意对话在当前笔记继续'}
+                {batchMode ? (selectedCount > 0 ? `已选 ${selectedCount} 条` : '选择要删除的对话') : '可选择任意对话在当前笔记继续'}
               </Typography>
-              {selectedCount > 0 && (
+              {batchMode && selectedCount > 0 && (
                 <Button
                   size="small"
                   color="error"
@@ -1088,6 +1140,11 @@ export default function ArticleDetailPage() {
                   sx={{ fontSize: 12 }}
                 >
                   批量删除
+                </Button>
+              )}
+              {batchMode && (
+                <Button size="small" onClick={() => { setBatchMode(false); setSelectedConvoIds([]) }}>
+                  取消
                 </Button>
               )}
             </Stack>
@@ -1102,7 +1159,7 @@ export default function ArticleDetailPage() {
                   key={c.id}
                   selected={convId === String(c.id)}
                   onClick={() => {
-                    if (selectedCount > 0) {
+                    if (batchMode) {
                       toggleConvoSelection(c.id)
                       return
                     }
@@ -1115,13 +1172,15 @@ export default function ArticleDetailPage() {
                   }}
                   sx={{ alignItems: 'flex-start', py: 1 }}
                 >
-                  <Checkbox
-                    size="small"
-                    checked={selectedConvoIds.includes(c.id)}
-                    onClick={e => e.stopPropagation()}
-                    onChange={() => toggleConvoSelection(c.id)}
-                    sx={{ mr: 0.5, p: 0.5, mt: 0.2 }}
-                  />
+                  {batchMode && (
+                    <Checkbox
+                      size="small"
+                      checked={selectedConvoIds.includes(c.id)}
+                      onClick={e => e.stopPropagation()}
+                      onChange={() => toggleConvoSelection(c.id)}
+                      sx={{ mr: 0.5, p: 0.5, mt: 0.2 }}
+                    />
+                  )}
                   <ListItemText
                     primary={
                       <Stack direction="row" spacing={0.6} alignItems="center" sx={{ minWidth: 0 }}>

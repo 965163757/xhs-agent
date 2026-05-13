@@ -32,6 +32,21 @@ def _validate_image_quality(v: str) -> str:
     return value
 
 
+def _normalize_tag_list(tags: List[str]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for raw in tags or []:
+        tag = str(raw or "").strip().lstrip("#＃").strip()
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tag)
+    return out
+
+
 class ArticleIn(BaseModel):
     title: str = ""
     body: str = ""
@@ -46,6 +61,11 @@ class ArticleIn(BaseModel):
         if len(v) > 20:
             raise ValueError("标题不能超过 20 个字符")
         return v
+
+    @field_validator("tags")
+    @classmethod
+    def tags_normalized(cls, v: List[str]) -> List[str]:
+        return _normalize_tag_list(v)
 
 
 class ArticleUpdate(BaseModel):
@@ -64,6 +84,11 @@ class ArticleUpdate(BaseModel):
             raise ValueError("标题不能超过 20 个字符")
         return v
 
+    @field_validator("tags")
+    @classmethod
+    def update_tags_normalized(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        return _normalize_tag_list(v or []) if v is not None else v
+
 
 class ChatMessage(BaseModel):
     role: str
@@ -79,7 +104,7 @@ class ChatRequest(BaseModel):
 
 class ImageGenRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
-    size: str = "1024x1536"
+    size: str = "1152x1536"
     quality: str = "high"
     n: int = Field(default=1, ge=1, le=4)
     reference_images: List[str] = Field(default_factory=list)

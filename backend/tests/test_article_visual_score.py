@@ -2,7 +2,15 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from app.agents.tools import _article_image_context, _article_payload, _normalize_score_payload, _score_for_article
+from app.agents.banned_words import check_banned_words
+from app.agents.tools import (
+    _article_image_context,
+    _article_payload,
+    _infer_image_size_from_request,
+    _normalize_score_payload,
+    _normalize_tags,
+    _score_for_article,
+)
 from app.config import Settings
 from app.database import Article, ArticleDiagnosis
 from app.time_utils import beijing_iso, parse_beijing_datetime_to_naive
@@ -106,6 +114,21 @@ class ArticleVisualAndScoreTests(unittest.TestCase):
             parse_beijing_datetime_to_naive("2026-05-13T16:30:00+08:00"),
             datetime(2026, 5, 13, 16, 30, 0),
         )
+
+    def test_tags_are_normalized_without_duplicate_hashes(self):
+        self.assertEqual(_normalize_tags(["#旅行", "##攻略", "旅行", " 美食 "]), ["旅行", "攻略", "美食"])
+
+    def test_banned_words_deduplicate_repeated_terms(self):
+        result = check_banned_words("最好最好最好，唯一唯一")
+        words = [h.word for h in result.hits]
+        self.assertEqual(words.count("最好"), 1)
+        self.assertEqual(words.count("唯一"), 1)
+
+    def test_image_size_inference_respects_resolution_and_ratio(self):
+        self.assertEqual(_infer_image_size_from_request("小红书海报 2K 3:4 竖版", "1024x1536"), "1536x2048")
+        self.assertEqual(_infer_image_size_from_request("横版 4K 16:9", None), "4096x2304")
+        self.assertEqual(_infer_image_size_from_request("精确 2048x1152", None), "2048x1152")
+        self.assertEqual(_infer_image_size_from_request("普通封面", "1024x1536"), "1152x1536")
 
 
 if __name__ == "__main__":
