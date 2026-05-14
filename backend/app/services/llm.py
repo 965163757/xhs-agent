@@ -194,8 +194,64 @@ def _ordered_model_candidates(s: Settings, kind: str, explicit_model: Optional[s
     return healthy + cooled_down
 
 
-def _fallback_error(action: str, errors: List[str]) -> RuntimeError:
+class ImageModelFallbackError(RuntimeError):
+    """Raised after every image candidate in the configured queue failed."""
+
+    def __init__(self, action: str, errors: List[str], attempts: Optional[List[Dict[str, Any]]] = None):
+        self.action = action
+        self.errors = errors
+        self.attempts = attempts or []
+        super().__init__(f"{action}：所有候选模型均失败。失败详情: {_compact_attempt_errors(errors, limit=2600)}")
+
+
+def _fallback_error(action: str, errors: List[str], attempts: Optional[List[Dict[str, Any]]] = None) -> RuntimeError:
+    if attempts is not None:
+        return ImageModelFallbackError(action, errors, attempts)
     return RuntimeError(f"{action}：所有候选模型均失败。失败详情: {_compact_attempt_errors(errors, limit=2600)}")
+
+
+def _new_image_attempt(action: str, s: Settings, index: int) -> Dict[str, Any]:
+    return {
+        "index": index,
+        "action": action,
+        "model": s.image_model,
+        "base_url": s.effective_image_base_url.rstrip("/"),
+        "method": "",
+        "status": "running",
+        "elapsed_ms": 0,
+        "elapsed_sec": 0,
+    }
+
+
+def _set_image_attempt_method(attempt: Optional[Dict[str, Any]], method: str, **extra: Any) -> None:
+    if attempt is None:
+        return
+    attempt["method"] = method
+    for key, value in extra.items():
+        attempt[key] = value
+
+
+def _finish_image_attempt(
+    attempt: Dict[str, Any],
+    *,
+    start: float,
+    status: str,
+    images_count: int = 0,
+    error: Optional[BaseException] = None,
+) -> Dict[str, Any]:
+    elapsed = int((time.perf_counter() - start) * 1000)
+    attempt.update({
+        "status": status,
+        "ok": status == "success",
+        "elapsed_ms": elapsed,
+        "elapsed_sec": round(elapsed / 1000, 2),
+    })
+    if images_count:
+        attempt["images_count"] = images_count
+    if error is not None:
+        attempt["error"] = f"{type(error).__name__}: {error}"[:1000]
+        attempt["timeout"] = _looks_like_timeout_text(attempt["error"])
+    return attempt
 
 
 def _normalize_image_quality(quality: Optional[str], model: str = "") -> str:
@@ -763,13 +819,16 @@ async def generate_image(
     quality: str = "high",
     reference_images: Optional[List[str]] = None,
     settings: Optional[Settings] = None,
+    attempt_trace: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     s = _effective_settings(settings)
     size = _normalize_image_size(size)
     n = _normalize_image_count(n)
     attempt_errors: List[str] = []
-    for candidate in _ordered_model_candidates(s, "image"):
+    for idx, candidate in enumerate(_ordered_model_candidates(s, "image")):
         model_settings = _settings_for_model(s, "image", candidate)
+        attempt = _new_image_attempt("generate", model_settings, idx)
+        attempt_start = time.perf_counter()
         try:
             urls = await _generate_image_once(
                 prompt=prompt,
@@ -778,14 +837,21 @@ async def generate_image(
                 quality=quality,
                 reference_images=reference_images,
                 settings=model_settings,
+                attempt=attempt,
             )
+            _finish_image_attempt(attempt, start=attempt_start, status="success", images_count=len(urls))
+            if attempt_trace is not None:
+                attempt_trace.append(attempt)
             _record_model_success("image", model_settings)
             return urls
         except Exception as e:
+            _finish_image_attempt(attempt, start=attempt_start, status="failed", error=e)
+            if attempt_trace is not None:
+                attempt_trace.append(attempt)
             attempt_errors.append(f"{model_settings.image_model}@{model_settings.effective_image_base_url}: {type(e).__name__}: {e}")
             _record_model_failure("image", model_settings, e)
             continue
-    raise _fallback_error("图片生成失败", attempt_errors)
+    raise _fallback_error("图片生成失败", attempt_errors, attempt_trace)
 
 
 async def _generate_image_once(
@@ -796,6 +862,7 @@ async def _generate_image_once(
     quality: str,
     reference_images: Optional[List[str]],
     settings: Settings,
+    attempt: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     s = settings
     quality = _normalize_image_quality(quality, s.image_model)
@@ -809,50 +876,18 @@ async def _generate_image_once(
             # provider-readable in many compatible gateways. Keep them as URLs
             # first; do not download/copy them into image_dir.
             url_refs = [str(x) for x in provider_refs if x]
-            try:
-                return await _generate_image_raw_http(
-                    settings=s,
-                    prompt=prompt,
-                    size=size,
-                    n=n,
-                    quality=quality,
-                    reference_images=url_refs,
-                )
-            except Exception as e:
-                # Some gateways model "reference image" as an edit endpoint
-                # with image_url instead of a generations reference_images
-                # field.  Try that URL-native shape before surfacing the error.
-                try:
-                    return await _edit_image_url_raw_http(
-                        settings=s,
-                        image_url=url_refs[0],
-                        mask_url=None,
-                        prompt=prompt,
-                        size=size,
-                        n=n,
-                        quality=quality,
-                    )
-                except Exception as edit_e:
-                    # For local /static images on a deployed app, URL-native is
-                    # just an optimization. If the provider rejects URL edits,
-                    # fall back to the SDK upload path. For true external URLs,
-                    # keep the user's preference: do not download them.
-                    if _is_app_static_image_reference(refs[0], s):
-                        return await edit_image(
-                            image_url=refs[0],
-                            mask_url=None,
-                            prompt=prompt,
-                            size=size,
-                            n=n,
-                            quality=quality,
-                            settings=s,
-                        )
-                    raise RuntimeError(
-                        "图片生成失败：上游未接受外部参考图 URL；"
-                        f"generations 失败: {e}; edits 失败: {edit_e}"
-                    ) from edit_e
+            _set_image_attempt_method(attempt, "raw_generations_reference_url", reference_images=len(url_refs))
+            return await _generate_image_raw_http(
+                settings=s,
+                prompt=prompt,
+                size=size,
+                n=n,
+                quality=quality,
+                reference_images=url_refs,
+            )
         if refs:
-            return await edit_image(
+            _set_image_attempt_method(attempt, "local_reference_edit", reference_images=len(refs))
+            return await _edit_image_once(
                 image_url=refs[0],
                 mask_url=None,
                 prompt=prompt,
@@ -860,11 +895,13 @@ async def _generate_image_once(
                 n=n,
                 quality=quality,
                 settings=s,
+                attempt=attempt,
             )
     client = get_client(s, kind="image")
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
 
-    try:
+    if _is_official_openai_image_base(s):
+        _set_image_attempt_method(attempt, "sdk_images_generate")
         resp = await client.images.generate(
             model=s.image_model,
             prompt=prompt,
@@ -872,30 +909,24 @@ async def _generate_image_once(
             n=n,
             quality=quality,
         )
-    except Exception as e:
-        # Some OpenAI-compatible image gateways reject the official SDK request
-        # headers/body while accepting a plain HTTP POST to /images/generations.
-        # Keep this fallback so split image_base_url providers remain usable.
-        try:
-            return await _generate_image_raw_http(
-                settings=s,
-                prompt=prompt,
-                size=size,
-                n=n,
-                quality=quality,
+        saved = await _save_image_items(_extract_image_items(resp), s, n)
+        if not saved:
+            upstream_error = _extract_response_error(resp)
+            raise RuntimeError(
+                "图片生成失败：上游没有返回可保存的图片数据"
+                + (f"；上游错误: {upstream_error}" if upstream_error else "")
+                + f"；response_shape={_summarize_response_shape(resp)}"
             )
-        except Exception as raw_e:
-            raise RuntimeError(f"图片生成失败: {e}; raw fallback 也失败: {raw_e}") from raw_e
+        return saved
 
-    saved = await _save_image_items(_extract_image_items(resp), s, n)
-    if not saved:
-        upstream_error = _extract_response_error(resp)
-        raise RuntimeError(
-            "图片生成失败：上游没有返回可保存的图片数据"
-            + (f"；上游错误: {upstream_error}" if upstream_error else "")
-            + f"；response_shape={_summarize_response_shape(resp)}"
-        )
-    return saved
+    _set_image_attempt_method(attempt, "raw_generations")
+    return await _generate_image_raw_http(
+        settings=s,
+        prompt=prompt,
+        size=size,
+        n=n,
+        quality=quality,
+    )
 
 
 async def _generate_image_raw_http(
@@ -1024,6 +1055,7 @@ async def _edit_image_url_raw_http(
     n: int,
     quality: str,
     timeout: float = IMAGE_GENERATION_TIMEOUT_SECONDS,
+    fast_failover: bool = False,
 ) -> List[str]:
     """URL/data-URL native image edit fallback for providers that can fetch image_url.
 
@@ -1054,6 +1086,8 @@ async def _edit_image_url_raw_http(
             by_url["mask_url"] = mask_url
             by_image["mask"] = mask_url
         attempts.extend([("json:image_url", by_url), ("json:image", by_image)])
+    if fast_failover:
+        attempts = attempts[:1]
 
     errors: List[str] = []
     async with httpx.AsyncClient(timeout=timeout) as hc:
@@ -1091,6 +1125,7 @@ async def _edit_image_multipart_raw_http(
     n: int,
     quality: str,
     timeout: float = IMAGE_GENERATION_TIMEOUT_SECONDS,
+    fast_failover: bool = False,
 ) -> List[str]:
     """Plain multipart /images/edits fallback.
 
@@ -1110,6 +1145,8 @@ async def _edit_image_multipart_raw_http(
         ("multipart:with_quality", {**base_data, "quality": quality}),
         ("multipart:no_quality", base_data),
     ]
+    if fast_failover:
+        attempts = attempts[:1]
     img_bytes = img_path.read_bytes()
     mask_bytes = mask_path.read_bytes() if mask_path else None
     errors: List[str] = []
@@ -1335,6 +1372,7 @@ async def edit_image(
     n: int = 1,
     quality: str = "high",
     settings: Optional[Settings] = None,
+    attempt_trace: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """Image-to-image edit via OpenAI `images.edit`.
 
@@ -1347,8 +1385,10 @@ async def edit_image(
     size = _normalize_image_size(size)
     n = _normalize_image_count(n)
     attempt_errors: List[str] = []
-    for candidate in _ordered_model_candidates(s, "image"):
+    for idx, candidate in enumerate(_ordered_model_candidates(s, "image")):
         model_settings = _settings_for_model(s, "image", candidate)
+        attempt = _new_image_attempt("edit", model_settings, idx)
+        attempt_start = time.perf_counter()
         try:
             urls = await _edit_image_once(
                 image_url=image_url,
@@ -1358,14 +1398,21 @@ async def edit_image(
                 n=n,
                 quality=quality,
                 settings=model_settings,
+                attempt=attempt,
             )
+            _finish_image_attempt(attempt, start=attempt_start, status="success", images_count=len(urls))
+            if attempt_trace is not None:
+                attempt_trace.append(attempt)
             _record_model_success("image", model_settings)
             return urls
         except Exception as e:
+            _finish_image_attempt(attempt, start=attempt_start, status="failed", error=e)
+            if attempt_trace is not None:
+                attempt_trace.append(attempt)
             attempt_errors.append(f"{model_settings.image_model}@{model_settings.effective_image_base_url}: {type(e).__name__}: {e}")
             _record_model_failure("image", model_settings, e)
             continue
-    raise _fallback_error("图片编辑失败", attempt_errors)
+    raise _fallback_error("图片编辑失败", attempt_errors, attempt_trace)
 
 
 async def _edit_image_once(
@@ -1377,6 +1424,7 @@ async def _edit_image_once(
     n: int,
     quality: str,
     settings: Settings,
+    attempt: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     s = settings
     quality = _normalize_image_quality(quality, s.image_model)
@@ -1387,7 +1435,18 @@ async def _edit_image_once(
     provider_mask_url = _provider_image_url(mask_url, s) if mask_url else None
     external_image_url = _is_public_remote_url(image_url) and not _is_app_static_image_reference(image_url, s)
     external_mask_url = bool(mask_url) and _is_public_remote_url(mask_url) and not _is_app_static_image_reference(mask_url, s)
-    if provider_image_url and (not mask_url or provider_mask_url) and (external_image_url or external_mask_url):
+    url_native_preferred = bool(provider_image_url and (not mask_url or provider_mask_url)) and (
+        external_image_url
+        or external_mask_url
+        or (not _is_official_openai_image_base(s) and bool(_configured_public_base_url(s)))
+    )
+    if url_native_preferred:
+        _set_image_attempt_method(
+            attempt,
+            "url_native_edit",
+            provider_readable=True,
+            has_mask=bool(mask_url),
+        )
         try:
             return await _edit_image_url_raw_http(
                 settings=s,
@@ -1397,12 +1456,12 @@ async def _edit_image_once(
                 size=size,
                 n=n,
                 quality=quality,
+                fast_failover=True,
             )
         except Exception as e:
-            # True public external URLs should remain URL-only; we do not
-            # download/copy arbitrary external assets for edits. App-owned
-            # /static/images are handled below as local files and uploaded as
-            # multipart image bytes, which is the standard images.edit shape.
+            # Fast-failover mode: do not spend another compatibility pass on
+            # the same model. The outer loop will immediately try the next
+            # configured image candidate and expose this hop in image_attempts.
             raise RuntimeError(f"图片编辑失败：上游未接受外部图片 URL: {e}") from e
     if external_image_url or external_mask_url:
         raise RuntimeError(
@@ -1476,6 +1535,7 @@ async def _edit_image_once(
                 n=n,
                 quality=quality,
                 timeout=IMAGE_GENERATION_TIMEOUT_SECONDS,
+                fast_failover=True,
             )
         except Exception as e:
             attempt_errors.append(f"raw multipart: {type(e).__name__}: {e}")
@@ -1505,40 +1565,15 @@ async def _edit_image_once(
 
     sdk_first = _is_official_openai_image_base(s)
     if sdk_first:
-        for attempt in (_attempt_sdk_upload, _attempt_raw_multipart, _attempt_data_url_json):
-            saved = await attempt()
-            if saved:
-                return saved
+        _set_image_attempt_method(attempt, "sdk_upload_edit", provider_readable=False, has_mask=bool(mask_url))
+        saved = await _attempt_sdk_upload()
+        if saved:
+            return saved
     else:
-        raw_error_start = len(attempt_errors)
+        _set_image_attempt_method(attempt, "raw_multipart_edit", provider_readable=False, has_mask=bool(mask_url))
         saved = await _attempt_raw_multipart()
         if saved:
             return saved
-
-        # If a custom gateway has already rejected raw multipart with an HTTP/upstream
-        # error or consumed the full edit timeout, do not send the same local file
-        # as a giant data URL or SDK upload.
-        raw_errors = attempt_errors[raw_error_start:]
-        if _raw_gateway_rejected_request(raw_errors):
-            attempt_errors.append(
-                "raw data-url / SDK upload: 已跳过。当前为非官方 image_base_url，raw multipart 已返回 HTTP/超时/上游错误；"
-                "已按完整图片编辑超时上限等待，继续尝试其它上传形态通常只会得到同一上游失败。"
-            )
-        else:
-            data_url_error_start = len(attempt_errors)
-            saved = await _attempt_data_url_json()
-            if saved:
-                return saved
-            raw_errors = attempt_errors[raw_error_start:]
-            if not _raw_gateway_rejected_request(raw_errors[data_url_error_start - raw_error_start:]):
-                saved = await _attempt_sdk_upload()
-                if saved:
-                    return saved
-            else:
-                attempt_errors.append(
-                    "SDK upload: 已跳过。当前为非官方 image_base_url，raw data-url 已返回 HTTP/超时/上游错误；"
-                    "继续走 SDK 通常只会等待更久并得到同一上游失败。"
-                )
 
     hint = ""
     if not _configured_public_base_url(s):

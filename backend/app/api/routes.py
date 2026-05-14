@@ -548,6 +548,10 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     return {}
 
 
+def _successful_image_attempt(attempts: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+    return next((a for a in attempts if isinstance(a, dict) and a.get("status") == "success"), None)
+
+
 def _clamp_norm_bbox(value: Any) -> List[int]:
     if not isinstance(value, list) or len(value) < 4:
         return [0, 0, 1000, 1000]
@@ -903,6 +907,7 @@ async def upload_mask(file: UploadFile = File(...), user: User = Depends(get_cur
 async def api_image(payload: ImageGenRequest, request: Request, user: User = Depends(get_current_user)):
     effective = with_public_base_url_if_missing(await get_effective_settings(user.id), str(request.base_url))
     start = time.perf_counter()
+    attempts: List[Dict[str, Any]] = []
     try:
         urls = await generate_image(
             prompt=payload.prompt,
@@ -911,9 +916,19 @@ async def api_image(payload: ImageGenRequest, request: Request, user: User = Dep
             n=payload.n,
             reference_images=payload.reference_images,
             settings=effective,
+            attempt_trace=attempts,
         )
         elapsed = int((time.perf_counter() - start) * 1000)
-        return {"ok": True, "images": urls, "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
+        used = _successful_image_attempt(attempts)
+        return {
+            "ok": True,
+            "images": urls,
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+            "image_attempts": attempts,
+            "used_image_model": used.get("model") if used else effective.image_model,
+            "used_image_base_url": used.get("base_url") if used else effective.effective_image_base_url,
+        }
     except Exception as e:
         elapsed = int((time.perf_counter() - start) * 1000)
         raw = str(e) or type(e).__name__
@@ -926,6 +941,7 @@ async def api_image(payload: ImageGenRequest, request: Request, user: User = Dep
             "timeout": timeout,
             "elapsed_ms": elapsed,
             "elapsed_sec": round(elapsed / 1000, 2),
+            "image_attempts": attempts,
             "retry_options": _image_retry_options(payload.prompt, payload.size, payload.quality, payload.n),
         }
 
@@ -1397,6 +1413,7 @@ async def test_image_settings(
     """Real image-model smoke test using the currently effective image config."""
     effective = await get_effective_settings(user.id)
     start = time.perf_counter()
+    attempts: List[Dict[str, Any]] = []
     try:
         urls = await generate_image(
             prompt=payload.prompt,
@@ -1404,17 +1421,20 @@ async def test_image_settings(
             quality=payload.quality,
             n=1,
             settings=effective,
+            attempt_trace=attempts,
         )
         elapsed = int((time.perf_counter() - start) * 1000)
+        used = _successful_image_attempt(attempts)
         return {
             "ok": True,
             "images": urls,
             "image": urls[0] if urls else "",
             "elapsed_ms": elapsed,
             "elapsed_sec": round(elapsed / 1000, 2),
-            "image_base_url": effective.effective_image_base_url,
-            "image_model": effective.image_model,
+            "image_base_url": used.get("base_url") if used else effective.effective_image_base_url,
+            "image_model": used.get("model") if used else effective.image_model,
             "image_model_candidates": effective.image_model_candidates,
+            "image_attempts": attempts,
             "size": payload.size,
             "quality": payload.quality,
         }
@@ -1432,6 +1452,7 @@ async def test_image_settings(
             "image_base_url": effective.effective_image_base_url,
             "image_model": effective.image_model,
             "image_model_candidates": effective.image_model_candidates,
+            "image_attempts": attempts,
             "size": payload.size,
             "quality": payload.quality,
             "retry_options": _image_retry_options(payload.prompt, payload.size, payload.quality, 1),

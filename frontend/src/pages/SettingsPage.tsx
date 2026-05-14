@@ -889,6 +889,32 @@ export default function SettingsPage() {
                       {imageTest.size && <Chip size="small" label={imageTest.size} sx={{ height: 22, fontSize: 11 }} />}
                       {imageTest.quality && <Chip size="small" label={`quality=${imageTest.quality}`} sx={{ height: 22, fontSize: 11 }} />}
                     </Stack>
+                    {Array.isArray(imageTest.image_attempts) && imageTest.image_attempts.length > 0 && (
+                      <Box sx={{ mb: 1, p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, bgcolor: 'background.paper' }}>
+                        <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mb: 0.6 }}>
+                          重试链路：失败即切换到下一候选，成功后停止
+                        </Typography>
+                        <Stack spacing={0.5}>
+                          {imageTest.image_attempts.map((a, idx) => (
+                            <Stack key={`${a.model || 'model'}-${idx}`} direction="row" spacing={0.6} alignItems="center" sx={{ minWidth: 0 }}>
+                              <Chip
+                                size="small"
+                                label={a.ok || a.status === 'success' ? '成功' : '失败'}
+                                color={a.ok || a.status === 'success' ? 'success' : 'error'}
+                                sx={{ height: 20, fontSize: 10.5 }}
+                              />
+                              <Typography sx={{ fontSize: 12, fontWeight: 700, minWidth: 0 }} noWrap>
+                                {idx + 1}. {a.model || '-'}
+                              </Typography>
+                              {a.method && <Chip size="small" label={a.method} sx={{ height: 20, fontSize: 10.5 }} />}
+                              <Typography sx={{ fontSize: 11.5, color: 'text.secondary', ml: 'auto', whiteSpace: 'nowrap' }}>
+                                {a.elapsed_sec ?? 0}s
+                              </Typography>
+                            </Stack>
+                          ))}
+                        </Stack>
+                      </Box>
+                    )}
                     {imageTest.image && (
                       <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mt: 1 }}>
                         <Box

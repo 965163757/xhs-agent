@@ -163,6 +163,11 @@ function ToolCard({
   const ok = !result || result.result?.ok !== false
   const errorText: string | undefined = result?.result?.error
   const retryOptions: Array<{ label: string; reason?: string; arguments?: any }> = result?.result?.retry_options || []
+  const imageAttempts: any[] = Array.isArray(result?.result?.image_attempts)
+    ? result.result.image_attempts
+    : Array.isArray(result?.result?.workflow?.image_attempts)
+      ? result.result.workflow.image_attempts
+      : []
   const images: string[] = collectToolImages(result?.result)
   const editBinding = bindingFromToolArgs(call?.arguments)
   const article = result?.result?.article
@@ -258,6 +263,41 @@ function ToolCard({
                     }}
                     sx={{ cursor: 'pointer' }}
                   />
+                ))}
+              </Stack>
+            </Box>
+          )}
+          {imageAttempts.length > 0 && (
+            <Box
+              sx={{
+                mb: 1,
+                p: 1,
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+              }}
+            >
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.8 }}>
+                图片模型重试链路
+              </Typography>
+              <Stack spacing={0.6}>
+                {imageAttempts.map((a, idx) => (
+                  <Stack key={`${a?.model || 'model'}-${idx}`} direction="row" spacing={0.6} alignItems="center" sx={{ minWidth: 0 }}>
+                    <Chip
+                      size="small"
+                      label={a?.ok || a?.status === 'success' ? '成功' : '失败'}
+                      color={a?.ok || a?.status === 'success' ? 'success' : 'error'}
+                      sx={{ height: 20, fontSize: 10.5 }}
+                    />
+                    <Typography sx={{ fontSize: 12, fontWeight: 700, minWidth: 0 }} noWrap>
+                      {idx + 1}. {a?.model || '-'}
+                    </Typography>
+                    {a?.method && <Chip size="small" label={a.method} sx={{ height: 20, fontSize: 10.5 }} />}
+                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary', ml: 'auto', whiteSpace: 'nowrap' }}>
+                      {formatElapsed(a?.elapsed_ms)}
+                    </Typography>
+                  </Stack>
                 ))}
               </Stack>
             </Box>

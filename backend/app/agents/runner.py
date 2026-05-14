@@ -278,6 +278,10 @@ def _compact_tool_result_for_context(result: Any, *, limit: int = 8000) -> Any:
         compact["image_errors"] = result["image_errors"][:5]
     if isinstance(result.get("image_results"), list):
         compact["image_results"] = result["image_results"][:6]
+    if isinstance(result.get("image_attempts"), list):
+        compact["image_attempts"] = result["image_attempts"][:8]
+    if result.get("used_image_model"):
+        compact["used_image_model"] = result.get("used_image_model")
     if isinstance(result.get("style_profile"), dict):
         compact["style_profile"] = result["style_profile"]
     if isinstance(result.get("image_plan"), list):

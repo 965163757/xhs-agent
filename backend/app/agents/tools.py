@@ -1457,9 +1457,11 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     generated_cover = ""
     generated_content_images: List[str] = []
     image_errors: List[Dict[str, Any]] = []
+    image_attempts: List[Dict[str, Any]] = []
     if generate_cover:
         emit_tool_progress("正在生成展示队列第 1 张（首图）", step="generate_cover", data={"article_id": article_id})
         img_start = time.perf_counter()
+        cover_attempts: List[Dict[str, Any]] = []
         try:
             urls = await _await_with_progress(
                 generate_image(
@@ -1467,11 +1469,13 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                     size=str(cover_prompt.get("size") or preferred_image_size),
                     quality=str(cover_prompt.get("quality") or "high"),
                     n=1,
+                    attempt_trace=cover_attempts,
                 ),
                 label="首图生成",
                 step="generate_cover",
                 data={"article_id": article_id, "role": "cover"},
             )
+            image_attempts.extend([{**a, "role": "cover"} for a in cover_attempts])
             generated_cover = urls[0] if urls else ""
             if generated_cover:
                 await _bind_image_to_article(generated_cover, article_id, role="cover")
@@ -1483,7 +1487,8 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         except Exception as e:
             elapsed = _elapsed_ms(img_start)
             msg = _friendly_tool_error(e, elapsed_ms=elapsed, action="首图生成")
-            image_errors.append({"role": "cover", "error": msg, "elapsed_ms": elapsed})
+            image_attempts.extend([{**a, "role": "cover"} for a in cover_attempts])
+            image_errors.append({"role": "cover", "error": msg, "elapsed_ms": elapsed, "image_attempts": cover_attempts})
             emit_tool_progress(msg, step="cover_failed", data={"article_id": article_id, "elapsed_ms": elapsed})
 
     if generate_content_images and content_shots:
@@ -1504,6 +1509,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                     data={"article_id": article_id, "index": idx, "scene": scene},
                 )
                 img_start = time.perf_counter()
+                attempts: List[Dict[str, Any]] = []
                 try:
                     urls = await _await_with_progress(
                         generate_image(
@@ -1511,6 +1517,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                             size=shot.get("size", preferred_image_size),
                             quality=shot.get("quality", "high"),
                             n=1,
+                            attempt_trace=attempts,
                         ),
                         label=f"队列图片 {idx + 1}/{len(shots_to_generate)}",
                         step=f"generate_content_image_{idx}",
@@ -1523,7 +1530,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                         step="content_image_done",
                         data={"article_id": article_id, "index": idx, "scene": scene, "image": url, "elapsed_ms": elapsed},
                     )
-                    return {"index": idx, "url": url, "elapsed_ms": elapsed}
+                    return {"index": idx, "url": url, "elapsed_ms": elapsed, "image_attempts": attempts}
                 except Exception as e:
                     elapsed = _elapsed_ms(img_start)
                     msg = _friendly_tool_error(e, elapsed_ms=elapsed, action=f"队列图片 {idx + 1} 生成")
@@ -1532,12 +1539,13 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                         step="content_image_failed",
                         data={"article_id": article_id, "index": idx, "scene": scene, "elapsed_ms": elapsed},
                     )
-                    return {"index": idx, "url": "", "error": msg, "elapsed_ms": elapsed}
+                    return {"index": idx, "url": "", "error": msg, "elapsed_ms": elapsed, "image_attempts": attempts}
 
         image_results = await asyncio.gather(
             *[_generate_one_content_image(idx, shot) for idx, shot in enumerate(shots_to_generate)]
         )
         for item in sorted(image_results, key=lambda x: int(x.get("index", 0))):
+            image_attempts.extend([{**a, "role": "content", "image_index": item.get("index")} for a in (item.get("image_attempts") or [])])
             if item.get("url"):
                 generated_content_images.append(str(item["url"]))
             elif item.get("error"):
@@ -1586,6 +1594,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             "visual_queue": [x["url"] for x in (final_ctx.get("visual_images") or [])],
             "first_image_is_cover": bool(generated_cover),
             "image_errors": image_errors,
+            "image_attempts": image_attempts,
             "image_concurrency": image_concurrency if generate_content_images else None,
             "next_actions": [
                 "打开笔记详情微调正文",
@@ -2145,6 +2154,10 @@ async def tool_cover_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---------- images ----------
 
+def _successful_image_attempt(attempts: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+    return next((a for a in attempts if isinstance(a, dict) and a.get("status") == "success"), None)
+
+
 async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
     prompt = (args.get("prompt") or "").strip()
     if not prompt:
@@ -2165,6 +2178,7 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
         data={"article_id": aid, "size": size, "quality": quality, "n": n},
     )
     img_start = time.perf_counter()
+    image_attempts: List[Dict[str, Any]] = []
     try:
         urls = await _await_with_progress(
             generate_image(
@@ -2173,6 +2187,7 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
                 quality=quality,
                 n=n,
                 reference_images=args.get("reference_images"),
+                attempt_trace=image_attempts,
             ),
             label="图片生成",
             step="image_generation",
@@ -2190,6 +2205,7 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
                 "quality": quality,
                 "elapsed_ms": elapsed,
                 "timeout": _is_timeout_error(e),
+                "image_attempts": image_attempts,
             },
         )
         return {
@@ -2199,6 +2215,7 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
             "timeout": _is_timeout_error(e),
             "elapsed_ms": elapsed,
             "elapsed_sec": round(elapsed / 1000, 2),
+            "image_attempts": image_attempts,
             "suggestions": [
                 "降低 size，例如 1536x2048 → 1152x1536",
                 "将 quality 从 high 改为 medium/auto",
@@ -2226,7 +2243,12 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
         "images": urls,
         "elapsed_ms": elapsed_done,
         "elapsed_sec": round(elapsed_done / 1000, 2),
+        "image_attempts": image_attempts,
     }
+    used = _successful_image_attempt(image_attempts)
+    if used:
+        result["used_image_model"] = used.get("model")
+        result["used_image_base_url"] = used.get("base_url")
     if bound_article:
         result["article"] = bound_article
     return result
@@ -2476,6 +2498,7 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
     image_errors: List[Dict[str, Any]] = []
     generated_cover = ""
     generated_content_images: List[str] = []
+    image_attempts: List[Dict[str, Any]] = []
     total_start = time.perf_counter()
 
     emit_tool_progress(
@@ -2491,6 +2514,7 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
             cover_prompt = (cover_resp.get("cover") or {}).get("prompt") or f"小红书首图/封面，主题：{art.title}，{style}"
         cover_size = _infer_image_size_from_request(size_hint_text, args.get("cover_size") or default_size)
         cover_start = time.perf_counter()
+        cover_attempts: List[Dict[str, Any]] = []
         emit_tool_progress("正在生成笔记展示队列第 1 张（首图）", step="article_cover_start", data={"article_id": aid})
         try:
             urls = await _await_with_progress(
@@ -2499,11 +2523,13 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
                     size=str(cover_size),
                     quality=str(default_quality),
                     n=1,
+                    attempt_trace=cover_attempts,
                 ),
                 label="笔记首图",
                 step="article_cover",
                 data={"article_id": aid, "role": "cover"},
             )
+            image_attempts.extend([{**a, "role": "cover"} for a in cover_attempts])
             generated_cover = urls[0] if urls else ""
             if generated_cover:
                 await _bind_image_to_article(generated_cover, aid, role="cover")
@@ -2515,7 +2541,8 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as e:
             elapsed = _elapsed_ms(cover_start)
             msg = _friendly_tool_error(e, elapsed_ms=elapsed, action="首图生成")
-            image_errors.append({"role": "cover", "error": msg, "elapsed_ms": elapsed})
+            image_attempts.extend([{**a, "role": "cover"} for a in cover_attempts])
+            image_errors.append({"role": "cover", "error": msg, "elapsed_ms": elapsed, "image_attempts": cover_attempts})
             emit_tool_progress(msg, step="article_cover_failed", data={"article_id": aid, "elapsed_ms": elapsed})
 
     shots = args.get("shots")
@@ -2558,12 +2585,14 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
                     data={"article_id": aid, "index": idx, "scene": scene},
                 )
                 try:
+                    attempts: List[Dict[str, Any]] = []
                     urls = await _await_with_progress(
                         generate_image(
                             prompt=shot["prompt"],
                             size=shot.get("size", default_size),
                             quality=shot.get("quality", default_quality),
                             n=1,
+                            attempt_trace=attempts,
                         ),
                         label=f"队列图片 {idx + 1}/{len(shots)}",
                         step=f"article_content_image_{idx}",
@@ -2576,7 +2605,7 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
                         step="article_content_image_done",
                         data={"article_id": aid, "index": idx, "image": url, "elapsed_ms": elapsed},
                     )
-                    return {"index": idx, "url": url, "elapsed_ms": elapsed, "scene": scene}
+                    return {"index": idx, "url": url, "elapsed_ms": elapsed, "scene": scene, "image_attempts": attempts}
                 except Exception as e:
                     elapsed = _elapsed_ms(start)
                     msg = _friendly_tool_error(e, elapsed_ms=elapsed, action=f"队列图片 {idx + 1} 生成")
@@ -2585,10 +2614,11 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
                         step="article_content_image_failed",
                         data={"article_id": aid, "index": idx, "scene": scene, "elapsed_ms": elapsed},
                     )
-                    return {"index": idx, "url": "", "error": msg, "elapsed_ms": elapsed, "scene": scene}
+                    return {"index": idx, "url": "", "error": msg, "elapsed_ms": elapsed, "scene": scene, "image_attempts": attempts}
 
         results = await asyncio.gather(*[_gen(i, shot) for i, shot in enumerate(shots)])
         for item in sorted(results, key=lambda x: int(x.get("index", 0))):
+            image_attempts.extend([{**a, "role": "content", "image_index": item.get("index")} for a in (item.get("image_attempts") or [])])
             if item.get("url"):
                 generated_content_images.append(str(item["url"]))
             elif item.get("error"):
@@ -2640,6 +2670,7 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
         "visual_queue": [x["url"] for x in (final_ctx.get("visual_images") or [])],
         "image_storyboard": image_storyboard if shots else {"series_style": _series_visual_style(title=art.title or "", style=style), "shots": []},
         "image_errors": image_errors,
+        "image_attempts": image_attempts,
         "concurrency": concurrency,
         "elapsed_ms": elapsed,
         "elapsed_sec": round(elapsed / 1000, 2),
@@ -2750,9 +2781,10 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
     access_err = await _ensure_article_image_access(article_id, image_url)
     if access_err:
         return access_err
+    image_attempts: List[Dict[str, Any]] = []
     try:
         urls = await _await_with_progress(
-            edit_image(image_url, mask_url, prompt, size=size, quality=quality, n=1),
+            edit_image(image_url, mask_url, prompt, size=size, quality=quality, n=1, attempt_trace=image_attempts),
             label="局部重绘",
             step="inpaint_image",
             data={"image_url": image_url, "size": size, "quality": quality},
@@ -2766,6 +2798,7 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
             "timeout": _is_timeout_error(e),
             "elapsed_ms": elapsed,
             "elapsed_sec": round(elapsed / 1000, 2),
+            "image_attempts": image_attempts,
         }
     if not urls:
         return {"ok": False, "error": "no image returned"}
@@ -2778,7 +2811,12 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
     if bind_err:
         return bind_err
     elapsed = _elapsed_ms(op_start)
-    return {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
+    result = {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2), "image_attempts": image_attempts}
+    used = _successful_image_attempt(image_attempts)
+    if used:
+        result["used_image_model"] = used.get("model")
+        result["used_image_base_url"] = used.get("base_url")
+    return result
 
 
 async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -2798,9 +2836,10 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
     access_err = await _ensure_article_image_access(article_id, image_url)
     if access_err:
         return access_err
+    image_attempts: List[Dict[str, Any]] = []
     try:
         urls = await _await_with_progress(
-            edit_image(image_url, mask_url, prompt, size=size, quality=quality, n=1),
+            edit_image(image_url, mask_url, prompt, size=size, quality=quality, n=1, attempt_trace=image_attempts),
             label="消除物体",
             step="remove_object",
             data={"image_url": image_url, "size": size, "quality": quality},
@@ -2814,6 +2853,7 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
             "timeout": _is_timeout_error(e),
             "elapsed_ms": elapsed,
             "elapsed_sec": round(elapsed / 1000, 2),
+            "image_attempts": image_attempts,
         }
     if not urls:
         return {"ok": False, "error": "no image returned"}
@@ -2826,7 +2866,12 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
     if bind_err:
         return bind_err
     elapsed = _elapsed_ms(op_start)
-    return {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
+    result = {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2), "image_attempts": image_attempts}
+    used = _successful_image_attempt(image_attempts)
+    if used:
+        result["used_image_model"] = used.get("model")
+        result["used_image_base_url"] = used.get("base_url")
+    return result
 
 
 async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -2845,9 +2890,10 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
     access_err = await _ensure_article_image_access(source_article_id, image_url)
     if access_err:
         return access_err
+    image_attempts: List[Dict[str, Any]] = []
     try:
         urls = await _await_with_progress(
-            edit_image(image_url, None, prompt, size=size, quality=quality, n=1),
+            edit_image(image_url, None, prompt, size=size, quality=quality, n=1, attempt_trace=image_attempts),
             label="图片编辑",
             step="edit_image",
             data={"image_url": image_url, "size": size, "quality": quality},
@@ -2861,6 +2907,7 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
             "timeout": _is_timeout_error(e),
             "elapsed_ms": elapsed,
             "elapsed_sec": round(elapsed / 1000, 2),
+            "image_attempts": image_attempts,
         }
     if not urls:
         return {"ok": False, "error": "no image returned"}
@@ -2873,7 +2920,12 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
     if bind_err:
         return bind_err
     elapsed = _elapsed_ms(op_start)
-    return {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
+    result = {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2), "image_attempts": image_attempts}
+    used = _successful_image_attempt(image_attempts)
+    if used:
+        result["used_image_model"] = used.get("model")
+        result["used_image_base_url"] = used.get("base_url")
+    return result
 
 
 # ---------- templates ----------

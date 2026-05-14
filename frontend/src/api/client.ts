@@ -658,6 +658,20 @@ export async function testImageSettings(payload?: {
     image_base_url?: string
     image_model?: string
     image_model_candidates?: string[]
+    image_attempts?: Array<{
+      index?: number
+      action?: string
+      model?: string
+      base_url?: string
+      method?: string
+      status?: string
+      ok?: boolean
+      elapsed_ms?: number
+      elapsed_sec?: number
+      images_count?: number
+      error?: string
+      timeout?: boolean
+    }>
     size?: string
     quality?: string
     retry_options?: Array<{ label: string; reason?: string; arguments?: any }>
