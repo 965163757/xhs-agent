@@ -1012,8 +1012,16 @@ async def test_static_image_public_access(
     request: Request,
     user: User = Depends(get_current_user),
 ):
-    """Create a tiny static image and verify /static/images/... is reachable via a public URL."""
+    """Create a tiny static image and verify /static/images/... reachability.
+
+    The same endpoint is useful in both modes:
+    - local mode: confirms the browser/backend can read /static/images via the
+      dev proxy or direct backend origin, but marks it as not provider-readable.
+    - server mode: confirms the configured/request public origin is reachable
+      and can safely be sent to upstream image/vision providers as a URL.
+    """
     import httpx
+    from urllib.parse import urlparse
 
     effective = await get_effective_settings(user.id)
     image_dir = Path(effective.image_dir)
@@ -1031,9 +1039,37 @@ async def test_static_image_public_access(
     (test_dir / name).write_bytes(png)
     static_path = f"/static/images/_static_public_tests/{name}"
 
-    base = (payload.public_base_url if payload.public_base_url is not None else effective.public_base_url).strip().rstrip("/")
-    if not base:
-        base = str(request.base_url).rstrip("/")
+    supplied_base = ""
+    source = "request"
+    if payload.public_base_url is not None and payload.public_base_url.strip():
+        supplied_base = payload.public_base_url
+        source = "input"
+    elif effective.public_base_url.strip():
+        supplied_base = effective.public_base_url
+        source = "settings"
+    else:
+        supplied_base = str(request.base_url)
+    base = supplied_base.strip().rstrip("/")
+
+    parsed = urlparse(base)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return {
+            "ok": False,
+            "public_ok": False,
+            "provider_readable": False,
+            "mode": "invalid",
+            "source": source,
+            "public_url": f"{base}{static_path}" if base else static_path,
+            "static_path": static_path,
+            "elapsed_ms": 0,
+            "elapsed_sec": 0,
+            "error": "PUBLIC_BASE_URL 必须是 http(s):// 开头的完整地址",
+            "message": "静态图片公网访问失败：部署访问地址格式无效。",
+        }
+
+    provider_base = infer_public_base_url(base)
+    provider_readable = bool(provider_base)
+    mode = "server" if provider_readable else "local"
     public_url = f"{base}{static_path}"
 
     start = time.perf_counter()
@@ -1043,8 +1079,23 @@ async def test_static_image_public_access(
         elapsed = int((time.perf_counter() - start) * 1000)
         content_type = r.headers.get("content-type", "")
         ok = r.status_code == 200 and r.content.startswith(b"\x89PNG") and "image" in content_type.lower()
+        public_ok = ok and provider_readable
+        if public_ok:
+            message = "静态图片公网访问正常，外部模型可直接读取该 /static/images/... URL。"
+        elif ok:
+            message = (
+                "静态图片本地访问正常；当前地址是 localhost/内网/保留地址，外部模型不可直接抓取。"
+                "本地模式会自动改用文件上传或原图 data URL，不会压缩画质。"
+            )
+        else:
+            message = "请求到了 URL，但返回内容不是有效图片"
         return {
             "ok": ok,
+            "public_ok": public_ok,
+            "provider_readable": provider_readable,
+            "mode": mode,
+            "source": source,
+            "provider_base_url": provider_base,
             "public_url": public_url,
             "static_path": static_path,
             "status_code": r.status_code,
@@ -1052,12 +1103,17 @@ async def test_static_image_public_access(
             "bytes": len(r.content),
             "elapsed_ms": elapsed,
             "elapsed_sec": round(elapsed / 1000, 2),
-            "message": "静态图片公网访问正常" if ok else "请求到了 URL，但返回内容不是有效图片",
+            "message": message,
         }
     except Exception as e:
         elapsed = int((time.perf_counter() - start) * 1000)
         return {
             "ok": False,
+            "public_ok": False,
+            "provider_readable": provider_readable,
+            "mode": mode,
+            "source": source,
+            "provider_base_url": provider_base,
             "public_url": public_url,
             "static_path": static_path,
             "elapsed_ms": elapsed,

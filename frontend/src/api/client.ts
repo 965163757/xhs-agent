@@ -574,6 +574,11 @@ export async function testStaticImagePublicAccess(publicBaseUrl?: string) {
   const r = await api.post('/settings/static-image-test', { public_base_url: publicBaseUrl ?? undefined })
   return r.data as {
     ok: boolean
+    public_ok?: boolean
+    provider_readable?: boolean
+    mode?: 'local' | 'server' | 'invalid'
+    source?: 'input' | 'settings' | 'request'
+    provider_base_url?: string
     public_url: string
     static_path: string
     status_code?: number

@@ -32,6 +32,40 @@ class AgentRoutingTests(unittest.TestCase):
         sig = inspect.signature(run_agent_stream)
         self.assertEqual(sig.parameters["max_tool_rounds"].default, 12)
 
+    def test_latest_uploaded_image_stays_attached(self):
+        out = runner._compact_input_messages(
+            [{"role": "user", "content": "把这张图调成更清晰", "images": ["/static/images/new.png"]}],
+            keep_recent=10,
+        )
+        self.assertEqual(out[-1]["images"], ["/static/images/new.png"])
+
+    def test_unreferenced_historical_images_are_path_only_in_local_mode(self):
+        out = runner._compact_input_messages(
+            [
+                {"role": "user", "content": "上传素材", "images": ["/static/images/old.png"]},
+                {"role": "assistant", "content": "收到"},
+                {"role": "user", "content": "帮我写三个标题", "images": []},
+            ],
+            keep_recent=10,
+            server_public_images=False,
+        )
+        self.assertEqual(out[0]["images"], [])
+        self.assertIn("[历史图片路径: /static/images/old.png]", out[0]["content"])
+
+    def test_server_mode_keeps_more_recent_image_pixels_than_local_mode(self):
+        messages = [
+            {"role": "user", "content": f"图 {i}", "images": [f"/static/images/{i}.png"]}
+            for i in range(5)
+        ] + [{"role": "user", "content": "继续改刚才那张图", "images": []}]
+
+        local = runner._compact_input_messages(messages, keep_recent=10, server_public_images=False)
+        server = runner._compact_input_messages(messages, keep_recent=10, server_public_images=True)
+
+        local_attached = sum(1 for item in local if item.get("images"))
+        server_attached = sum(1 for item in server if item.get("images"))
+        self.assertEqual(local_attached, 2)
+        self.assertEqual(server_attached, 4)
+
     def test_visual_tool_schema_uses_single_queue_semantics(self):
         workflow_schema = TOOLS["create_complete_note_workflow"]["schema"]["function"]
         workflow_props = workflow_schema["parameters"]["properties"]

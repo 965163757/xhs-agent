@@ -24,8 +24,8 @@ _current_settings: contextvars.ContextVar[Optional[Settings]] = contextvars.Cont
 )
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 IMAGE_GENERATION_TIMEOUT_SECONDS = 8 * 60.0
-# Compatibility upload probes should fail quickly on gateways that do not support
-# images.edit uploads, while full image generation/edit requests keep the 8 min cap.
+# Secondary JSON/data-url compatibility probes should fail quickly, while the
+# primary image generation/edit upload path keeps the full 8 min cap.
 IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS = 25.0
 VISION_IMAGE_DETAIL = "auto"
 VISION_REMOTE_FETCH_TIMEOUT_SECONDS = 20.0
@@ -436,6 +436,14 @@ async def _to_vision_image_url(
     return _original_image_data_url(path.read_bytes(), source_name=path.name, mime=_mime_for_path(path))
 
 
+def _image_context_hint(url: str, settings: Optional[Settings] = None) -> str:
+    value = str(url or "").strip()
+    provider_url = _provider_image_url(value, settings)
+    if provider_url and provider_url != value:
+        return f"[图片路径: {value} | 可访问URL: {provider_url}]"
+    return f"[图片路径: {value}]"
+
+
 async def to_openai_messages(
     messages: List[Dict[str, Any]],
     *,
@@ -470,14 +478,16 @@ async def to_openai_messages(
             parts: List[Dict[str, Any]] = []
             if content:
                 parts.append({"type": "text", "text": content})
-            # Tell the LLM the local paths so it can pass them to image editing tools
-            path_hints = "\n".join(f"[图片路径: {url}]" for url in images)
+            # Tell the LLM the stable app paths so it can pass them to image
+            # editing tools. In server mode also expose the public URL so the
+            # model can reason about provider-readable image references.
+            path_hints = "\n".join(_image_context_hint(str(url), settings) for url in images)
             parts.append({"type": "text", "text": path_hints})
             for url in images:
                 parts.append(
                     {
                         "type": "image_url",
-                            "image_url": {
+                        "image_url": {
                             "url": await _to_vision_image_url(
                                 str(url),
                                 inline_remote=inline_remote_images,
@@ -788,9 +798,9 @@ def _raw_gateway_rejected_request(errors: List[str]) -> bool:
     """Whether raw edit attempts reached the gateway and were rejected there.
 
     For non-official gateways, this is a strong signal that the provider's
-    /images/edits path is incompatible; skipping the SDK upload avoids another
-    long wait for the same upstream failure. Network/DNS failures still allow an
-    SDK fallback because those may be test doubles or transient transport issues.
+    /images/edits path is incompatible or has already consumed the full edit
+    timeout. Network/DNS failures still allow an SDK fallback because those may
+    be test doubles or transient transport issues.
     """
     text = "\n".join(str(e or "") for e in errors).lower()
     return any(x in text for x in ("http 4", "http 5", "/images/edits error", "timeout", "timed out", "readtimeout"))
@@ -1136,7 +1146,7 @@ async def edit_image(
     provider_mask_url = _provider_image_url(mask_url, s) if mask_url else None
     external_image_url = _is_public_remote_url(image_url) and not _is_app_static_image_reference(image_url, s)
     external_mask_url = bool(mask_url) and _is_public_remote_url(mask_url) and not _is_app_static_image_reference(mask_url, s)
-    if provider_image_url and (not mask_url or provider_mask_url):
+    if provider_image_url and (not mask_url or provider_mask_url) and (external_image_url or external_mask_url):
         try:
             return await _edit_image_url_raw_http(
                 settings=s,
@@ -1148,12 +1158,11 @@ async def edit_image(
                 quality=quality,
             )
         except Exception as e:
-            # Public external URLs should remain URL-only; local static images
-            # can safely fall back to SDK upload if the provider rejects URL
-            # edits.
-            if external_image_url or external_mask_url:
-                raise RuntimeError(f"图片编辑失败：上游未接受外部图片 URL: {e}") from e
-            attempt_errors.append(f"URL-native edit: {type(e).__name__}: {e}")
+            # True public external URLs should remain URL-only; we do not
+            # download/copy arbitrary external assets for edits. App-owned
+            # /static/images are handled below as local files and uploaded as
+            # multipart image bytes, which is the standard images.edit shape.
+            raise RuntimeError(f"图片编辑失败：上游未接受外部图片 URL: {e}") from e
     if external_image_url or external_mask_url:
         raise RuntimeError(
             "图片编辑失败：公开外部 URL 默认不下载到本地；当前图片/mask 混合了外部 URL 与本地文件，"
@@ -1225,7 +1234,7 @@ async def edit_image(
                 size=size,
                 n=n,
                 quality=quality,
-                timeout=IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS,
+                timeout=IMAGE_GENERATION_TIMEOUT_SECONDS,
             )
         except Exception as e:
             attempt_errors.append(f"raw multipart: {type(e).__name__}: {e}")
@@ -1266,13 +1275,13 @@ async def edit_image(
             return saved
 
         # If a custom gateway has already rejected raw multipart with an HTTP/upstream
-        # error, do not send the same local file as a giant data URL or SDK upload.
-        # In practice this avoids 1-3 minute hangs ending in 524/empty upstream output.
+        # error or consumed the full edit timeout, do not send the same local file
+        # as a giant data URL or SDK upload.
         raw_errors = attempt_errors[raw_error_start:]
         if _raw_gateway_rejected_request(raw_errors):
             attempt_errors.append(
                 "raw data-url / SDK upload: 已跳过。当前为非官方 image_base_url，raw multipart 已返回 HTTP/超时/上游错误；"
-                "继续尝试其它上传形态通常只会等待更久并得到同一上游失败。"
+                "已按完整图片编辑超时上限等待，继续尝试其它上传形态通常只会得到同一上游失败。"
             )
         else:
             data_url_error_start = len(attempt_errors)

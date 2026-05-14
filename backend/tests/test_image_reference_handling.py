@@ -273,6 +273,62 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(items), 1)
         self.assertTrue(items[0]["b64_json"].startswith("data:image/png;base64,"))
 
+    async def test_app_static_image_uses_multipart_before_url_native_on_custom_gateway(self):
+        with tempfile.TemporaryDirectory() as image_dir:
+            (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)
+            settings = Settings(
+                image_dir=image_dir,
+                image_api_key="test-key",
+                image_base_url="https://image-gateway.invalid/v1",
+                public_base_url="https://xhs.example.com/app",
+            )
+            seen = {}
+
+            async def fail_if_url_native_called(**_kwargs):
+                raise AssertionError("app-owned local images should upload file bytes before URL-native edit")
+
+            async def raw_multipart_success(**kwargs):
+                seen["timeout"] = kwargs.get("timeout")
+                return ["/static/images/edited.png"]
+
+            orig_get_settings = llm.get_settings
+            orig_get_client = llm.get_client
+            orig_multipart = llm._edit_image_multipart_raw_http
+            orig_url_native = llm._edit_image_url_raw_http
+            try:
+                llm.get_settings = lambda: settings
+                llm.get_client = lambda _settings=None, kind="chat": _FailIfCalledClient()
+                llm._edit_image_multipart_raw_http = raw_multipart_success
+                llm._edit_image_url_raw_http = fail_if_url_native_called
+                saved = await llm.edit_image(
+                    image_url="/static/images/ref.png",
+                    mask_url=None,
+                    prompt="整体风格化",
+                    size="1024x1024",
+                    n=1,
+                    quality="high",
+                    settings=settings,
+                )
+            finally:
+                llm.get_settings = orig_get_settings
+                llm.get_client = orig_get_client
+                llm._edit_image_multipart_raw_http = orig_multipart
+                llm._edit_image_url_raw_http = orig_url_native
+
+            self.assertEqual(saved, ["/static/images/edited.png"])
+            self.assertEqual(seen.get("timeout"), llm.IMAGE_GENERATION_TIMEOUT_SECONDS)
+
+    async def test_chat_image_context_exposes_stable_path_and_server_public_url(self):
+        settings = Settings(public_base_url="https://xhs.example.com/app")
+        out = await llm.to_openai_messages(
+            [{"role": "user", "content": "参考这张图", "images": ["/static/images/ref.png"]}],
+            settings=settings,
+        )
+        parts = out[0]["content"]
+        self.assertEqual(parts[0]["type"], "text")
+        self.assertIn("[图片路径: /static/images/ref.png | 可访问URL: https://xhs.example.com/app/static/images/ref.png]", parts[1]["text"])
+        self.assertEqual(parts[2]["image_url"]["url"], "https://xhs.example.com/app/static/images/ref.png")
+
     async def test_custom_gateway_http_rejection_skips_slow_sdk_upload(self):
         with tempfile.TemporaryDirectory() as image_dir:
             (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)

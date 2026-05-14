@@ -584,6 +584,15 @@ def _article_prompt_context(art: Article, *, body_limit: int = 8000) -> str:
 XHS_WRITER_SYSTEM = (
     "你是小红书爆款内容创作专家，精通平台话术、用户心理和流量机制。"
     "你的文风像跟闺蜜聊天——真诚、有温度、口语化，但信息密度高。\n\n"
+    "【原创创作原则】\n"
+    "- 原创不是把主题扩写成通用模板，而是从用户给的素材里提炼真实卖点、使用场景、情绪价值和可验证细节\n"
+    "- 如果有房源信息/产品信息/服务信息/用户评价/房客评价，必须把素材拆成：硬信息、体验证据、目标人群、痛点解决、避坑提醒，再写成小红书口吻\n"
+    "- 民宿/酒店/房源类要重点写：位置与交通、景观/空间、适合谁、入住体验、周边玩法、房客评价里反复出现的亮点；不要空喊“绝美/高级/宝藏”\n"
+    "- 每 2-3 段至少落一个具体细节；不能从素材推出的事实不要编造，可用“更适合/比较适合/建议提前确认”这类稳妥表达\n\n"
+    "【改写原则】\n"
+    "- 改写不是缩写，也不是逐句同义替换；要先保留事实，再重构标题钩子、开头视角、段落顺序、表达节奏和互动结尾\n"
+    "- 降低与原帖的连续文本和关键词重复：避免连续 12 个字以上照搬；高频关键词要换成场景化表达、用户语言或长尾搜索词\n"
+    "- 原帖里的核心信息、房源/产品事实、图片匹配关系要保留，但表达要像一篇新的可发布笔记\n\n"
     "【标题规范】≤20字，必须含 1-2 个搜索关键词。公式参考：\n"
     "- 数字冲击：「5 个动作瘦腰 8cm」\n"
     "- 痛点共鸣：「熬夜党必看！急救暗沉只要 3 步」\n"
@@ -607,6 +616,9 @@ XHS_WRITER_SYSTEM = (
 XHS_WORKFLOW_SYSTEM = (
     "你是小红书端到端内容工作流总监。你不是只写一篇文案，而是要一次性交付"
     "选题定位、标题、正文、标签、首图方向、后续内容图方向和自检结论。\n\n"
+    "如果 brief 包含房源信息、房客评价、商品评价或原始素材，必须先做素材提炼："
+    "把真实信息转成小红书用户关心的场景、痛点、证据和种草理由；不要产出泛泛的模板文。\n"
+    "如果任务是改写/仿写，要重构表达而不是压缩原文，避免原帖关键词和句式高度重合。\n\n"
     "输出必须能直接进入草稿箱：标题≤20字，正文口语化、分段清晰、结尾有互动引导，"
     "标签 5-10 个，可带 #；系统入库时会统一规范为单个 # 展示。\n"
     "避免广告法绝对化、医疗承诺、收益承诺和站外引流表达。\n\n"
@@ -627,9 +639,9 @@ XHS_WORKFLOW_SYSTEM = (
 XHS_CATEGORY_PLAYBOOKS: Dict[str, Dict[str, str]] = {
     "travel": {
         "title": "旅游/攻略",
-        "writing": "路线要按天/区域写，必须包含交通、预算/时间、避坑、拍照机位；正文适合收藏转发。",
-        "title_formula": "地名 + 天数/人均/避坑/路线，例如「北京3天不踩坑」。",
-        "visual": "首图优先地图感信息图/地标拼贴/路线卡片，分区清楚，文字少而准。",
+        "writing": "路线要按天/区域写，必须包含交通、预算/时间、避坑、拍照机位；民宿/酒店/房源要从位置、景观、房型、入住体验、房客评价和周边玩法提炼种草点，正文适合收藏转发。",
+        "title_formula": "地名 + 天数/人均/避坑/路线/住宿体验，例如「威海海景民宿怎么选」。",
+        "visual": "首图优先地图感信息图/地标拼贴/路线卡片；民宿房源适合窗景、房间细节、周边路线、评价亮点卡片。",
     },
     "food": {
         "title": "美食/食谱",
@@ -693,6 +705,37 @@ def _category_playbook_text(category: str) -> str:
         f"图片 {model['image_count']['min']}-{model['image_count']['max']} 张。\n"
         f"- 爆款标题参考：{' / '.join(viral)}"
     )
+
+
+def _stringify_material(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    try:
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except Exception:
+        return str(value).strip()
+
+
+def _collect_creation_material(args: Dict[str, Any]) -> str:
+    """Collect structured source material without forcing the model into generic copy.
+
+    Agents may pass listing_info / guest_reviews separately, or put everything
+    into extra.  We keep clear section labels so the writer can distinguish hard
+    facts from subjective reviews and turn them into XHS-style evidence.
+    """
+    blocks: List[str] = []
+    for key, label in (
+        ("source_material", "原始素材"),
+        ("listing_info", "房源/产品信息"),
+        ("guest_reviews", "用户/房客评价"),
+        ("extra", "补充要求"),
+    ):
+        text = _stringify_material(args.get(key))
+        if text:
+            blocks.append(f"【{label}】\n{text}")
+    return "\n\n".join(blocks)
 
 
 def _normalize_title(value: Any, fallback: str = "", *, limit: int = 20) -> str:
@@ -1182,14 +1225,17 @@ async def tool_generate_article(args: Dict[str, Any]) -> Dict[str, Any]:
     tone = args.get("tone", "真诚、有温度")
     length = args.get("length", "中等")
     audience = args.get("audience", "20-30岁女性")
-    extra = args.get("extra", "")
+    extra = _collect_creation_material(args)
     from .research_data import detect_category
     category = detect_category(str(topic), str(extra), [])
     playbook = _category_playbook_text(category)
 
     user_prompt = (
-        f"主题：{topic}\n语气：{tone}\n长度：{length}\n目标受众：{audience}\n补充：{extra}\n"
+        f"主题：{topic}\n语气：{tone}\n长度：{length}\n目标受众：{audience}\n"
+        f"素材与补充：\n{extra or '（无额外素材）'}\n\n"
         f"{playbook}\n"
+        "请先在心里完成素材提炼：哪些是硬信息、哪些是评价证据、哪些能转成小红书种草点；"
+        "正文必须有真实场景感和小红书口吻，避免像广告简介或通用 AI 文案。\n"
         "请按系统要求输出 JSON。"
     )
     resp = await chat_completion(
@@ -1229,7 +1275,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     audience = args.get("audience", "小红书主力用户")
     tone = args.get("tone", args.get("style", "真诚、有温度、有网感"))
     length = args.get("length", "中等")
-    extra = args.get("extra", "")
+    extra = _collect_creation_material(args)
     auto_optimize = bool(args.get("auto_optimize", True))
     include_visual_prompts = bool(args.get("include_visual_prompts", True))
     generate_cover = bool(args.get("generate_cover", False))
@@ -1263,10 +1309,12 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         f"目标受众：{audience}\n"
         f"语气风格：{tone}\n"
         f"篇幅：{length}\n"
-        f"补充信息：{extra}\n"
+        f"素材与补充信息：\n{extra or '（无额外素材）'}\n\n"
         f"{playbook}\n"
         f"是否需要视觉方向：{include_visual_prompts}\n"
         f"图片规格：默认小红书 3:4 竖版，当前解析为 {preferred_image_size}；如果用户指定 2K/4K/16:9/1:1 等，必须按该规格输出所有图片 size。\n"
+        "原创要求：如果素材里有房源信息/房客评价/用户反馈，必须用评价中的真实体验做证据，"
+        "转成「谁适合、为什么值得住/买/去、有哪些注意点」的小红书表达，不要写成商家介绍。\n"
         "请一次性交付完整小红书笔记工作流结果。"
     )
     emit_tool_progress("正在规划内容策略、正文结构、标题候选和视觉方向", step="planning")
@@ -1546,12 +1594,17 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
                     f"请基于下列笔记改写为小红书风格。\n改写风格：{style}\n附加要求：{instruction}\n"
                     f"{playbook}\n"
                     f"{_article_prompt_context(art)}\n"
+                    "改写执行要求：\n"
+                    "1. 先提炼原帖事实与卖点，再换一个新的小红书切入角度重写，不要缩写原文。\n"
+                    "2. 标题、开头、段落顺序、分区小标题、结尾互动都要重新设计；不要沿用原文句式。\n"
+                    "3. 原帖高频词要做场景化替换，避免连续 12 个字以上与原文一致，避免关键词堆叠。\n"
+                    "4. 如果原文来自房源/民宿/酒店介绍，要把房源信息和房客评价改成用户视角体验：适合谁、住起来怎样、周边怎么玩、需要提前确认什么。\n"
                     "注意：保留与现有首图/后续图片匹配的叙事，不要写出和图片明显冲突的场景。\n"
                     "严格按系统要求 JSON 返回。"
                 ),
             },
         ],
-        temperature=0.85,
+        temperature=0.92,
     )
     content = resp.choices[0].message.content or ""
     data = _safe_json(content)
@@ -3008,7 +3061,10 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "tone": {"type": "string"},
                 "length": {"type": "string"},
                 "audience": {"type": "string"},
-                "extra": {"type": "string"},
+                "extra": {"type": "string", "description": "补充要求、口吻、禁用点等"},
+                "source_material": {"type": "string", "description": "原始素材/用户提供的信息，可包含产品、房源、服务、评价等"},
+                "listing_info": {"type": "string", "description": "房源/民宿/酒店/产品的客观信息，用于原创提炼卖点"},
+                "guest_reviews": {"type": "string", "description": "房客评价/用户评价/真实反馈，用于提炼体验证据和小红书口吻"},
             },
             required=["topic"],
         ),
@@ -3024,6 +3080,9 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "tone": {"type": "string", "description": "语气/风格"},
                 "length": {"type": "string", "description": "短/中等/长"},
                 "extra": {"type": "string", "description": "补充要求、产品卖点、禁用表达等"},
+                "source_material": {"type": "string", "description": "用户提供的原始素材；做原创时要从素材中提炼真实卖点，而不是泛泛扩写"},
+                "listing_info": {"type": "string", "description": "房源/民宿/酒店/产品的客观信息，如位置、景观、设施、价格、交通、周边"},
+                "guest_reviews": {"type": "string", "description": "房客评价/用户评价/真实反馈，用作体验证据和语气参考"},
                 "auto_optimize": {"type": "boolean", "description": "是否基于自检自动二次优化，默认 true"},
                 "include_visual_prompts": {"type": "boolean", "description": "是否产出首图和后续队列图片 prompt，默认 true"},
                 "generate_cover": {"type": "boolean", "description": "是否直接生成展示队列第 1 张（首图），默认 false；与内容图只有队列位置区别"},
@@ -3043,8 +3102,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "对指定 article_id 的笔记整体改写并写回。",
             {
                 "article_id": {"type": "integer"},
-                "style": {"type": "string"},
-                "instruction": {"type": "string"},
+                "style": {"type": "string", "description": "改写后的风格，如更口语化、更小红书、更种草、更真实体验感"},
+                "instruction": {"type": "string", "description": "改写要求。改写会重构标题/开头/段落/结尾，降低原帖连续文本/关键词重复，避免缩写式改写。"},
             },
             required=["article_id"],
         ),

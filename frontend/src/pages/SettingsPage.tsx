@@ -251,10 +251,13 @@ export default function SettingsPage() {
     try {
       const r = await testStaticImagePublicAccess(publicBaseUrl.trim() || undefined)
       setStaticTest(r)
+      const reachableButLocal = r.ok && !r.provider_readable
       setMsg({
-        kind: r.ok ? 'success' : 'error',
+        kind: r.ok ? (reachableButLocal ? 'info' : 'success') : 'error',
         text: r.ok
-          ? `静态图片访问正常：HTTP ${r.status_code}，${r.bytes || 0} bytes，用时 ${r.elapsed_sec}s`
+          ? (reachableButLocal
+            ? `本地静态图片访问正常：HTTP ${r.status_code}，但当前地址不是公网，模型会走本地上传/原图内联。`
+            : `静态图片公网访问正常：HTTP ${r.status_code}，${r.bytes || 0} bytes，用时 ${r.elapsed_sec}s`)
           : `静态图片访问失败：${r.message || r.error || '未知错误'}`,
       })
     } catch (e: any) {
@@ -607,14 +610,18 @@ export default function SettingsPage() {
                 sx={{
                   p: 1.5,
                   borderRadius: 2,
-                  bgcolor: staticTest ? (staticTest.ok ? 'rgba(22,163,74,0.04)' : 'rgba(220,38,38,0.04)') : 'rgba(0,0,0,0.015)',
+                  bgcolor: staticTest
+                    ? (staticTest.ok
+                      ? (staticTest.provider_readable ? 'rgba(22,163,74,0.04)' : 'rgba(37,99,235,0.04)')
+                      : 'rgba(220,38,38,0.04)')
+                    : 'rgba(0,0,0,0.015)',
                 }}
               >
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
                   <Box flex={1}>
                     <Typography sx={{ fontSize: 13, fontWeight: 700 }}>静态图片公网可访问测试</Typography>
                     <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mt: 0.3 }}>
-                      自动写入一张 1×1 测试图，并从服务端请求完整 URL，确认 /static/images/... 部署后真的可访问。
+                      自动写入一张 1×1 测试图，并从服务端请求完整 URL；本地模式确认代理/静态挂载，服务器模式确认外部模型可直接读取。
                     </Typography>
                   </Box>
                   <Button variant="outlined" onClick={testStaticImages} disabled={busy} sx={{ minWidth: 152 }}>
@@ -626,10 +633,18 @@ export default function SettingsPage() {
                     <Stack direction="row" spacing={0.6} flexWrap="wrap" sx={{ gap: 0.6, mb: 0.8 }}>
                       <Chip
                         size="small"
-                        label={staticTest.ok ? '可访问' : '不可访问'}
-                        color={staticTest.ok ? 'success' : 'error'}
+                        label={staticTest.ok ? (staticTest.provider_readable ? '公网可访问' : '本地可访问') : '不可访问'}
+                        color={staticTest.ok ? (staticTest.provider_readable ? 'success' : 'info') : 'error'}
                         sx={{ height: 22, fontSize: 11 }}
                       />
+                      <Chip
+                        size="small"
+                        label={staticTest.mode === 'server' ? '服务器模式' : staticTest.mode === 'invalid' ? '地址无效' : '本地模式'}
+                        sx={{ height: 22, fontSize: 11 }}
+                      />
+                      {staticTest.provider_readable === false && staticTest.ok && (
+                        <Chip size="small" label="模型不可直接抓取" color="warning" sx={{ height: 22, fontSize: 11 }} />
+                      )}
                       {typeof staticTest.status_code === 'number' && (
                         <Chip size="small" label={`HTTP ${staticTest.status_code}`} sx={{ height: 22, fontSize: 11 }} />
                       )}
@@ -641,8 +656,13 @@ export default function SettingsPage() {
                     <Typography sx={{ fontSize: 11.5, color: 'text.secondary', wordBreak: 'break-all' }}>
                       URL：<a href={staticTest.public_url} target="_blank" rel="noreferrer">{staticTest.public_url}</a>
                     </Typography>
-                    {!staticTest.ok && (
-                      <Typography sx={{ fontSize: 11.5, color: 'error.main', mt: 0.5 }}>
+                    {staticTest.provider_base_url && (
+                      <Typography sx={{ fontSize: 11.5, color: 'text.secondary', wordBreak: 'break-all', mt: 0.4 }}>
+                        模型可读 Origin：{staticTest.provider_base_url}
+                      </Typography>
+                    )}
+                    {staticTest.message && (
+                      <Typography sx={{ fontSize: 11.5, color: staticTest.ok ? 'text.secondary' : 'error.main', mt: 0.5 }}>
                         {staticTest.error || staticTest.message}
                       </Typography>
                     )}
