@@ -146,6 +146,37 @@ def _save_user_upload(content: bytes, user_id: int, ext: str, suffix: str = "") 
     return f"/static/images/user_{user_id}/{name}"
 
 
+def _is_admin_user(user: User) -> bool:
+    return getattr(user, "role", "") == "admin"
+
+
+def _can_access_owned_record(user: User, owner_id: int | None) -> bool:
+    return _is_admin_user(user) or owner_id == user.id
+
+
+def _public_user_payload(user: User | None, user_id: int | None = None) -> Dict[str, Any]:
+    if user:
+        return {"id": user.id, "username": user.username, "role": user.role}
+    if user_id:
+        return {"id": user_id, "username": f"用户 {user_id}", "role": "user"}
+    return {"id": None, "username": "未归属", "role": ""}
+
+
+async def _owner_map_for_ids(session, user_ids: List[int | None]) -> Dict[int, Dict[str, Any]]:
+    ids = sorted({int(uid) for uid in user_ids if uid})
+    if not ids:
+        return {}
+    res = await session.execute(select(User).where(User.id.in_(ids)))
+    return {u.id: _public_user_payload(u) for u in res.scalars().all()}
+
+
+def _with_owner_meta(payload: Dict[str, Any], owner_id: int | None, owner_map: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+    payload = dict(payload)
+    payload["user_id"] = owner_id
+    payload["owner_user"] = owner_map.get(int(owner_id or 0), _public_user_payload(None, owner_id))
+    return payload
+
+
 async def _snapshot_article_version(
     session,
     article: Article,
@@ -183,7 +214,7 @@ async def chat_stream(req: ChatRequest, request: Request, user: User = Depends(g
     if req.conversation_id:
         async with SessionLocal() as s:
             conv = await s.get(Conversation, req.conversation_id)
-            if not conv or conv.user_id != user.id:
+            if not conv or not _can_access_owned_record(user, conv.user_id):
                 raise HTTPException(404, "conversation not found")
 
     messages: List[Dict[str, Any]] = []
@@ -227,22 +258,30 @@ async def chat_stream(req: ChatRequest, request: Request, user: User = Depends(g
 @router.get("/articles")
 async def list_articles(limit: int = 50, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
+        q = select(Article).order_by(Article.updated_at.desc()).limit(limit)
+        if not _is_admin_user(user):
+            q = q.where(Article.user_id == user.id)
         res = await s.execute(
-            select(Article)
-            .where(Article.user_id == user.id)
-            .order_by(Article.updated_at.desc())
-            .limit(limit)
+            q
         )
-        return {"items": [a.to_dict() for a in res.scalars().all()]}
+        articles = res.scalars().all()
+        if not _is_admin_user(user):
+            return {"items": [a.to_dict() for a in articles]}
+        owners = await _owner_map_for_ids(s, [a.user_id for a in articles])
+        return {"items": [_with_owner_meta(a.to_dict(), a.user_id, owners) for a in articles]}
 
 
 @router.get("/articles/{aid}")
 async def get_article(aid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "not found")
-        return _article_payload(a)
+        payload = _article_payload(a)
+        if _is_admin_user(user):
+            owners = await _owner_map_for_ids(s, [a.user_id])
+            payload = _with_owner_meta(payload, a.user_id, owners)
+        return payload
 
 
 @router.post("/articles")
@@ -267,7 +306,7 @@ async def create_article(payload: ArticleIn, user: User = Depends(get_current_us
 async def update_article(aid: int, payload: ArticleUpdate, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "not found")
         data = payload.model_dump(exclude_unset=True)
         if "tags" in data and data["tags"] is not None:
@@ -277,14 +316,18 @@ async def update_article(aid: int, payload: ArticleUpdate, user: User = Depends(
             setattr(a, k, v)
         await s.commit()
         await s.refresh(a)
-        return _article_payload(a)
+        result = _article_payload(a)
+        if _is_admin_user(user):
+            owners = await _owner_map_for_ids(s, [a.user_id])
+            result = _with_owner_meta(result, a.user_id, owners)
+        return result
 
 
 @router.delete("/articles/{aid}")
 async def delete_article(aid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "not found")
         await s.delete(a)
         await s.commit()
@@ -322,11 +365,13 @@ async def api_diagnose(payload: DiagnoseRequest, user: User = Depends(get_curren
 async def list_article_diagnoses(aid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "article not found")
+        q = select(ArticleDiagnosis).where(ArticleDiagnosis.article_id == aid)
+        if not _is_admin_user(user):
+            q = q.where(ArticleDiagnosis.user_id == user.id)
         res = await s.execute(
-            select(ArticleDiagnosis)
-            .where(ArticleDiagnosis.article_id == aid, ArticleDiagnosis.user_id == user.id)
+            q
             .order_by(ArticleDiagnosis.created_at.desc(), ArticleDiagnosis.id.desc())
             .limit(50)
         )
@@ -337,11 +382,13 @@ async def list_article_diagnoses(aid: int, user: User = Depends(get_current_user
 async def latest_article_diagnosis(aid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "article not found")
+        q = select(ArticleDiagnosis).where(ArticleDiagnosis.article_id == aid)
+        if not _is_admin_user(user):
+            q = q.where(ArticleDiagnosis.user_id == user.id)
         res = await s.execute(
-            select(ArticleDiagnosis)
-            .where(ArticleDiagnosis.article_id == aid, ArticleDiagnosis.user_id == user.id)
+            q
             .order_by(ArticleDiagnosis.created_at.desc(), ArticleDiagnosis.id.desc())
             .limit(1)
         )
@@ -353,10 +400,10 @@ async def latest_article_diagnosis(aid: int, user: User = Depends(get_current_us
 async def get_article_diagnosis(aid: int, did: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "article not found")
         d = await s.get(ArticleDiagnosis, did)
-        if not d or d.article_id != aid or d.user_id != user.id:
+        if not d or d.article_id != aid or (not _is_admin_user(user) and d.user_id != user.id):
             raise HTTPException(404, "diagnosis not found")
         return d.to_dict()
 
@@ -374,10 +421,10 @@ async def apply_article_diagnosis(
     fields = fields & allowed or allowed
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "article not found")
         d = await s.get(ArticleDiagnosis, did)
-        if not d or d.article_id != aid or d.user_id != user.id:
+        if not d or d.article_id != aid or (not _is_admin_user(user) and d.user_id != user.id):
             raise HTTPException(404, "diagnosis not found")
         report = d.report or {}
         changed: List[str] = []
@@ -410,7 +457,11 @@ async def apply_article_diagnosis(
         await s.commit()
         await s.refresh(a)
         await s.refresh(d)
-        return {"ok": True, "changed": changed, "article": _article_payload(a), "diagnosis": d.to_dict()}
+        result = _article_payload(a)
+        if _is_admin_user(user):
+            owners = await _owner_map_for_ids(s, [a.user_id])
+            result = _with_owner_meta(result, a.user_id, owners)
+        return {"ok": True, "changed": changed, "article": result, "diagnosis": d.to_dict()}
 
 
 @router.post("/articles/outline")
@@ -945,7 +996,7 @@ async def extract_template(payload: ExtractTemplateRequest, user: User = Depends
     effective = await get_effective_settings(user.id)
     async with SessionLocal() as s:
         art = await s.get(Article, payload.article_id)
-        if not art or art.user_id != user.id:
+        if not art or not _can_access_owned_record(user, art.user_id):
             raise HTTPException(404, "article not found")
     resp = await chat_completion(
         messages=[
@@ -989,13 +1040,17 @@ async def extract_template(payload: ExtractTemplateRequest, user: User = Depends
 @router.get("/conversations")
 async def list_conversations(user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
+        q = select(Conversation).order_by(Conversation.updated_at.desc()).limit(100)
+        if not _is_admin_user(user):
+            q = q.where(Conversation.user_id == user.id)
         res = await s.execute(
-            select(Conversation)
-            .where(Conversation.user_id == user.id)
-            .order_by(Conversation.updated_at.desc())
-            .limit(100)
+            q
         )
-        return {"items": [c.to_dict() for c in res.scalars().all()]}
+        conversations = res.scalars().all()
+        if not _is_admin_user(user):
+            return {"items": [c.to_dict() for c in conversations]}
+        owners = await _owner_map_for_ids(s, [c.user_id for c in conversations])
+        return {"items": [_with_owner_meta(c.to_dict(), c.user_id, owners) for c in conversations]}
 
 
 @router.post("/conversations/batch_delete")
@@ -1019,12 +1074,10 @@ async def batch_delete_conversations(payload: Dict[str, Any], user: User = Depen
         raise HTTPException(400, "一次最多删除 100 条对话")
 
     async with SessionLocal() as s:
-        res = await s.execute(
-            select(Conversation).where(
-                Conversation.user_id == user.id,
-                Conversation.id.in_(ids),
-            )
-        )
+        q = select(Conversation).where(Conversation.id.in_(ids))
+        if not _is_admin_user(user):
+            q = q.where(Conversation.user_id == user.id)
+        res = await s.execute(q)
         conversations = res.scalars().all()
         for c in conversations:
             await s.delete(c)
@@ -1036,9 +1089,13 @@ async def batch_delete_conversations(payload: Dict[str, Any], user: User = Depen
 async def get_conversation(cid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         c = await s.get(Conversation, cid)
-        if not c or c.user_id != user.id:
+        if not c or not _can_access_owned_record(user, c.user_id):
             raise HTTPException(404, "not found")
-        return c.to_dict()
+        payload = c.to_dict()
+        if _is_admin_user(user):
+            owners = await _owner_map_for_ids(s, [c.user_id])
+            payload = _with_owner_meta(payload, c.user_id, owners)
+        return payload
 
 
 @router.post("/conversations")
@@ -1047,7 +1104,7 @@ async def create_conversation(payload: Dict[str, Any], user: User = Depends(get_
         article_id = payload.get("article_id")
         if article_id:
             a = await s.get(Article, int(article_id))
-            if not a or a.user_id != user.id:
+            if not a or not _can_access_owned_record(user, a.user_id):
                 raise HTTPException(404, "article not found")
         c = Conversation(
             user_id=user.id,
@@ -1065,25 +1122,29 @@ async def create_conversation(payload: Dict[str, Any], user: User = Depends(get_
 async def update_conversation(cid: int, payload: Dict[str, Any], user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         c = await s.get(Conversation, cid)
-        if not c or c.user_id != user.id:
+        if not c or not _can_access_owned_record(user, c.user_id):
             raise HTTPException(404, "not found")
         if "article_id" in payload and payload["article_id"]:
             a = await s.get(Article, int(payload["article_id"]))
-            if not a or a.user_id != user.id:
+            if not a or not _can_access_owned_record(user, a.user_id):
                 raise HTTPException(404, "article not found")
         for k in ("title", "messages", "article_id"):
             if k in payload:
                 setattr(c, k, payload[k])
         await s.commit()
         await s.refresh(c)
-        return c.to_dict()
+        result = c.to_dict()
+        if _is_admin_user(user):
+            owners = await _owner_map_for_ids(s, [c.user_id])
+            result = _with_owner_meta(result, c.user_id, owners)
+        return result
 
 
 @router.delete("/conversations/{cid}")
 async def delete_conversation(cid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         c = await s.get(Conversation, cid)
-        if not c or c.user_id != user.id:
+        if not c or not _can_access_owned_record(user, c.user_id):
             raise HTTPException(404, "not found")
         await s.delete(c)
         await s.commit()
@@ -1096,7 +1157,7 @@ async def delete_conversation(cid: int, user: User = Depends(get_current_user)):
 async def list_versions(aid: int, user: User = Depends(get_current_user)):
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "not found")
         res = await s.execute(
             select(ArticleVersion)
@@ -1111,7 +1172,7 @@ async def create_version(aid: int, payload: Dict[str, Any] = {}, user: User = De
     """Snapshot current article state as a new version."""
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "article not found")
         last = await s.execute(
             select(ArticleVersion)
@@ -1143,7 +1204,7 @@ async def rollback_version(aid: int, vid: int, user: User = Depends(get_current_
     """Rollback article to a specific version."""
     async with SessionLocal() as s:
         a = await s.get(Article, aid)
-        if not a or a.user_id != user.id:
+        if not a or not _can_access_owned_record(user, a.user_id):
             raise HTTPException(404, "article not found")
         v = await s.get(ArticleVersion, vid)
         if not v or v.article_id != aid:
@@ -1155,7 +1216,11 @@ async def rollback_version(aid: int, vid: int, user: User = Depends(get_current_
         a.images = v.images or []
         await s.commit()
         await s.refresh(a)
-        return _article_payload(a)
+        result = _article_payload(a)
+        if _is_admin_user(user):
+            owners = await _owner_map_for_ids(s, [a.user_id])
+            result = _with_owner_meta(result, a.user_id, owners)
+        return result
 
 
 # ---------- tasks ----------

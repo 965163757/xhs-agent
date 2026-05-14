@@ -23,10 +23,12 @@ import AddIcon from '@mui/icons-material/Add'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import SortIcon from '@mui/icons-material/Sort'
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline'
 import { deleteArticle, listArticles, type Article } from '../api/client'
 import { toast } from 'sonner'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { appDateTimestamp, formatBeijingDate } from '../utils/time'
+import { useAuth } from '../AuthContext'
 
 type SortKey = 'updated' | 'score' | 'title'
 
@@ -50,6 +52,8 @@ export default function ArticlesPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<SortKey>('updated')
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const nav = useNavigate()
   const refresh = () => listArticles().then(setItems).catch(() => setItems([])).finally(() => setLoading(false))
   useEffect(() => {
@@ -67,6 +71,7 @@ export default function ArticlesPage() {
         !query ||
         a.title.toLowerCase().includes(query.toLowerCase()) ||
         a.body.toLowerCase().includes(query.toLowerCase()) ||
+        (a.owner_user?.username || '').toLowerCase().includes(query.toLowerCase()) ||
         (a.tags || []).some(t => t.toLowerCase().includes(query.toLowerCase()))
     )
     if (statusFilter !== 'all') {
@@ -86,10 +91,10 @@ export default function ArticlesPage() {
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3.5 }}>
         <Stack spacing={0.2}>
           <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
-            我的笔记
+            {isAdmin ? '全部笔记' : '我的笔记'}
           </Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
-            {items.length} 篇笔记
+            {items.length} 篇笔记{isAdmin ? ' · 管理员视图' : ''}
           </Typography>
         </Stack>
         <Box sx={{ flex: 1 }} />
@@ -246,6 +251,21 @@ export default function ArticlesPage() {
                     size="small"
                     label={`${articleScore(a)}分`}
                     sx={{ bgcolor: 'rgba(22,163,74,0.08)', color: '#16A34A', fontSize: 11, height: 20, fontWeight: 600 }}
+                  />
+                )}
+                {a.owner_user && (
+                  <Chip
+                    size="small"
+                    icon={<PersonOutlineIcon sx={{ fontSize: '13px !important' }} />}
+                    label={a.owner_user.username || `用户 ${a.user_id || ''}`}
+                    sx={{
+                      bgcolor: 'rgba(59,130,246,0.08)',
+                      color: '#2563EB',
+                      fontSize: 11,
+                      height: 20,
+                      fontWeight: 600,
+                      '& .MuiChip-icon': { color: '#2563EB' },
+                    }}
                   />
                 )}
               </Stack>

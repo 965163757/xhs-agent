@@ -39,7 +39,7 @@ async def _build_diagnosis_payload(req: DiagnoseStreamRequest, user: User) -> Di
             article = await s.get(Article, req.article_id)
             if not article:
                 raise HTTPException(404, "笔记不存在")
-            if article.user_id != user.id:
+            if user.role != "admin" and article.user_id != user.id:
                 raise HTTPException(403, "无权访问该笔记")
             title = article.title or ""
             content = article.body or ""

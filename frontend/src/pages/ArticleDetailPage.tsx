@@ -28,6 +28,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import MenuIcon from '@mui/icons-material/Menu'
 import AddIcon from '@mui/icons-material/Add'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline'
 import {
   getArticle,
   listArticles,
@@ -718,6 +719,20 @@ export default function ArticleDetailPage() {
               label={art.status === 'published' ? '已发布' : art.status === 'draft' ? '草稿' : art.status}
               sx={{ bgcolor: 'action.hover', fontSize: 11, height: 20 }}
             />
+            {art.owner_user && (
+              <Chip
+                size="small"
+                icon={<PersonOutlineIcon sx={{ fontSize: '13px !important' }} />}
+                label={art.owner_user.username || `用户 ${art.user_id || ''}`}
+                sx={{
+                  bgcolor: 'rgba(59,130,246,0.08)',
+                  color: '#2563EB',
+                  fontSize: 11,
+                  height: 20,
+                  '& .MuiChip-icon': { color: '#2563EB' },
+                }}
+              />
+            )}
             <Button
               size="small"
               variant="outlined"
@@ -802,7 +817,7 @@ export default function ArticleDetailPage() {
                     #{item.id} {item.title || '（无标题）'}
                   </Typography>
                   <Typography noWrap sx={{ fontSize: 11, color: 'text.secondary' }}>
-                    {item.status} · {item.content_stats?.image_count ?? ([item.cover_image, ...(item.images || [])].filter(Boolean).length)} 张图
+                    {(item.owner_user?.username ? `${item.owner_user.username} · ` : '')}{item.status} · {item.content_stats?.image_count ?? ([item.cover_image, ...(item.images || [])].filter(Boolean).length)} 张图
                     {convId ? ' · 保留当前对话' : ''}
                   </Typography>
                 </Stack>
@@ -1197,6 +1212,18 @@ export default function ArticleDetailPage() {
                             color: isCurrentArticle ? '#0F8C3D' : isOtherArticle ? '#C2410C' : 'text.secondary',
                           }}
                         />
+                        {c.owner_user && (
+                          <Chip
+                            size="small"
+                            label={c.owner_user.username}
+                            sx={{
+                              height: 18,
+                              fontSize: 10,
+                              bgcolor: 'rgba(59,130,246,0.08)',
+                              color: '#2563EB',
+                            }}
+                          />
+                        )}
                       </Stack>
                     }
                     secondary={

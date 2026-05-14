@@ -28,8 +28,16 @@ api.interceptors.response.use(
   }
 )
 
+export interface OwnerUser {
+  id: number | null
+  username: string
+  role?: string
+}
+
 export interface Article {
   id: number
+  user_id?: number | null
+  owner_user?: OwnerUser
   title: string
   body: string
   tags: string[]
@@ -94,6 +102,8 @@ export interface Template {
 
 export interface Conversation {
   id: number
+  user_id?: number | null
+  owner_user?: OwnerUser
   title: string
   article_id: number | null
   messages: ChatMessage[]

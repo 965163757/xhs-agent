@@ -36,6 +36,7 @@ import ChatPanel from '../components/ChatPanel'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor, getSession } from '../chatStore'
 import { formatBeijingDateTime } from '../utils/time'
+import { useAuth } from '../AuthContext'
 
 const suggestions = [
   { icon: '✍️', title: '一键完整成稿', prompt: '帮我完整做一篇关于「早C晚A护肤」的小红书笔记，目标受众是20-25岁学生党，包含标题候选、标签、封面方向和发布前自检' },
@@ -60,6 +61,8 @@ export default function ChatPage() {
   const [selectedConvoIds, setSelectedConvoIds] = useState<number[]>([])
   const [batchDeleteIds, setBatchDeleteIds] = useState<number[] | null>(null)
   const [batchMode, setBatchMode] = useState(false)
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const justCreatedRef = useRef(false)
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(articleId ? Number(articleId) : null)
   const selectedCount = selectedConvoIds.length
@@ -184,7 +187,7 @@ export default function ChatPage() {
     <Box sx={{ width: temporary ? 340 : 304, bgcolor: 'background.paper', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Stack direction="row" spacing={0.75} alignItems="center" sx={{ px: 1.5, py: 1.4 }}>
         <Typography sx={{ fontSize: 15, fontWeight: 800 }}>
-          历史对话
+          {isAdmin ? '全部对话' : '历史对话'}
         </Typography>
         <Box sx={{ flex: 1 }} />
         <Tooltip title="新对话">
@@ -277,7 +280,7 @@ export default function ChatPage() {
             )}
             <ListItemText
               primary={c.title || '新对话'}
-              secondary={formatBeijingDateTime(c.updated_at)}
+              secondary={`${c.owner_user?.username ? `${c.owner_user.username} · ` : ''}${formatBeijingDateTime(c.updated_at)}`}
               primaryTypographyProps={{ fontSize: 13.5, noWrap: true, fontWeight: convId === String(c.id) ? 700 : 500 }}
               secondaryTypographyProps={{ fontSize: 11 }}
             />
@@ -363,6 +366,13 @@ export default function ChatPage() {
             新对话
           </Typography>
         )}
+        {article?.owner_user && (
+          <Chip
+            size="small"
+            label={article.owner_user.username}
+            sx={{ height: 22, fontSize: 11, bgcolor: 'rgba(59,130,246,0.08)', color: '#2563EB' }}
+          />
+        )}
         <Button
           size="small"
           variant="outlined"
@@ -406,7 +416,7 @@ export default function ChatPage() {
                 #{item.id} {item.title || '（无标题）'}
               </Typography>
               <Typography noWrap sx={{ fontSize: 11, color: 'text.secondary' }}>
-                {item.status} · {(item.tags || []).slice(0, 3).map(t => `#${String(t).replace(/^[#＃]+/, '')}`).join(' ')}
+                {(item.owner_user?.username ? `${item.owner_user.username} · ` : '')}{item.status} · {(item.tags || []).slice(0, 3).map(t => `#${String(t).replace(/^[#＃]+/, '')}`).join(' ')}
               </Typography>
             </Stack>
           </MenuItem>
