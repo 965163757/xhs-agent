@@ -21,7 +21,8 @@ import {
 import MenuIcon from '@mui/icons-material/Menu'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
-import CloseIcon from '@mui/icons-material/Close'
+import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft'
+import ChecklistIcon from '@mui/icons-material/Checklist'
 import {
   listConversations,
   deleteConversation,
@@ -181,7 +182,7 @@ export default function ChatPage() {
 
   const HistorySidebar = ({ temporary = false }: { temporary?: boolean }) => (
     <Box sx={{ width: temporary ? 340 : 304, bgcolor: 'background.paper', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
+      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ px: 1.5, py: 1.4 }}>
         <Typography sx={{ fontSize: 15, fontWeight: 800 }}>
           历史对话
         </Typography>
@@ -197,25 +198,37 @@ export default function ChatPage() {
             <AddIcon sx={{ fontSize: 18 }} />
           </IconButton>
         </Tooltip>
-        <Tooltip title={temporary ? '关闭' : '收起侧栏'}>
+        <Tooltip title={temporary ? '收起' : '收起侧栏'}>
           <IconButton size="small" onClick={closeHistory}>
-            <CloseIcon sx={{ fontSize: 17 }} />
+            <KeyboardDoubleArrowLeftIcon sx={{ fontSize: 18 }} />
           </IconButton>
         </Tooltip>
       </Stack>
       {convos.length > 0 && (
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 2, pb: 1.5 }}>
+        <Stack direction="row" spacing={0.75} alignItems="center" sx={{ px: 1.5, pb: 1.2 }}>
           {!batchMode ? (
-            <Button size="small" onClick={() => { setBatchMode(true); setSelectedConvoIds([]) }} sx={{ fontSize: 12 }}>
-              批量管理
-            </Button>
+            <Tooltip title="批量管理">
+              <IconButton
+                size="small"
+                onClick={() => { setBatchMode(true); setSelectedConvoIds([]) }}
+                sx={{
+                  width: 30,
+                  height: 30,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 2,
+                }}
+              >
+                <ChecklistIcon sx={{ fontSize: 17 }} />
+              </IconButton>
+            </Tooltip>
           ) : (
             <Button size="small" onClick={toggleSelectAll} sx={{ fontSize: 12 }}>
               {allSelected ? '取消全选' : '全选'}
             </Button>
           )}
           <Typography sx={{ flex: 1, fontSize: 12, color: 'text.secondary' }}>
-            {batchMode ? (selectedCount > 0 ? `已选 ${selectedCount} 条` : '选择要删除的对话') : '像 ChatGPT 一样常驻'}
+            {batchMode ? (selectedCount > 0 ? `已选 ${selectedCount} 条` : '选择要删除的对话') : ''}
           </Typography>
           {batchMode && selectedCount > 0 && (
             <Button
