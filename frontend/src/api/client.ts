@@ -134,6 +134,10 @@ export interface PublicSettings {
   image_base_url: string
   chat_model: string
   image_model: string
+  chat_models?: string
+  image_models?: string
+  chat_model_candidates?: string[]
+  image_model_candidates?: string[]
   public_base_url: string
 }
 
@@ -614,8 +618,11 @@ export async function testSettings() {
     error?: string
     chat_base_url?: string
     chat_model?: string
+    used_chat_model?: string
+    chat_model_candidates?: string[]
     image_base_url?: string
     image_model?: string
+    image_model_candidates?: string[]
     public_base_url?: string
     image_key_set?: boolean
   }
@@ -637,6 +644,7 @@ export async function testImageSettings(payload?: {
     elapsed_sec: number
     image_base_url?: string
     image_model?: string
+    image_model_candidates?: string[]
     size?: string
     quality?: string
     retry_options?: Array<{ label: string; reason?: string; arguments?: any }>
@@ -701,6 +709,10 @@ export interface MySettings {
   image_base_url: string
   chat_model: string
   image_model: string
+  chat_models?: string
+  image_models?: string
+  chat_model_candidates?: string[]
+  image_model_candidates?: string[]
 }
 
 export async function getMySettings(): Promise<MySettings> {
@@ -718,6 +730,8 @@ export async function updateMySettings(payload: {
   image_base_url?: string
   chat_model?: string
   image_model?: string
+  chat_models?: string
+  image_models?: string
 }): Promise<MySettings> {
   const r = await api.put('/my-settings', payload)
   return r.data

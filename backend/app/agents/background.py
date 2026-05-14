@@ -266,6 +266,8 @@ async def _run_loop(
         trace["model"] = {
             "chat_model": settings.chat_model,
             "image_model": settings.image_model,
+            "chat_model_candidates": settings.chat_model_candidates,
+            "image_model_candidates": settings.image_model_candidates,
             "chat_base_url": settings.effective_chat_base_url,
             "image_base_url": settings.effective_image_base_url,
             "public_base_url": settings.public_base_url.rstrip("/"),
@@ -408,6 +410,8 @@ async def _run_diagnosis_loop(
         trace["model"] = {
             "chat_model": settings.chat_model,
             "image_model": settings.image_model,
+            "chat_model_candidates": settings.chat_model_candidates,
+            "image_model_candidates": settings.image_model_candidates,
             "chat_base_url": settings.effective_chat_base_url,
             "image_base_url": settings.effective_image_base_url,
         }

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import ipaddress
 from pathlib import Path
@@ -88,6 +89,8 @@ _MUTABLE_KEYS = (
     "image_base_url",
     "chat_model",
     "image_model",
+    "chat_models",
+    "image_models",
     # Public origin of this app when deployed, e.g. https://xhs.example.com.
     # If set, /static/images/... can be sent to model providers as absolute
     # URLs instead of being uploaded/inlined.
@@ -98,6 +101,25 @@ _MUTABLE_KEYS = (
 def _mask_key(key: str) -> str:
     k = key or ""
     return (k[:6] + "…" + k[-4:]) if len(k) > 12 else ("已设置" if k else "")
+
+
+def parse_model_candidates(primary: str = "", extra: str = "") -> List[str]:
+    """Return unique model candidates, preserving user order.
+
+    `primary` remains the backward-compatible first choice.  `extra` can be a
+    comma/newline/semicolon separated fallback pool from the settings page.
+    """
+    raw = "\n".join([primary or "", extra or ""])
+    items = [x.strip() for x in re.split(r"[\n,，;；]+", raw) if x.strip()]
+    out: List[str] = []
+    seen = set()
+    for item in items:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
 
 
 class Settings(BaseSettings):
@@ -115,6 +137,8 @@ class Settings(BaseSettings):
     image_base_url: str = ""
     chat_model: str = "gpt-4o"
     image_model: str = "gpt-image-1"
+    chat_models: str = ""
+    image_models: str = ""
     public_base_url: str = ""
 
     database_url: str = f"sqlite+aiosqlite:///{DATA_DIR / 'xhs_agent.db'}"
@@ -143,6 +167,14 @@ class Settings(BaseSettings):
     def effective_image_base_url(self) -> str:
         return self.image_base_url or self.chat_base_url or self.openai_base_url
 
+    @property
+    def chat_model_candidates(self) -> List[str]:
+        return parse_model_candidates(self.chat_model, self.chat_models)
+
+    @property
+    def image_model_candidates(self) -> List[str]:
+        return parse_model_candidates(self.image_model, self.image_models)
+
     def public_dict(self) -> Dict[str, Any]:
         """What we expose via /api/settings. Mask the key."""
         chat_key = self.effective_chat_api_key
@@ -161,6 +193,10 @@ class Settings(BaseSettings):
             "image_base_url": self.effective_image_base_url,
             "chat_model": self.chat_model,
             "image_model": self.image_model,
+            "chat_models": self.chat_models,
+            "image_models": self.image_models,
+            "chat_model_candidates": self.chat_model_candidates,
+            "image_model_candidates": self.image_model_candidates,
             "public_base_url": self.public_base_url.rstrip("/"),
         }
 
@@ -221,8 +257,9 @@ def _load_overlay() -> Dict[str, Any]:
 
 
 def _apply_overlay(settings: Settings, overlay: Dict[str, Any]) -> None:
+    allow_empty = {"public_base_url", "chat_models", "image_models"}
     for k, v in overlay.items():
-        if k in _MUTABLE_KEYS and v is not None and (v != "" or k == "public_base_url"):
+        if k in _MUTABLE_KEYS and v is not None and (v != "" or k in allow_empty):
             setattr(settings, k, v)
 
 
@@ -338,5 +375,10 @@ async def get_effective_settings(user_id: int) -> Settings:
         effective.chat_model = us.chat_model
     if us.image_model:
         effective.image_model = us.image_model
+    # When a user opts into personal model settings, their candidate pools
+    # should not accidentally inherit the admin fallback chain for another
+    # gateway. Empty strings intentionally clear the inherited global pools.
+    effective.chat_models = getattr(us, "chat_models", "") or ""
+    effective.image_models = getattr(us, "image_models", "") or ""
     _normalize_runtime_paths(effective)
     return effective

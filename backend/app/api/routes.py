@@ -1377,8 +1377,11 @@ async def test_settings(user: User = Depends(get_current_user)):
             "reply": content[:80],
             "chat_base_url": effective.effective_chat_base_url,
             "chat_model": effective.chat_model,
+            "used_chat_model": getattr(r, "model", "") or effective.chat_model,
+            "chat_model_candidates": effective.chat_model_candidates,
             "image_base_url": effective.effective_image_base_url,
             "image_model": effective.image_model,
+            "image_model_candidates": effective.image_model_candidates,
             "image_key_set": bool(effective.effective_image_api_key),
             "public_base_url": effective.public_base_url.rstrip("/"),
         }
@@ -1411,6 +1414,7 @@ async def test_image_settings(
             "elapsed_sec": round(elapsed / 1000, 2),
             "image_base_url": effective.effective_image_base_url,
             "image_model": effective.image_model,
+            "image_model_candidates": effective.image_model_candidates,
             "size": payload.size,
             "quality": payload.quality,
         }
@@ -1427,6 +1431,7 @@ async def test_image_settings(
             "elapsed_sec": round(elapsed / 1000, 2),
             "image_base_url": effective.effective_image_base_url,
             "image_model": effective.image_model,
+            "image_model_candidates": effective.image_model_candidates,
             "size": payload.size,
             "quality": payload.quality,
             "retry_options": _image_retry_options(payload.prompt, payload.size, payload.quality, 1),

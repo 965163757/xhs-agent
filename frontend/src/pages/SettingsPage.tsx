@@ -68,6 +68,8 @@ export default function SettingsPage() {
   const [imageBaseUrl, setImageBaseUrl] = useState('')
   const [chatModel, setChatModel] = useState('')
   const [imageModel, setImageModel] = useState('')
+  const [chatModels, setChatModels] = useState('')
+  const [imageModels, setImageModels] = useState('')
   const [publicBaseUrl, setPublicBaseUrl] = useState('')
   const [showChatKey, setShowChatKey] = useState(false)
   const [showImageKey, setShowImageKey] = useState(false)
@@ -79,6 +81,8 @@ export default function SettingsPage() {
   const [myImageBaseUrl, setMyImageBaseUrl] = useState('')
   const [myChatModel, setMyChatModel] = useState('')
   const [myImageModel, setMyImageModel] = useState('')
+  const [myChatModels, setMyChatModels] = useState('')
+  const [myImageModels, setMyImageModels] = useState('')
   const [useOwnKey, setUseOwnKey] = useState(false)
   const [showMyChatKey, setShowMyChatKey] = useState(false)
   const [showMyImageKey, setShowMyImageKey] = useState(false)
@@ -103,6 +107,8 @@ export default function SettingsPage() {
     setImageBaseUrl(cur.image_base_url || cur.chat_base_url || cur.openai_base_url)
     setChatModel(cur.chat_model)
     setImageModel(cur.image_model)
+    setChatModels(cur.chat_models || '')
+    setImageModels(cur.image_models || '')
     setPublicBaseUrl(cur.public_base_url || '')
     getMcpTools().then(setMcpTools).catch(() => setMcpTools([]))
 
@@ -113,6 +119,8 @@ export default function SettingsPage() {
       setMyImageBaseUrl(ms.image_base_url || ms.chat_base_url || ms.openai_base_url)
       setMyChatModel(ms.chat_model)
       setMyImageModel(ms.image_model)
+      setMyChatModels(ms.chat_models || '')
+      setMyImageModels(ms.image_models || '')
     }).catch(() => {})
 
     if (isAdmin) {
@@ -138,6 +146,8 @@ export default function SettingsPage() {
         image_base_url: imageBaseUrl || undefined,
         chat_model: chatModel || undefined,
         image_model: imageModel || undefined,
+        chat_models: chatModels,
+        image_models: imageModels,
         public_base_url: publicBaseUrl.trim(),
       })
       setS(next)
@@ -178,6 +188,8 @@ export default function SettingsPage() {
         image_base_url: myImageBaseUrl || undefined,
         chat_model: myChatModel || undefined,
         image_model: myImageModel || undefined,
+        chat_models: myChatModels,
+        image_models: myImageModels,
       })
       setMy(next)
       setMyChatKey('')
@@ -237,7 +249,7 @@ export default function SettingsPage() {
     setMsg({ kind: 'info', text: '正在测试连接...' })
     try {
       const r = await testSettings()
-      if (r.ok) setMsg({ kind: 'success', text: `文本连接正常：${r.reply || ''}；生图配置：${r.image_model || '-'} @ ${r.image_base_url || '-'}；公网地址：${r.public_base_url || '未配置'}` })
+      if (r.ok) setMsg({ kind: 'success', text: `文本连接正常：${r.reply || ''}；实际模型 ${r.used_chat_model || r.chat_model || '-'}；对话候选 ${r.chat_model_candidates?.length || 1} 个；生图候选 ${r.image_model_candidates?.length || 1} 个；生图配置：${r.image_model || '-'} @ ${r.image_base_url || '-'}；公网地址：${r.public_base_url || '未配置'}` })
       else setMsg({ kind: 'error', text: `连接失败：${r.error || ''}` })
     } finally {
       setBusy(false)
@@ -281,7 +293,7 @@ export default function SettingsPage() {
       setMsg({
         kind: r.ok ? 'success' : 'error',
         text: r.ok
-          ? `生图模型可用：${r.image_model || '-'}，用时 ${r.elapsed_sec}s`
+          ? `生图模型可用：${r.image_model || '-'}，候选 ${r.image_model_candidates?.length || 1} 个，用时 ${r.elapsed_sec}s`
           : `生图测试失败：${r.error || '未知错误'}${r.timeout ? '（疑似超时）' : ''}`,
       })
     } catch (e: any) {
@@ -373,6 +385,16 @@ export default function SettingsPage() {
                 value={myChatModel}
                 onChange={e => setMyChatModel(e.target.value)}
               />
+              <TextField
+                label="对话候选模型 / 兜底模型"
+                placeholder={'每行一个，失败时按顺序切换，例如：\ngpt-5.4\ngpt-4.1'}
+                fullWidth
+                multiline
+                minRows={2}
+                value={myChatModels}
+                onChange={e => setMyChatModels(e.target.value)}
+                helperText="会和上面的主模型自动去重；主模型优先，后面的模型作为失败兜底。"
+              />
 
               <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
                 生图模型
@@ -407,6 +429,16 @@ export default function SettingsPage() {
                 fullWidth
                 value={myImageModel}
                 onChange={e => setMyImageModel(e.target.value)}
+              />
+              <TextField
+                label="生图候选模型 / 兜底模型"
+                placeholder={'每行一个，失败时按顺序切换，例如：\ngpt-image-2\ngpt-image-1'}
+                fullWidth
+                multiline
+                minRows={2}
+                value={myImageModels}
+                onChange={e => setMyImageModels(e.target.value)}
+                helperText="生成图片、图片编辑都会使用这个兜底顺序。"
               />
             </Stack>
           )}
@@ -502,6 +534,8 @@ export default function SettingsPage() {
               />
               <Chip size="small" label={`对话 ${s.chat_model}`} />
               <Chip size="small" label={`图片 ${s.image_model}`} />
+              <Chip size="small" label={`对话候选 ${s.chat_model_candidates?.length || 1}`} />
+              <Chip size="small" label={`生图候选 ${s.image_model_candidates?.length || 1}`} />
               <Chip
                 size="small"
                 label={`公网地址 ${s.public_base_url || '未配置'}`}
@@ -547,6 +581,16 @@ export default function SettingsPage() {
                 value={chatModel}
                 onChange={e => setChatModel(e.target.value)}
               />
+              <TextField
+                label="对话候选模型 / 兜底模型"
+                placeholder={'每行一个，失败时按顺序切换，例如：\ngpt-5.4\ngpt-4.1\ngpt-4o'}
+                fullWidth
+                multiline
+                minRows={2}
+                value={chatModels}
+                onChange={e => setChatModels(e.target.value)}
+                helperText="主模型优先；候选模型会自动去重。文本对话、Agent 工具调用失败时会依次兜底。"
+              />
 
               <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
                 生图模型
@@ -580,6 +624,16 @@ export default function SettingsPage() {
                 fullWidth
                 value={imageModel}
                 onChange={e => setImageModel(e.target.value)}
+              />
+              <TextField
+                label="生图候选模型 / 兜底模型"
+                placeholder={'每行一个，失败时按顺序切换，例如：\ngpt-image-2\ngpt-image-1'}
+                fullWidth
+                multiline
+                minRows={2}
+                value={imageModels}
+                onChange={e => setImageModels(e.target.value)}
+                helperText="生成图片和编辑图片共用该兜底顺序；如果第一个模型超时/报错，会自动尝试后续模型。"
               />
 
               <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
@@ -700,6 +754,7 @@ export default function SettingsPage() {
                       <Chip size="small" label={`${imageTest.elapsed_sec || 0}s`} sx={{ height: 22, fontSize: 11 }} />
                       {imageTest.timeout && <Chip size="small" color="warning" label="超时" sx={{ height: 22, fontSize: 11 }} />}
                       {imageTest.image_model && <Chip size="small" label={imageTest.image_model} sx={{ height: 22, fontSize: 11 }} />}
+                      <Chip size="small" label={`候选 ${imageTest.image_model_candidates?.length || 1}`} sx={{ height: 22, fontSize: 11 }} />
                       {imageTest.size && <Chip size="small" label={imageTest.size} sx={{ height: 22, fontSize: 11 }} />}
                       {imageTest.quality && <Chip size="small" label={`quality=${imageTest.quality}`} sx={{ height: 22, fontSize: 11 }} />}
                     </Stack>

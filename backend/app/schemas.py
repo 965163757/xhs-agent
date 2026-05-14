@@ -322,6 +322,8 @@ class SettingsUpdate(BaseModel):
     image_base_url: Optional[str] = None
     chat_model: Optional[str] = None
     image_model: Optional[str] = None
+    chat_models: Optional[str] = None
+    image_models: Optional[str] = None
     public_base_url: Optional[str] = None
 
     @field_validator("public_base_url")

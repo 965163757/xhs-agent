@@ -93,6 +93,8 @@ async def get_my_settings(user: User = Depends(get_current_user)):
             "image_base_url": "",
             "chat_model": "",
             "image_model": "",
+            "chat_models": "",
+            "image_models": "",
         }
     return us.to_dict()
 
@@ -107,6 +109,8 @@ class MySettingsUpdate(BaseModel):
     image_base_url: Optional[str] = None
     chat_model: Optional[str] = None
     image_model: Optional[str] = None
+    chat_models: Optional[str] = None
+    image_models: Optional[str] = None
 
 
 @router.put("/my-settings")
