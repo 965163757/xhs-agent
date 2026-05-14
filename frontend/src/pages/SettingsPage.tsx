@@ -106,8 +106,10 @@ function serializeModelPool(rows: ModelPoolRow[]) {
     base_url: r.base_url.trim(),
     api_key: r.api_key.trim(),
   }))
-  const hasData = normalized.some(r => r.model || r.base_url || r.api_key)
-  if (!hasData && normalized.length <= 1) return ''
+  // Keep intentionally added blank rows so “添加模型” gives immediate visual
+  // feedback and the user can fill the row next. Empty fallback rows can still
+  // be removed with the row delete button.
+  if (normalized.length === 0) return ''
   return JSON.stringify(normalized, null, 2)
 }
 
