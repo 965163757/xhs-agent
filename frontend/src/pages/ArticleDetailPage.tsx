@@ -1121,6 +1121,28 @@ export default function ArticleDetailPage() {
               }}
             >
               <Stack direction="row" alignItems="center" spacing={1} sx={{ ...sectionHeaderSx, flexWrap: 'wrap', gap: 0.6 }}>
+                <Button
+                  size="small"
+                  variant={showVersions ? 'contained' : 'text'}
+                  onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}
+                  sx={{
+                    minHeight: 24,
+                    height: 24,
+                    px: 0.8,
+                    borderRadius: 1,
+                    fontSize: 11,
+                    fontWeight: 800,
+                    boxShadow: 'none',
+                    color: showVersions ? '#fff' : '#64748B',
+                    bgcolor: showVersions ? '#334155' : 'rgba(15,23,42,0.04)',
+                    '&:hover': {
+                      bgcolor: showVersions ? '#1E293B' : 'rgba(15,23,42,0.08)',
+                      boxShadow: 'none',
+                    },
+                  }}
+                >
+                  版本{versions.length > 0 ? ` ${versions.length}` : ''}
+                </Button>
                 <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
                   内容
                 </Typography>
@@ -1159,6 +1181,35 @@ export default function ArticleDetailPage() {
                   }}
                 />
               </Stack>
+              {showVersions && (
+                <Stack
+                  spacing={0.7}
+                  sx={{
+                    ...sectionBodySx,
+                    py: 0.65,
+                    bgcolor: 'rgba(248,250,252,0.9)',
+                    borderBottom: '1px solid rgba(15,23,42,0.08)',
+                  }}
+                >
+                  {versions.length === 0 && (
+                    <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>暂无版本记录（改写/优化时自动保存）</Typography>
+                  )}
+                  {versions.map(v => (
+                    <Stack key={v.id} direction="row" alignItems="center" spacing={1} sx={{ p: 0.75, borderRadius: 1, bgcolor: '#fff', border: '1px solid rgba(15,23,42,0.06)' }}>
+                      <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>v{v.version}</Typography>
+                      <Typography sx={{ fontSize: 11, color: 'text.secondary', flex: 1 }} noWrap>
+                        {v.title || '(无标题)'} · {v.trigger}
+                      </Typography>
+                      <Typography sx={{ fontSize: 10, color: 'text.secondary' }}>
+                        {formatBeijingDateTime(v.created_at, { year: undefined, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: undefined })}
+                      </Typography>
+                      <Button size="small" onClick={() => handleRollback(v.id)} sx={{ fontSize: 11, minWidth: 0, px: 1 }}>
+                        回滚
+                      </Button>
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
               <Box sx={{ ...sectionBodySx, py: 0.7 }}>
                 <TextField
                   placeholder="输入一个抓人的小红书标题"
@@ -1192,26 +1243,17 @@ export default function ArticleDetailPage() {
                   }}
                   sx={textFieldSx}
                 />
-              </Box>
-            </Box>
-            <Box
-              sx={{
-                order: 4,
-                ...sectionCardSx,
-              }}
-            >
-              <Stack direction="row" alignItems="center" spacing={1} sx={sectionHeaderSx}>
-                <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
-                  标签
-                </Typography>
-                <Box sx={{ flex: 1 }} />
-                <Chip
-                  size="small"
-                  label={`${(art.tags || []).length} 个`}
-                  sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: '#F1F5F9', color: '#64748B' }}
-                />
-              </Stack>
-              <Box sx={sectionBodySx}>
+                <Divider sx={{ my: 0.8, borderColor: 'rgba(15,23,42,0.08)' }} />
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.65 }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                    标签
+                  </Typography>
+                  <Chip
+                    size="small"
+                    label={`${(art.tags || []).length} 个`}
+                    sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: '#F1F5F9', color: '#64748B' }}
+                  />
+                </Stack>
                 <TagInput
                   tags={art.tags || []}
                   onChange={tags => setArt({ ...art, tags })}
@@ -1387,41 +1429,6 @@ export default function ArticleDetailPage() {
                     </Typography>
                   )}
                 </Box>
-              )}
-            </Box>
-
-            {/* version history */}
-            <Box sx={{ order: 6, ...sectionCardSx }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ ...sectionHeaderSx, cursor: 'pointer' }} onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}>
-                <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
-                  版本历史
-                </Typography>
-                {versions.length > 0 && (
-                  <Chip size="small" label={`${versions.length} 个版本`} sx={{ fontSize: 10.5, height: 20, fontWeight: 700, bgcolor: '#F1F5F9', color: '#64748B' }} />
-                )}
-                <Box flex={1} />
-                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{showVersions ? '收起' : '展开'}</Typography>
-              </Stack>
-              {showVersions && (
-                <Stack spacing={0.75} sx={sectionBodySx}>
-                  {versions.length === 0 && (
-                    <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>暂无版本记录（改写/优化时自动保存）</Typography>
-                  )}
-                  {versions.map(v => (
-                    <Stack key={v.id} direction="row" alignItems="center" spacing={1} sx={{ p: 1, borderRadius: 1, bgcolor: 'background.default' }}>
-                      <Typography sx={{ fontSize: 12, fontWeight: 600 }}>v{v.version}</Typography>
-                      <Typography sx={{ fontSize: 11, color: 'text.secondary', flex: 1 }} noWrap>
-                        {v.title || '(无标题)'} · {v.trigger}
-                      </Typography>
-                      <Typography sx={{ fontSize: 10, color: 'text.secondary' }}>
-                        {formatBeijingDateTime(v.created_at, { year: undefined, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: undefined })}
-                      </Typography>
-                      <Button size="small" onClick={() => handleRollback(v.id)} sx={{ fontSize: 11, minWidth: 0, px: 1 }}>
-                        回滚
-                      </Button>
-                    </Stack>
-                  ))}
-                </Stack>
               )}
             </Box>
           </Stack>
