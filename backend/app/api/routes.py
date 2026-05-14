@@ -22,7 +22,13 @@ from ..agents.tools import (
     openai_tool_schemas,
 )
 from ..auth import get_current_user, require_admin
-from ..config import get_settings, update_settings
+from ..config import (
+    get_effective_settings,
+    get_settings,
+    infer_public_base_url,
+    update_settings,
+    with_public_base_url_if_missing,
+)
 from ..database import Article, ArticleDiagnosis, ArticleVersion, Conversation, SessionLocal, Task, Template, User, UserMemory
 from ..schemas import (
     ApplyTemplateRequest,
@@ -70,10 +76,19 @@ IMAGE_FORMAT_TO_EXT = {
 }
 
 
-async def _call_user_tool(name: str, arguments: Dict[str, Any], user: User) -> Dict[str, Any]:
+async def _call_user_tool(
+    name: str,
+    arguments: Dict[str, Any],
+    user: User,
+    request: Request | None = None,
+) -> Dict[str, Any]:
     """Call a registered tool with the authenticated user's context/settings."""
     try:
-        return await call_tool_for_user(name, arguments, user.id)
+        settings = None
+        if request is not None:
+            effective = await get_effective_settings(user.id)
+            settings = with_public_base_url_if_missing(effective, str(request.base_url))
+        return await call_tool_for_user(name, arguments, user.id, settings=settings)
     except Exception as e:
         return {"ok": False, "error": str(e), "tool": name}
 
@@ -162,7 +177,7 @@ async def _snapshot_article_version(
 # ---------- chat ----------
 
 @router.post("/chat/stream")
-async def chat_stream(req: ChatRequest, user: User = Depends(get_current_user)):
+async def chat_stream(req: ChatRequest, request: Request, user: User = Depends(get_current_user)):
     if req.conversation_id:
         async with SessionLocal() as s:
             conv = await s.get(Conversation, req.conversation_id)
@@ -176,7 +191,12 @@ async def chat_stream(req: ChatRequest, user: User = Depends(get_current_user)):
         )
 
     try:
-        task_id = await spawn_agent_task(messages, conversation_id=req.conversation_id, user_id=user.id)
+        task_id = await spawn_agent_task(
+            messages,
+            conversation_id=req.conversation_id,
+            user_id=user.id,
+            request_public_base_url=infer_public_base_url(str(request.base_url)),
+        )
     except RuntimeError as e:
         raise HTTPException(429, str(e))
 
@@ -434,23 +454,23 @@ async def api_arrange_images(payload: ArticleImageArrangeRequest, user: User = D
 # ---------- image editing ----------
 
 @router.post("/images/crop")
-async def api_crop(payload: CropImageRequest, user: User = Depends(get_current_user)):
-    return await _call_user_tool("crop_image", payload.model_dump(), user)
+async def api_crop(payload: CropImageRequest, request: Request, user: User = Depends(get_current_user)):
+    return await _call_user_tool("crop_image", payload.model_dump(), user, request)
 
 
 @router.post("/images/inpaint")
-async def api_inpaint(payload: InpaintRequest, user: User = Depends(get_current_user)):
-    return await _call_user_tool("inpaint_image", payload.model_dump(), user)
+async def api_inpaint(payload: InpaintRequest, request: Request, user: User = Depends(get_current_user)):
+    return await _call_user_tool("inpaint_image", payload.model_dump(), user, request)
 
 
 @router.post("/images/remove_object")
-async def api_remove_object(payload: RemoveObjectRequest, user: User = Depends(get_current_user)):
-    return await _call_user_tool("remove_object", payload.model_dump(), user)
+async def api_remove_object(payload: RemoveObjectRequest, request: Request, user: User = Depends(get_current_user)):
+    return await _call_user_tool("remove_object", payload.model_dump(), user, request)
 
 
 @router.post("/images/edit")
-async def api_edit_image(payload: EditImageRequest, user: User = Depends(get_current_user)):
-    return await _call_user_tool("edit_image", payload.model_dump(), user)
+async def api_edit_image(payload: EditImageRequest, request: Request, user: User = Depends(get_current_user)):
+    return await _call_user_tool("edit_image", payload.model_dump(), user, request)
 
 
 @router.post("/images/upload_mask")
@@ -467,9 +487,8 @@ async def upload_mask(file: UploadFile = File(...), user: User = Depends(get_cur
 
 
 @router.post("/images/generate")
-async def api_image(payload: ImageGenRequest, user: User = Depends(get_current_user)):
-    from ..config import get_effective_settings
-    effective = await get_effective_settings(user.id)
+async def api_image(payload: ImageGenRequest, request: Request, user: User = Depends(get_current_user)):
+    effective = with_public_base_url_if_missing(await get_effective_settings(user.id), str(request.base_url))
     start = time.perf_counter()
     try:
         urls = await generate_image(
@@ -560,7 +579,6 @@ async def delete_template(tid: int, user: User = Depends(get_current_user)):
 @router.post("/templates/extract")
 async def extract_template(payload: ExtractTemplateRequest, user: User = Depends(get_current_user)):
     """Use LLM to extract a reusable template structure from an existing article."""
-    from ..config import get_effective_settings
     from ..services.llm import chat_completion
     effective = await get_effective_settings(user.id)
     async with SessionLocal() as s:
@@ -919,7 +937,6 @@ async def put_settings(payload: SettingsUpdate, user: User = Depends(require_adm
 async def test_settings(user: User = Depends(get_current_user)):
     """Quick connectivity test against the currently saved config."""
     from ..services.llm import chat_completion
-    from ..config import get_effective_settings
     effective = await get_effective_settings(user.id)
     try:
         r = await chat_completion(
@@ -948,7 +965,6 @@ async def test_image_settings(
     user: User = Depends(get_current_user),
 ):
     """Real image-model smoke test using the currently effective image config."""
-    from ..config import get_effective_settings
     effective = await get_effective_settings(user.id)
     start = time.perf_counter()
     try:
@@ -998,7 +1014,6 @@ async def test_static_image_public_access(
 ):
     """Create a tiny static image and verify /static/images/... is reachable via a public URL."""
     import httpx
-    from ..config import get_effective_settings
 
     effective = await get_effective_settings(user.id)
     image_dir = Path(effective.image_dir)
@@ -1083,7 +1098,6 @@ async def api_calendar(user: User = Depends(get_current_user)):
 
 @router.get("/meta")
 async def meta(user: User = Depends(get_current_user)):
-    from ..config import get_effective_settings
     s = await get_effective_settings(user.id)
     return {
         "chat_model": s.chat_model,

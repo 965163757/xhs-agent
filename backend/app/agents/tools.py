@@ -21,6 +21,7 @@ from ..services.llm import (
     crop_image,
     edit_image,
     generate_image,
+    get_current_settings,
     reset_current_settings,
     set_current_settings,
 )
@@ -93,6 +94,15 @@ def _safe_int(value: Any, default: int, *, min_value: Optional[int] = None, max_
     if max_value is not None:
         out = min(max_value, out)
     return out
+
+
+def _optional_article_id(value: Any) -> Optional[int]:
+    """Treat 0/empty/non-numeric article ids as intentionally unbound."""
+    try:
+        out = int(value)
+    except Exception:
+        return None
+    return out if out > 0 else None
 
 
 def _is_timeout_error(exc: BaseException) -> bool:
@@ -306,7 +316,8 @@ def _safe_json(text: str) -> Dict[str, Any]:
 
 
 def _configured_public_base_url() -> str:
-    base = (getattr(get_settings(), "public_base_url", "") or "").strip().rstrip("/")
+    settings = get_current_settings() or get_settings()
+    base = (getattr(settings, "public_base_url", "") or "").strip().rstrip("/")
     if not base:
         return ""
     try:
@@ -2610,13 +2621,14 @@ async def tool_crop_image(args: Dict[str, Any]) -> Dict[str, Any]:
     if w <= 0 or h <= 0:
         return {"ok": False, "error": "w/h must be > 0"}
     op_start = time.perf_counter()
-    access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
+    article_id = _optional_article_id(args.get("article_id"))
+    access_err = await _ensure_article_image_access(article_id, image_url)
     if access_err:
         return access_err
     new_url = crop_image(image_url, x, y, w, h)
     bind_err = await _bind_image_to_article(
         new_url,
-        args.get("article_id"),
+        article_id,
         args.get("role", "content"),
         args.get("replace_index"),
     )
@@ -2636,7 +2648,8 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
     size = args.get("size", "1024x1024")
     quality = args.get("quality", "high")
     op_start = time.perf_counter()
-    access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
+    article_id = _optional_article_id(args.get("article_id"))
+    access_err = await _ensure_article_image_access(article_id, image_url)
     if access_err:
         return access_err
     try:
@@ -2660,7 +2673,7 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "no image returned"}
     bind_err = await _bind_image_to_article(
         urls[0],
-        args.get("article_id"),
+        article_id,
         args.get("role", "content"),
         args.get("replace_index"),
     )
@@ -2683,7 +2696,8 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
     size = args.get("size", "1024x1024")
     quality = args.get("quality", "high")
     op_start = time.perf_counter()
-    access_err = await _ensure_article_image_access(args.get("article_id"), image_url)
+    article_id = _optional_article_id(args.get("article_id"))
+    access_err = await _ensure_article_image_access(article_id, image_url)
     if access_err:
         return access_err
     try:
@@ -2707,7 +2721,7 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "no image returned"}
     bind_err = await _bind_image_to_article(
         urls[0],
-        args.get("article_id"),
+        article_id,
         args.get("role", "content"),
         args.get("replace_index"),
     )
@@ -2728,7 +2742,9 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
     op_start = time.perf_counter()
     # source_article_id lets Agent imitate an image from one note and bind the
     # edited/variant result to another note.  article_id remains the write target.
-    access_err = await _ensure_article_image_access(args.get("source_article_id") or args.get("article_id"), image_url)
+    article_id = _optional_article_id(args.get("article_id"))
+    source_article_id = _optional_article_id(args.get("source_article_id")) or article_id
+    access_err = await _ensure_article_image_access(source_article_id, image_url)
     if access_err:
         return access_err
     try:
@@ -2752,7 +2768,7 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "no image returned"}
     bind_err = await _bind_image_to_article(
         urls[0],
-        args.get("article_id"),
+        article_id,
         args.get("role", "content"),
         args.get("replace_index"),
     )
@@ -3267,7 +3283,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_inpaint_image,
         "schema": _fn_schema(
             "inpaint_image",
-            "局部重绘：在 mask 透明区域按 prompt 生成新内容。mask 是与原图等尺寸的 PNG，透明像素即可编辑区域。",
+            "局部重绘：在 mask 透明区域按 prompt 生成新内容。必须提供 mask_url；没有蒙版时先让用户上传/涂抹，不要强行调用。article_id/source ID 只能传真实笔记 ID，独立编辑不要传 0。",
             {
                 "image_url": {"type": "string"},
                 "mask_url": {"type": "string"},
@@ -3278,7 +3294,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                     "enum": ["high", "medium", "low", "auto"],
                     "description": "生成质量，默认 high（最高）",
                 },
-                "article_id": {"type": "integer"},
+                "article_id": {"type": "integer", "description": "可选真实笔记 ID；独立图片编辑不要传 0/空值"},
                 "role": {"type": "string", "enum": ["cover", "content"]},
                 "replace_index": {"type": "integer"},
             },
@@ -3289,7 +3305,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_remove_object,
         "schema": _fn_schema(
             "remove_object",
-            "消除：在 mask 透明区域自动填充和周围环境一致的内容，用来擦除物体/水印/路人。",
+            "消除：在 mask 透明区域自动填充和周围环境一致的内容，用来擦除物体/水印/路人。必须提供 mask_url；没有蒙版时先让用户上传/涂抹，不要强行调用。",
             {
                 "image_url": {"type": "string"},
                 "mask_url": {"type": "string"},
@@ -3300,7 +3316,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                     "enum": ["high", "medium", "low", "auto"],
                     "description": "生成质量，默认 high（最高）",
                 },
-                "article_id": {"type": "integer"},
+                "article_id": {"type": "integer", "description": "可选真实笔记 ID；独立图片编辑不要传 0/空值"},
                 "role": {"type": "string", "enum": ["cover", "content"]},
                 "replace_index": {"type": "integer"},
             },
@@ -3311,7 +3327,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_edit_image,
         "schema": _fn_schema(
             "edit_image",
-            "整图风格化编辑（不带 mask）。可用 source_article_id 指明原图归属，再把结果绑定到另一个 article_id。",
+            "整图风格化编辑（不带 mask），用于同风格变体、清晰度增强、改色调、整体风格调整。可用 source_article_id 指明原图归属，再把结果绑定到另一个真实 article_id；独立编辑不要传 article_id=0。",
             {
                 "image_url": {"type": "string"},
                 "prompt": {"type": "string"},
@@ -3321,8 +3337,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                     "enum": ["high", "medium", "low", "auto"],
                     "description": "生成质量，默认 high（最高）",
                 },
-                "source_article_id": {"type": "integer", "description": "原图所属笔记 ID；用于跨笔记仿图/改图权限校验"},
-                "article_id": {"type": "integer"},
+                "source_article_id": {"type": "integer", "description": "原图所属真实笔记 ID；用于跨笔记仿图/改图权限校验，独立图片可不传"},
+                "article_id": {"type": "integer", "description": "写回目标真实笔记 ID；独立图片编辑不要传 0/空值"},
                 "role": {"type": "string", "enum": ["cover", "content"]},
                 "replace_index": {"type": "integer"},
             },
@@ -3459,6 +3475,7 @@ async def call_tool_for_user(
     name: str,
     args: Dict[str, Any],
     user_id: Optional[int],
+    settings: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Call a tool with user ownership and per-user LLM settings bound.
 
@@ -3468,7 +3485,7 @@ async def call_tool_for_user(
     """
     from ..config import get_effective_settings
 
-    settings = await get_effective_settings(user_id) if user_id else None
+    settings = settings if settings is not None else (await get_effective_settings(user_id) if user_id else None)
     user_token = set_tool_user_id(user_id)
     settings_token = set_current_settings(settings)
     try:

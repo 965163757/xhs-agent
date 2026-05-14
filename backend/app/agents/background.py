@@ -127,6 +127,7 @@ async def spawn_agent_task(
     messages: List[Dict[str, Any]],
     conversation_id: Optional[int] = None,
     user_id: Optional[int] = None,
+    request_public_base_url: str = "",
 ) -> str:
     """Create a Task row and spawn the agent loop in the background. Returns task_id."""
     if user_id is not None and _running_count_for_user(user_id) >= MAX_RUNNING_TASKS_PER_USER:
@@ -157,7 +158,17 @@ async def spawn_agent_task(
     _running[task_id] = True
     _task_users[task_id] = user_id
 
-    task = asyncio.create_task(_run_loop(task_id, messages, conversation_id, user_id, stream, trace))
+    task = asyncio.create_task(
+        _run_loop(
+            task_id,
+            messages,
+            conversation_id,
+            user_id,
+            stream,
+            trace,
+            request_public_base_url=request_public_base_url,
+        )
+    )
     _task_handles[task_id] = task
     return task_id
 
@@ -238,21 +249,27 @@ async def _run_loop(
     user_id: Optional[int],
     stream: TaskStream,
     trace: Dict[str, Any],
+    *,
+    request_public_base_url: str = "",
 ):
     """Execute the agent stream, pushing events to the broadcast stream."""
-    from ..config import get_effective_settings
+    from ..config import get_effective_settings, with_public_base_url_if_missing
     from ..services.llm import reset_current_settings, set_current_settings
     from .tools import reset_tool_user_id, set_tool_user_id
 
     settings = None
     if user_id:
         settings = await get_effective_settings(user_id)
+    if settings and request_public_base_url:
+        settings = with_public_base_url_if_missing(settings, request_public_base_url)
     if settings:
         trace["model"] = {
             "chat_model": settings.chat_model,
             "image_model": settings.image_model,
             "chat_base_url": settings.effective_chat_base_url,
             "image_base_url": settings.effective_image_base_url,
+            "public_base_url": settings.public_base_url.rstrip("/"),
+            "public_base_url_inferred": bool(request_public_base_url and settings.public_base_url.rstrip("/") == request_public_base_url.rstrip("/")),
         }
 
     runtime_messages = await _with_user_memory(user_id, messages)

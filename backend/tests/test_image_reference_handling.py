@@ -26,6 +26,55 @@ class _FakeClient:
         self.images = _FakeImages()
 
 
+class _QualityRejectingImages:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def edit(self, **kwargs):
+        self.calls.append(kwargs)
+        if "quality" in kwargs:
+            raise TypeError("AsyncImages.edit() got an unexpected keyword argument 'quality'")
+        return type("Resp", (), {"data": [{"b64_json": TINY_IMAGE_B64}]})()
+
+
+class _QualityRejectingClient:
+    def __init__(self) -> None:
+        self.images = _QualityRejectingImages()
+
+
+class _EmptyEditImages:
+    async def edit(self, **_kwargs):
+        return type(
+            "Resp",
+            (),
+            {
+                "data": None,
+                "model_dump": lambda self: {
+                    "created": None,
+                    "data": None,
+                    "error": {
+                        "message": "upstream did not return any image output",
+                        "type": "upstream_error",
+                    },
+                },
+            },
+        )()
+
+
+class _EmptyEditClient:
+    def __init__(self) -> None:
+        self.images = _EmptyEditImages()
+
+class _FailIfCalledImages:
+    async def edit(self, **_kwargs):
+        raise AssertionError("SDK should have been skipped")
+
+
+class _FailIfCalledClient:
+    def __init__(self) -> None:
+        self.images = _FailIfCalledImages()
+
+
 class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
     async def test_public_app_static_url_can_fallback_to_local_upload(self):
         with tempfile.TemporaryDirectory() as image_dir:
@@ -35,7 +84,7 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
                 image_dir=image_dir,
                 public_base_url="https://xhs.example.com/app",
                 image_api_key="test-key",
-                image_base_url="https://image-gateway.invalid/v1",
+                image_base_url="https://api.openai.com/v1",
             )
             own_public_url = "https://xhs.example.com/app/static/images/ref.png"
 
@@ -75,6 +124,195 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
             uploaded = fake_client.images.last_edit_kwargs["image"]
             self.assertEqual(uploaded[0], "ref.png")
             self.assertEqual(uploaded[2], "image/png")
+
+    async def test_sdk_edit_retries_without_quality_when_sdk_does_not_support_it(self):
+        with tempfile.TemporaryDirectory() as image_dir:
+            ref_path = Path(image_dir) / "ref.png"
+            ref_path.write_bytes(TINY_IMAGE_BYTES)
+            settings = Settings(
+                image_dir=image_dir,
+                image_api_key="test-key",
+                image_base_url="https://api.openai.com/v1",
+            )
+            fake_client = _QualityRejectingClient()
+            orig_get_settings = llm.get_settings
+            orig_get_client = llm.get_client
+            try:
+                llm.get_settings = lambda: settings
+                llm.get_client = lambda _settings=None, kind="chat": fake_client
+                saved = await llm.edit_image(
+                    image_url="/static/images/ref.png",
+                    mask_url=None,
+                    prompt="整体风格化",
+                    size="1024x1024",
+                    n=1,
+                    quality="high",
+                    settings=settings,
+                )
+            finally:
+                llm.get_settings = orig_get_settings
+                llm.get_client = orig_get_client
+
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(len(fake_client.images.calls), 2)
+            self.assertIn("quality", fake_client.images.calls[0])
+            self.assertNotIn("quality", fake_client.images.calls[1])
+
+    async def test_sdk_mask_edit_retries_without_quality_when_sdk_does_not_support_it(self):
+        with tempfile.TemporaryDirectory() as image_dir:
+            (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)
+            (Path(image_dir) / "mask.png").write_bytes(TINY_IMAGE_BYTES)
+            settings = Settings(
+                image_dir=image_dir,
+                image_api_key="test-key",
+                image_base_url="https://api.openai.com/v1",
+            )
+            fake_client = _QualityRejectingClient()
+            orig_get_settings = llm.get_settings
+            orig_get_client = llm.get_client
+            try:
+                llm.get_settings = lambda: settings
+                llm.get_client = lambda _settings=None, kind="chat": fake_client
+                saved = await llm.edit_image(
+                    image_url="/static/images/ref.png",
+                    mask_url="/static/images/mask.png",
+                    prompt="局部重绘",
+                    size="1024x1024",
+                    n=1,
+                    quality="high",
+                    settings=settings,
+                )
+            finally:
+                llm.get_settings = orig_get_settings
+                llm.get_client = orig_get_client
+
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(len(fake_client.images.calls), 2)
+            self.assertIn("mask", fake_client.images.calls[1])
+            self.assertNotIn("quality", fake_client.images.calls[1])
+
+    async def test_sdk_edit_empty_data_falls_back_to_raw_multipart(self):
+        with tempfile.TemporaryDirectory() as image_dir:
+            (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)
+            settings = Settings(
+                image_dir=image_dir,
+                image_api_key="test-key",
+                image_base_url="https://api.openai.com/v1",
+                public_base_url="",
+            )
+
+            async def raw_multipart_success(**_kwargs):
+                return ["/static/images/fallback.png"]
+
+            orig_get_settings = llm.get_settings
+            orig_get_client = llm.get_client
+            orig_multipart = llm._edit_image_multipart_raw_http
+            try:
+                llm.get_settings = lambda: settings
+                llm.get_client = lambda _settings=None, kind="chat": _EmptyEditClient()
+                llm._edit_image_multipart_raw_http = raw_multipart_success
+                saved = await llm.edit_image(
+                    image_url="/static/images/ref.png",
+                    mask_url=None,
+                    prompt="整体风格化",
+                    size="1024x1024",
+                    n=1,
+                    quality="high",
+                    settings=settings,
+                )
+            finally:
+                llm.get_settings = orig_get_settings
+                llm.get_client = orig_get_client
+                llm._edit_image_multipart_raw_http = orig_multipart
+
+            self.assertEqual(saved, ["/static/images/fallback.png"])
+
+    async def test_sdk_edit_empty_data_reports_gateway_error_instead_of_typeerror(self):
+        with tempfile.TemporaryDirectory() as image_dir:
+            (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)
+            settings = Settings(
+                image_dir=image_dir,
+                image_api_key="test-key",
+                image_base_url="https://api.openai.com/v1",
+                public_base_url="",
+            )
+
+            async def fail_multipart(**_kwargs):
+                raise RuntimeError("multipart rejected")
+
+            async def fail_data_url(**_kwargs):
+                raise RuntimeError("data-url rejected")
+
+            orig_get_settings = llm.get_settings
+            orig_get_client = llm.get_client
+            orig_multipart = llm._edit_image_multipart_raw_http
+            orig_url_native = llm._edit_image_url_raw_http
+            try:
+                llm.get_settings = lambda: settings
+                llm.get_client = lambda _settings=None, kind="chat": _EmptyEditClient()
+                llm._edit_image_multipart_raw_http = fail_multipart
+                llm._edit_image_url_raw_http = fail_data_url
+                with self.assertRaisesRegex(RuntimeError, "upstream did not return any image output"):
+                    await llm.edit_image(
+                        image_url="/static/images/ref.png",
+                        mask_url=None,
+                        prompt="整体风格化",
+                        size="1024x1024",
+                        n=1,
+                        quality="high",
+                        settings=settings,
+                    )
+            finally:
+                llm.get_settings = orig_get_settings
+                llm.get_client = orig_get_client
+                llm._edit_image_multipart_raw_http = orig_multipart
+                llm._edit_image_url_raw_http = orig_url_native
+
+    def test_extract_image_items_supports_gateway_image_string_wrappers(self):
+        items = llm._extract_image_items({"output": [{"image": f"data:image/png;base64,{TINY_IMAGE_B64}"}]})
+        self.assertEqual(len(items), 1)
+        self.assertTrue(items[0]["b64_json"].startswith("data:image/png;base64,"))
+
+    async def test_custom_gateway_http_rejection_skips_slow_sdk_upload(self):
+        with tempfile.TemporaryDirectory() as image_dir:
+            (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)
+            settings = Settings(
+                image_dir=image_dir,
+                image_api_key="test-key",
+                image_base_url="https://image-gateway.invalid/v1",
+                public_base_url="",
+            )
+
+            async def reject_multipart(**_kwargs):
+                raise RuntimeError("HTTP 500: gateway rejected multipart")
+
+            async def reject_data_url(**_kwargs):
+                raise RuntimeError("HTTP 503: gateway rejected data-url")
+
+            orig_get_settings = llm.get_settings
+            orig_get_client = llm.get_client
+            orig_multipart = llm._edit_image_multipart_raw_http
+            orig_url_native = llm._edit_image_url_raw_http
+            try:
+                llm.get_settings = lambda: settings
+                llm.get_client = lambda _settings=None, kind="chat": _FailIfCalledClient()
+                llm._edit_image_multipart_raw_http = reject_multipart
+                llm._edit_image_url_raw_http = reject_data_url
+                with self.assertRaisesRegex(RuntimeError, "SDK upload: 已跳过"):
+                    await llm.edit_image(
+                        image_url="/static/images/ref.png",
+                        mask_url=None,
+                        prompt="整体风格化",
+                        size="1024x1024",
+                        n=1,
+                        quality="high",
+                        settings=settings,
+                    )
+            finally:
+                llm.get_settings = orig_get_settings
+                llm.get_client = orig_get_client
+                llm._edit_image_multipart_raw_http = orig_multipart
+                llm._edit_image_url_raw_http = orig_url_native
 
     async def test_true_external_url_stays_url_only_when_provider_rejects_it(self):
         settings = Settings(

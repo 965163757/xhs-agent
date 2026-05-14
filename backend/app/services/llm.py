@@ -24,6 +24,9 @@ _current_settings: contextvars.ContextVar[Optional[Settings]] = contextvars.Cont
 )
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 IMAGE_GENERATION_TIMEOUT_SECONDS = 8 * 60.0
+# Compatibility upload probes should fail quickly on gateways that do not support
+# images.edit uploads, while full image generation/edit requests keep the 8 min cap.
+IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS = 25.0
 VISION_IMAGE_DETAIL = "auto"
 VISION_REMOTE_FETCH_TIMEOUT_SECONDS = 20.0
 REMOTE_IMAGE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
@@ -53,6 +56,11 @@ def set_current_settings(settings: Optional[Settings]) -> contextvars.Token:
 
 def reset_current_settings(token: contextvars.Token) -> None:
     _current_settings.reset(token)
+
+
+def get_current_settings() -> Optional[Settings]:
+    """Return settings bound to the current async tool/agent context, if any."""
+    return _current_settings.get()
 
 
 def _effective_settings(settings: Optional[Settings] = None) -> Settings:
@@ -293,6 +301,20 @@ def _original_image_data_url(data: bytes, *, source_name: str = "image", mime: O
         mime = _mime_for_path(Path(source_name))
     b64 = base64.b64encode(data).decode()
     return f"data:{mime};base64,{b64}"
+
+
+def _decode_b64_image_payload(payload: str) -> Tuple[bytes, str]:
+    """Decode either raw b64_json or a data:image/...;base64 payload."""
+    text = str(payload or "").strip()
+    ext = ".png"
+    if text.startswith("data:"):
+        header, sep, body = text.partition(",")
+        if not sep:
+            raise ValueError("invalid image data URL")
+        mime = header[5:].split(";", 1)[0]
+        ext = _extension_for_mime(mime)
+        text = body
+    return base64.b64decode(text), ext
 
 
 async def _fetch_remote_image_bytes(
@@ -647,9 +669,14 @@ async def generate_image(
         except Exception as raw_e:
             raise RuntimeError(f"图片生成失败: {e}; raw fallback 也失败: {raw_e}") from raw_e
 
-    saved = await _save_image_items(list(resp.data), s, n)
+    saved = await _save_image_items(_extract_image_items(resp), s, n)
     if not saved:
-        raise RuntimeError("图片生成失败：上游没有返回可保存的图片数据")
+        upstream_error = _extract_response_error(resp)
+        raise RuntimeError(
+            "图片生成失败：上游没有返回可保存的图片数据"
+            + (f"；上游错误: {upstream_error}" if upstream_error else "")
+            + f"；response_shape={_summarize_response_shape(resp)}"
+        )
     return saved
 
 
@@ -700,10 +727,73 @@ async def _generate_image_raw_http(
         raise RuntimeError(f"unexpected JSON from /images/generations: {json.dumps(data, ensure_ascii=False)[:500]}")
     if isinstance(data, dict) and data.get("error"):
         raise RuntimeError(f"/images/generations error: {json.dumps(data.get('error'), ensure_ascii=False)[:500]}")
-    saved = await _save_image_items(data.get("data") or [], settings, n)
+    saved = await _save_image_items(_extract_image_items(data), settings, n)
     if not saved:
-        raise RuntimeError(f"no image data returned by /images/generations: {json.dumps(data, ensure_ascii=False)[:500]}")
+        raise RuntimeError(f"no image data returned by /images/generations: {_summarize_response_shape(data, limit=500)}")
     return saved
+
+
+async def _save_image_edit_response(
+    data: Any,
+    *,
+    settings: Settings,
+    n: int,
+    endpoint: str,
+) -> List[str]:
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(f"{endpoint} error: {json.dumps(data.get('error'), ensure_ascii=False)[:500]}")
+    items = _extract_image_items(data)
+    saved = await _save_image_items(items, settings, n)
+    if not saved:
+        raise RuntimeError(f"no image data returned by {endpoint}: {_summarize_response_shape(data, limit=500)}")
+    return saved
+
+
+def _response_detail(response: httpx.Response, *, limit: int = 1000) -> str:
+    try:
+        return _summarize_response_shape(response.json(), limit=limit)
+    except Exception:
+        return response.text[:limit]
+
+
+def _compact_attempt_errors(errors: List[str], *, limit: int = 2200) -> str:
+    out: List[str] = []
+    seen = set()
+    for err in errors:
+        text = str(err or "").strip()
+        if not text:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    joined = "；".join(out)
+    return joined if len(joined) <= limit else joined[: limit - 1] + "…"
+
+
+def _is_official_openai_image_base(settings: Settings) -> bool:
+    try:
+        host = (urlparse(settings.effective_image_base_url).hostname or "").lower()
+    except Exception:
+        return False
+    return host == "api.openai.com" or host.endswith(".api.openai.com")
+
+
+def _looks_like_timeout_text(value: Any) -> bool:
+    text = str(value or "").lower()
+    return any(x in text for x in ("timeout", "timed out", "readtimeout"))
+
+
+def _raw_gateway_rejected_request(errors: List[str]) -> bool:
+    """Whether raw edit attempts reached the gateway and were rejected there.
+
+    For non-official gateways, this is a strong signal that the provider's
+    /images/edits path is incompatible; skipping the SDK upload avoids another
+    long wait for the same upstream failure. Network/DNS failures still allow an
+    SDK fallback because those may be test doubles or transient transport issues.
+    """
+    text = "\n".join(str(e or "") for e in errors).lower()
+    return any(x in text for x in ("http 4", "http 5", "/images/edits error", "timeout", "timed out", "readtimeout"))
 
 
 async def _edit_image_url_raw_http(
@@ -715,12 +805,14 @@ async def _edit_image_url_raw_http(
     size: str,
     n: int,
     quality: str,
+    timeout: float = IMAGE_GENERATION_TIMEOUT_SECONDS,
 ) -> List[str]:
-    """URL-native image edit fallback for providers that can fetch image_url.
+    """URL/data-URL native image edit fallback for providers that can fetch image_url.
 
     The official OpenAI SDK edit call uploads image bytes.  Some compatible
     gateways support URL references instead.  Use that shape for public external
-    URLs to avoid unnecessary local downloads/copies.
+    URLs to avoid unnecessary local downloads/copies; the same function also
+    supports lossless data URLs as a last-resort fallback for local images.
     """
     base_url = settings.effective_image_base_url.rstrip("/")
     url = f"{base_url}/images/edits"
@@ -733,41 +825,139 @@ async def _edit_image_url_raw_http(
         "prompt": prompt,
         "size": size,
         "n": n,
-        "quality": quality,
     }
+    base_payload_with_quality = {**base_payload, "quality": quality}
     # Provider variants seen in OpenAI-compatible image gateways.
-    attempts: List[Dict[str, Any]] = [
-        {**base_payload, "image_url": image_url},
-        {**base_payload, "image": image_url},
-    ]
-    if mask_url:
-        attempts[0]["mask_url"] = mask_url
-        attempts[1]["mask"] = mask_url
+    attempts: List[Tuple[str, Dict[str, Any]]] = []
+    for payload_base in (base_payload_with_quality, base_payload):
+        by_url = {**payload_base, "image_url": image_url}
+        by_image = {**payload_base, "image": image_url}
+        if mask_url:
+            by_url["mask_url"] = mask_url
+            by_image["mask"] = mask_url
+        attempts.extend([("json:image_url", by_url), ("json:image", by_image)])
 
     errors: List[str] = []
-    async with httpx.AsyncClient(timeout=IMAGE_GENERATION_TIMEOUT_SECONDS) as hc:
-        for payload in attempts:
-            r = await hc.post(url, headers=headers, json=payload)
-            if r.status_code < 400:
-                try:
-                    data = r.json()
-                except Exception as e:
-                    raise RuntimeError(f"invalid JSON from /images/edits: {r.text[:500]}") from e
-                if not isinstance(data, dict):
-                    raise RuntimeError(f"unexpected JSON from /images/edits: {json.dumps(data, ensure_ascii=False)[:500]}")
-                if isinstance(data, dict) and data.get("error"):
-                    raise RuntimeError(f"/images/edits error: {json.dumps(data.get('error'), ensure_ascii=False)[:500]}")
-                saved = await _save_image_items(data.get("data") or [], settings, n)
-                if not saved:
-                    raise RuntimeError(f"no image data returned by /images/edits: {json.dumps(data, ensure_ascii=False)[:500]}")
-                return saved
-            detail = r.text[:1000]
+    async with httpx.AsyncClient(timeout=timeout) as hc:
+        for label, payload in attempts:
             try:
-                detail = json.dumps(r.json(), ensure_ascii=False)[:1000]
-            except Exception:
-                pass
-            errors.append(f"HTTP {r.status_code}: {detail}")
-    raise RuntimeError("; ".join(errors))
+                r = await hc.post(url, headers=headers, json=payload)
+            except Exception as e:
+                errors.append(f"{label}: {type(e).__name__}: {e}")
+                if _looks_like_timeout_text(f"{type(e).__name__}: {e}"):
+                    break
+                continue
+            if r.status_code >= 400:
+                errors.append(f"{label}: HTTP {r.status_code}: {_response_detail(r)}")
+                continue
+            try:
+                data = r.json()
+            except Exception as e:
+                errors.append(f"{label}: invalid JSON from /images/edits: {r.text[:500]} ({e})")
+                continue
+            try:
+                return await _save_image_edit_response(data, settings=settings, n=n, endpoint="/images/edits")
+            except Exception as e:
+                errors.append(f"{label}: {e}")
+                continue
+    raise RuntimeError(_compact_attempt_errors(errors) or "all URL/data-url edit attempts failed")
+
+
+async def _edit_image_multipart_raw_http(
+    *,
+    settings: Settings,
+    img_path: Path,
+    mask_path: Optional[Path],
+    prompt: str,
+    size: str,
+    n: int,
+    quality: str,
+    timeout: float = IMAGE_GENERATION_TIMEOUT_SECONDS,
+) -> List[str]:
+    """Plain multipart /images/edits fallback.
+
+    This avoids SDK-specific request wrappers and also retries without `quality`,
+    which is important for old OpenAI SDKs and several compatible gateways.
+    """
+    base_url = settings.effective_image_base_url.rstrip("/")
+    url = f"{base_url}/images/edits"
+    headers = {"Authorization": f"Bearer {settings.effective_image_api_key}"}
+    base_data = {
+        "model": settings.image_model,
+        "prompt": prompt,
+        "size": size,
+        "n": str(n),
+    }
+    attempts: List[Tuple[str, Dict[str, str]]] = [
+        ("multipart:with_quality", {**base_data, "quality": quality}),
+        ("multipart:no_quality", base_data),
+    ]
+    img_bytes = img_path.read_bytes()
+    mask_bytes = mask_path.read_bytes() if mask_path else None
+    errors: List[str] = []
+    async with httpx.AsyncClient(timeout=timeout) as hc:
+        for label, data in attempts:
+            files: Dict[str, Tuple[str, bytes, str]] = {
+                "image": (img_path.name, img_bytes, _mime_for_path(img_path)),
+            }
+            if mask_path and mask_bytes is not None:
+                files["mask"] = (mask_path.name, mask_bytes, _mime_for_path(mask_path))
+            try:
+                r = await hc.post(url, headers=headers, data=data, files=files)
+            except Exception as e:
+                errors.append(f"{label}: {type(e).__name__}: {e}")
+                if _looks_like_timeout_text(f"{type(e).__name__}: {e}"):
+                    break
+                continue
+            if r.status_code >= 400:
+                errors.append(f"{label}: HTTP {r.status_code}: {_response_detail(r)}")
+                continue
+            try:
+                payload = r.json()
+            except Exception as e:
+                errors.append(f"{label}: invalid JSON from /images/edits: {r.text[:500]} ({e})")
+                continue
+            try:
+                return await _save_image_edit_response(payload, settings=settings, n=n, endpoint="/images/edits")
+            except Exception as e:
+                errors.append(f"{label}: {e}")
+                continue
+    raise RuntimeError(_compact_attempt_errors(errors) or "all multipart edit attempts failed")
+
+
+
+def _is_unexpected_keyword_error(exc: BaseException, keyword: str) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return "unexpected keyword argument" in text and keyword.lower() in text
+
+
+async def _sdk_images_edit_with_compat(
+    client: AsyncOpenAI,
+    *,
+    image: Any,
+    mask: Optional[Any],
+    kwargs: Dict[str, Any],
+) -> Any:
+    """Call SDK images.edit across openai-python versions.
+
+    Some deployed environments still use openai-python 1.57.x whose
+    AsyncImages.edit signature does not accept `quality`, while newer image
+    models/gateways often do.  Keep `quality` for providers/SDKs that support it
+    and retry once without it when the local SDK rejects the keyword before a
+    request is even sent.
+    """
+    try:
+        if mask is not None:
+            return await client.images.edit(image=image, mask=mask, **kwargs)
+        return await client.images.edit(image=image, **kwargs)
+    except TypeError as e:
+        if "quality" not in kwargs or not _is_unexpected_keyword_error(e, "quality"):
+            raise
+        retry_kwargs = dict(kwargs)
+        retry_kwargs.pop("quality", None)
+        if mask is not None:
+            return await client.images.edit(image=image, mask=mask, **retry_kwargs)
+        return await client.images.edit(image=image, **retry_kwargs)
 
 
 async def _save_image_items(items: List[Any], settings: Settings, n: int) -> List[str]:
@@ -785,8 +975,7 @@ async def _save_image_items(items: List[Any], settings: Settings, n: int) -> Lis
             url = getattr(item, "url", None)
 
         if b64:
-            data = base64.b64decode(b64)
-            ext = ".png"
+            data, ext = _decode_b64_image_payload(b64)
         elif url:
             data, mime = await _fetch_remote_image_bytes(
                 url,
@@ -802,6 +991,102 @@ async def _save_image_items(items: List[Any], settings: Settings, n: int) -> Lis
         out_path.write_bytes(data)
         saved.append(f"/static/images/{name}")
     return saved
+
+
+def _extract_image_items(value: Any, *, depth: int = 0) -> List[Any]:
+    """Extract image result items from common OpenAI-compatible response shapes."""
+    if value is None or depth > 5:
+        return []
+    if hasattr(value, "model_dump"):
+        try:
+            value = value.model_dump()
+        except Exception:
+            pass
+    if not isinstance(value, (dict, list)) and (getattr(value, "b64_json", None) or getattr(value, "url", None)):
+        return [value]
+    if not isinstance(value, (dict, list)) and hasattr(value, "data"):
+        return _extract_image_items(getattr(value, "data", None), depth=depth + 1)
+    if isinstance(value, list):
+        out: List[Any] = []
+        for item in value:
+            out.extend(_extract_image_items(item, depth=depth + 1))
+        return out
+    if isinstance(value, dict):
+        # Standard item shape.
+        if value.get("b64_json") or value.get("url"):
+            return [value]
+
+        # A few compatible gateways use b64/base64/image_base64 or return a
+        # single image string under `image`. Accept these without assuming a
+        # particular SDK response class.
+        for key in ("b64", "base64", "image_base64"):
+            raw = value.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return [{"b64_json": raw.strip()}]
+        raw_image = value.get("image")
+        if isinstance(raw_image, str) and raw_image.strip():
+            raw = raw_image.strip()
+            if raw.startswith("http://") or raw.startswith("https://"):
+                return [{"url": raw}]
+            if raw.startswith("data:image/") or len(raw) > 100:
+                return [{"b64_json": raw}]
+
+        out: List[Any] = []
+        # Common non-standard gateway wrappers.
+        for key in ("data", "images", "image", "result", "results", "output", "outputs", "items"):
+            if key in value:
+                out.extend(_extract_image_items(value.get(key), depth=depth + 1))
+        return out
+    return []
+
+
+def _summarize_response_shape(value: Any, *, limit: int = 1200) -> str:
+    """Return a short, non-secret response-shape summary for diagnostics."""
+    if hasattr(value, "model_dump"):
+        try:
+            value = value.model_dump()
+        except Exception:
+            value = repr(value)
+
+    def scrub(x: Any, depth: int = 0) -> Any:
+        if depth > 4:
+            return type(x).__name__
+        if isinstance(x, dict):
+            out: Dict[str, Any] = {}
+            for k, v in x.items():
+                if isinstance(v, str) and (len(v) > 120 or k.lower() in {"b64_json", "base64", "image"}):
+                    out[k] = f"<str {len(v)} chars>"
+                else:
+                    out[k] = scrub(v, depth + 1)
+            return out
+        if isinstance(x, list):
+            return [scrub(v, depth + 1) for v in x[:3]] + ([f"... +{len(x) - 3}"] if len(x) > 3 else [])
+        if isinstance(x, str):
+            return x[:180]
+        return x
+
+    try:
+        text = json.dumps(scrub(value), ensure_ascii=False)
+    except Exception:
+        text = repr(value)
+    return text[:limit]
+
+
+def _extract_response_error(value: Any) -> str:
+    if hasattr(value, "model_dump"):
+        try:
+            value = value.model_dump()
+        except Exception:
+            return ""
+    if not isinstance(value, dict):
+        return ""
+    err = value.get("error")
+    if not err:
+        return ""
+    try:
+        return json.dumps(err, ensure_ascii=False)[:800]
+    except Exception:
+        return str(err)[:800]
 
 
 def _resolve_local_path(url_or_path: str) -> Path:
@@ -845,6 +1130,7 @@ async def edit_image(
     n = _normalize_image_count(n)
     quality = _normalize_image_quality(quality, s.image_model)
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
+    attempt_errors: List[str] = []
 
     provider_image_url = _provider_image_url(image_url, s)
     provider_mask_url = _provider_image_url(mask_url, s) if mask_url else None
@@ -867,6 +1153,7 @@ async def edit_image(
             # edits.
             if external_image_url or external_mask_url:
                 raise RuntimeError(f"图片编辑失败：上游未接受外部图片 URL: {e}") from e
+            attempt_errors.append(f"URL-native edit: {type(e).__name__}: {e}")
     if external_image_url or external_mask_url:
         raise RuntimeError(
             "图片编辑失败：公开外部 URL 默认不下载到本地；当前图片/mask 混合了外部 URL 与本地文件，"
@@ -889,6 +1176,7 @@ async def edit_image(
     img_bytes = img_path.read_bytes()
     files_image = (img_path.name, img_bytes, _mime_for_path(img_path))
 
+    mask_path: Optional[Path] = None
     mask_bytes: Optional[bytes] = None
     if mask_url:
         mask_path = await _ensure_local_image_path(mask_url, s, suffix="mask")
@@ -896,25 +1184,125 @@ async def edit_image(
             raise FileNotFoundError(f"mask not found: {mask_url}")
         mask_bytes = mask_path.read_bytes()
 
-    try:
-        if mask_bytes is not None:
-            resp = await client.images.edit(
-                image=files_image,
-                mask=(mask_path.name, mask_bytes, _mime_for_path(mask_path)),
-                **kwargs,
+
+    async def _attempt_sdk_upload() -> Optional[List[str]]:
+        try:
+            if mask_bytes is not None and mask_path is not None:
+                resp = await _sdk_images_edit_with_compat(
+                    client,
+                    image=files_image,
+                    mask=(mask_path.name, mask_bytes, _mime_for_path(mask_path)),
+                    kwargs=kwargs,
+                )
+            else:
+                resp = await _sdk_images_edit_with_compat(
+                    client,
+                    image=files_image,
+                    mask=None,
+                    kwargs=kwargs,
+                )
+            response_items = _extract_image_items(resp)
+            saved = await _save_image_items(response_items, s, n)
+            if saved:
+                return saved
+            upstream_error = _extract_response_error(resp)
+            attempt_errors.append(
+                "SDK upload: 上游没有返回可保存的图片数据"
+                + (f"，上游错误: {upstream_error}" if upstream_error else "")
+                + f"，response_shape={_summarize_response_shape(resp, limit=500)}"
+            )
+        except Exception as e:
+            attempt_errors.append(f"SDK upload: {type(e).__name__}: {e}")
+        return None
+
+    async def _attempt_raw_multipart() -> Optional[List[str]]:
+        try:
+            return await _edit_image_multipart_raw_http(
+                settings=s,
+                img_path=img_path,
+                mask_path=mask_path,
+                prompt=prompt,
+                size=size,
+                n=n,
+                quality=quality,
+                timeout=IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS,
+            )
+        except Exception as e:
+            attempt_errors.append(f"raw multipart: {type(e).__name__}: {e}")
+        return None
+
+    async def _attempt_data_url_json() -> Optional[List[str]]:
+        try:
+            data_image_url = _original_image_data_url(img_bytes, source_name=img_path.name, mime=_mime_for_path(img_path))
+            data_mask_url = (
+                _original_image_data_url(mask_bytes, source_name=mask_path.name, mime=_mime_for_path(mask_path))
+                if mask_bytes is not None and mask_path is not None
+                else None
+            )
+            return await _edit_image_url_raw_http(
+                settings=s,
+                image_url=data_image_url,
+                mask_url=data_mask_url,
+                prompt=prompt,
+                size=size,
+                n=n,
+                quality=quality,
+                timeout=IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS,
+            )
+        except Exception as e:
+            attempt_errors.append(f"raw data-url: {type(e).__name__}: {e}")
+        return None
+
+    sdk_first = _is_official_openai_image_base(s)
+    if sdk_first:
+        for attempt in (_attempt_sdk_upload, _attempt_raw_multipart, _attempt_data_url_json):
+            saved = await attempt()
+            if saved:
+                return saved
+    else:
+        raw_error_start = len(attempt_errors)
+        saved = await _attempt_raw_multipart()
+        if saved:
+            return saved
+
+        # If a custom gateway has already rejected raw multipart with an HTTP/upstream
+        # error, do not send the same local file as a giant data URL or SDK upload.
+        # In practice this avoids 1-3 minute hangs ending in 524/empty upstream output.
+        raw_errors = attempt_errors[raw_error_start:]
+        if _raw_gateway_rejected_request(raw_errors):
+            attempt_errors.append(
+                "raw data-url / SDK upload: 已跳过。当前为非官方 image_base_url，raw multipart 已返回 HTTP/超时/上游错误；"
+                "继续尝试其它上传形态通常只会等待更久并得到同一上游失败。"
             )
         else:
-            resp = await client.images.edit(
-                image=files_image,
-                **kwargs,
-            )
-    except Exception as e:
-        raise RuntimeError(f"图片编辑失败: {e}") from e
+            data_url_error_start = len(attempt_errors)
+            saved = await _attempt_data_url_json()
+            if saved:
+                return saved
+            raw_errors = attempt_errors[raw_error_start:]
+            if not _raw_gateway_rejected_request(raw_errors[data_url_error_start - raw_error_start:]):
+                saved = await _attempt_sdk_upload()
+                if saved:
+                    return saved
+            else:
+                attempt_errors.append(
+                    "SDK upload: 已跳过。当前为非官方 image_base_url，raw data-url 已返回 HTTP/超时/上游错误；"
+                    "继续走 SDK 通常只会等待更久并得到同一上游失败。"
+                )
 
-    saved = await _save_image_items(list(resp.data), s, n)
-    if not saved:
-        raise RuntimeError("图片编辑失败：上游没有返回可保存的图片数据")
-    return saved
+    hint = ""
+    if not _configured_public_base_url(s):
+        hint = (
+            " 当前未配置 public_base_url，本地 /static/images 无法让上游直接抓取；"
+            "如果当前网关不兼容文件上传/data-url 式 images.edit，请在设置页配置可公网访问的域名，"
+            "并先运行“静态图片公网可访问测试”。"
+        )
+    raise RuntimeError(
+        "图片编辑失败：所有兼容调用方式均失败。"
+        + hint
+        + " 失败详情: "
+        + _compact_attempt_errors(attempt_errors)
+    )
 
 
 def save_png_bytes(data: bytes, suffix: str = "") -> str:

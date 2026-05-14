@@ -8,8 +8,10 @@ from __future__ import annotations
 import json
 import os
 import threading
+import ipaddress
 from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -235,6 +237,50 @@ def get_settings() -> Settings:
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             _cached = s
         return _cached
+
+
+
+def infer_public_base_url(value: str) -> str:
+    """Infer a provider-readable app origin from an HTTP request base URL.
+
+    We only infer for public-looking hosts.  localhost/private LAN addresses are
+    intentionally rejected because upstream image providers cannot fetch them.
+    """
+    raw = (value or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return ""
+    host = (parsed.hostname or "").strip("[]").lower()
+    if not host or host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
+        return ""
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            return ""
+    except ValueError:
+        # Domain names are allowed; operators can use the settings-page static
+        # image public access test to verify DNS/proxy reachability.
+        pass
+    path = (parsed.path or "").rstrip("/")
+    return f"{parsed.scheme.lower()}://{parsed.netloc}{path}"
+
+
+def with_public_base_url_if_missing(settings: Settings, public_base_url: str) -> Settings:
+    """Return a settings copy with inferred public_base_url when unset."""
+    base = infer_public_base_url(public_base_url)
+    if not base or (settings.public_base_url or "").strip():
+        return settings
+    try:
+        copied = settings.model_copy(deep=True)
+    except AttributeError:
+        copied = settings.copy(deep=True)  # type: ignore[attr-defined]
+    copied.public_base_url = base
+    return copied
 
 
 def update_settings(patch: Dict[str, Any]) -> Settings:
