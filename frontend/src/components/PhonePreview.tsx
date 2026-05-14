@@ -13,56 +13,73 @@ export default function PhonePreview({
   tags,
   coverImage,
   images,
+  scale = 1,
 }: {
   title: string
   body: string
   tags: string[]
   coverImage?: string
   images?: string[]
+  scale?: number
 }) {
   const allImages = [coverImage, ...(images || [])].filter(Boolean) as string[]
   const [slideIdx, setSlideIdx] = useState(0)
   const safeIdx = allImages.length > 0 ? slideIdx % allImages.length : 0
   const normalizedTags = tags.map(t => String(t || '').replace(/^[#＃]+/, '').trim()).filter(Boolean)
+  const safeScale = Math.max(0.58, Math.min(1, scale))
 
   return (
     <Box
       sx={{
-        width: 340,
-        height: 660,
-        border: '2px solid #E5E5E5',
-        borderRadius: '38px',
-        overflow: 'hidden',
-        bgcolor: '#fff',
-        display: 'flex',
-        flexDirection: 'column',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
+        width: 340 * safeScale,
+        height: 660 * safeScale,
+        flexShrink: 0,
+        position: 'relative',
+        overflow: 'visible',
         mx: 'auto',
       }}
     >
-      {/* Status bar */}
       <Box
         sx={{
-          height: 40,
-          px: 3,
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: 340,
+          height: 660,
+          transform: `scale(${safeScale})`,
+          transformOrigin: 'top left',
+          border: '2px solid #E5E5E5',
+          borderRadius: '38px',
+          overflow: 'hidden',
+          bgcolor: '#fff',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexShrink: 0,
+          flexDirection: 'column',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
         }}
       >
-        <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#1F1F1F' }}>9:41</Typography>
-        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-          <Box sx={{ width: 16, height: 10, border: '1px solid #1F1F1F', borderRadius: 0.5, position: 'relative' }}>
-            <Box sx={{ position: 'absolute', inset: '1.5px', bgcolor: '#1F1F1F', borderRadius: 0.3 }} />
+        {/* Status bar */}
+        <Box
+          sx={{
+            height: 40,
+            px: 3,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexShrink: 0,
+          }}
+        >
+          <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#1F1F1F' }}>9:41</Typography>
+          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+            <Box sx={{ width: 16, height: 10, border: '1px solid #1F1F1F', borderRadius: 0.5, position: 'relative' }}>
+              <Box sx={{ position: 'absolute', inset: '1.5px', bgcolor: '#1F1F1F', borderRadius: 0.3 }} />
+            </Box>
           </Box>
         </Box>
-      </Box>
 
-      {/* Scrollable content */}
-      <Box sx={{ flex: 1, overflow: 'auto', '&::-webkit-scrollbar': { display: 'none' } }}>
-        {/* Image carousel */}
-        <Box sx={{ position: 'relative', width: '100%', aspectRatio: '3 / 4', bgcolor: '#F5F5F5' }}>
+        {/* Scrollable content */}
+        <Box sx={{ flex: 1, overflow: 'auto', '&::-webkit-scrollbar': { display: 'none' } }}>
+          {/* Image carousel */}
+          <Box sx={{ position: 'relative', width: '100%', aspectRatio: '3 / 4', bgcolor: '#F5F5F5' }}>
           {allImages.length > 0 ? (
             <>
               <Box
@@ -140,10 +157,10 @@ export default function PhonePreview({
               暂无封面
             </Box>
           )}
-        </Box>
+          </Box>
 
-        {/* Content area */}
-        <Box sx={{ px: 2, py: 1.5 }}>
+          {/* Content area */}
+          <Box sx={{ px: 2, py: 1.5 }}>
           {/* Author row */}
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
             <Box
@@ -203,34 +220,35 @@ export default function PhonePreview({
               {normalizedTags.map(t => `#${t}`).join(' ')}
             </Typography>
           )}
+          </Box>
         </Box>
-      </Box>
 
-      {/* Bottom interaction bar */}
-      <Box
-        sx={{
-          height: 50,
-          borderTop: '1px solid #F0F0F0',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-around',
-          px: 2,
-          flexShrink: 0,
-        }}
-      >
-        <Stack direction="row" spacing={0.3} alignItems="center">
-          <FavoriteBorderIcon sx={{ fontSize: 20, color: '#666' }} />
-          <Typography sx={{ fontSize: 11, color: '#666' }}>128</Typography>
-        </Stack>
-        <Stack direction="row" spacing={0.3} alignItems="center">
-          <StarBorderIcon sx={{ fontSize: 20, color: '#666' }} />
-          <Typography sx={{ fontSize: 11, color: '#666' }}>56</Typography>
-        </Stack>
-        <Stack direction="row" spacing={0.3} alignItems="center">
-          <ChatBubbleOutlineIcon sx={{ fontSize: 18, color: '#666' }} />
-          <Typography sx={{ fontSize: 11, color: '#666' }}>23</Typography>
-        </Stack>
-        <ShareOutlinedIcon sx={{ fontSize: 20, color: '#666' }} />
+        {/* Bottom interaction bar */}
+        <Box
+          sx={{
+            height: 50,
+            borderTop: '1px solid #F0F0F0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-around',
+            px: 2,
+            flexShrink: 0,
+          }}
+        >
+          <Stack direction="row" spacing={0.3} alignItems="center">
+            <FavoriteBorderIcon sx={{ fontSize: 20, color: '#666' }} />
+            <Typography sx={{ fontSize: 11, color: '#666' }}>128</Typography>
+          </Stack>
+          <Stack direction="row" spacing={0.3} alignItems="center">
+            <StarBorderIcon sx={{ fontSize: 20, color: '#666' }} />
+            <Typography sx={{ fontSize: 11, color: '#666' }}>56</Typography>
+          </Stack>
+          <Stack direction="row" spacing={0.3} alignItems="center">
+            <ChatBubbleOutlineIcon sx={{ fontSize: 18, color: '#666' }} />
+            <Typography sx={{ fontSize: 11, color: '#666' }}>23</Typography>
+          </Stack>
+          <ShareOutlinedIcon sx={{ fontSize: 20, color: '#666' }} />
+        </Box>
       </Box>
     </Box>
   )

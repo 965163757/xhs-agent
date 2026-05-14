@@ -97,7 +97,10 @@ export default function ChatPanel({
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: height || '100%',
+        height: height || 'auto',
+        flex: height ? '0 0 auto' : 1,
+        minHeight: 0,
+        overflow: 'hidden',
         bgcolor: 'background.paper',
       }}
     >
@@ -154,6 +157,7 @@ export default function ChatPanel({
         ref={scrollRef}
         sx={{
           flex: 1,
+          minHeight: 0,
           overflow: 'auto',
           px: { xs: 2, md: 3 },
           py: messages.length === 0 ? 0 : 3,
@@ -338,7 +342,15 @@ export default function ChatPanel({
         )}
       </Box>
 
-      <Box sx={{ px: { xs: 2, md: 3 }, pb: 2.5, pt: 1.2 }}>
+      <Box
+        sx={{
+          px: { xs: 1.5, md: 2 },
+          pb: 'max(14px, env(safe-area-inset-bottom))',
+          pt: 1,
+          flexShrink: 0,
+          bgcolor: 'background.paper',
+        }}
+      >
         <Box sx={{ maxWidth: 760, mx: 'auto' }}>
           {messages.length > 0 && quickActions && quickActions.length > 0 && (
             <Stack direction="row" spacing={0.6} sx={{ mb: 1, flexWrap: 'wrap', gap: 0.6 }}>
@@ -493,7 +505,7 @@ export default function ChatPanel({
           </Box>
           <Typography
             sx={{
-              mt: 1,
+              mt: 0.55,
               fontSize: 11,
               color: 'text.disabled',
               textAlign: 'center',

@@ -1,4 +1,4 @@
-import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type DragEvent, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Box,
@@ -55,6 +55,101 @@ import TagInput from '../components/TagInput'
 import { getSession, loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor } from '../chatStore'
 import { appDateTimestamp, formatBeijingDateTime } from '../utils/time'
 import { useAuth } from '../AuthContext'
+
+const EDITOR_LAYOUT_KEY = 'xhs_article_editor_layout_v2'
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n))
+}
+
+function getInitialEditorLayout() {
+  if (typeof window === 'undefined') return { left: 360, right: 372 }
+  try {
+    const raw = localStorage.getItem(EDITOR_LAYOUT_KEY)
+    if (!raw) return { left: 360, right: 372 }
+    const parsed = JSON.parse(raw)
+    return {
+      left: clamp(Number(parsed.left) || 360, 280, 520),
+      right: clamp(Number(parsed.right) || 372, 340, 560),
+    }
+  } catch {
+    return { left: 360, right: 372 }
+  }
+}
+
+function adaptiveBodyRows(body: string) {
+  const visualLines = body
+    .split('\n')
+    .reduce((total, line) => total + Math.max(1, Math.ceil((line.trim().length || 1) / 46)), 0)
+  return clamp(visualLines + 2, 10, 34)
+}
+
+function fitEditorLayout(layout: { left: number; right: number }, rootWidth: number) {
+  const showRight = rootWidth >= 1536
+  const minCenter = rootWidth >= 1900 ? 820 : rootWidth >= 1536 ? 700 : 560
+  let left = clamp(layout.left, 280, 520)
+  let right = clamp(layout.right, 340, 560)
+
+  if (showRight) {
+    const overflow = left + right + minCenter + 24 - rootWidth
+    if (overflow > 0) {
+      const leftRoom = left - 280
+      const rightRoom = right - 340
+      const room = Math.max(1, leftRoom + rightRoom)
+      left = clamp(left - Math.ceil(overflow * (leftRoom / room)), 280, 520)
+      right = clamp(right - Math.ceil(overflow * (rightRoom / room)), 340, 560)
+    }
+  } else {
+    left = clamp(left, 280, Math.max(280, Math.min(520, rootWidth - minCenter - 12)))
+  }
+
+  return { left, right }
+}
+
+function ResizeGrip({
+  onMouseDown,
+  minBreakpoint = 'lg',
+  title = '拖动调整栏目宽度',
+}: {
+  onMouseDown: (e: ReactMouseEvent<HTMLDivElement>) => void
+  minBreakpoint?: 'lg' | 'xl'
+  title?: string
+}) {
+  return (
+    <Box
+      title={title}
+      onMouseDown={onMouseDown}
+      sx={{
+        width: 10,
+        flexShrink: 0,
+        cursor: 'col-resize',
+        display: { xs: 'none', [minBreakpoint]: 'flex' },
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: 'background.paper',
+        borderLeft: '1px solid',
+        borderRight: '1px solid',
+        borderColor: 'divider',
+        transition: 'background .15s',
+        '&:hover': {
+          bgcolor: 'rgba(255,36,66,0.04)',
+          '& .resize-grip-line': { bgcolor: '#FF2741', height: 54 },
+        },
+      }}
+    >
+      <Box
+        className="resize-grip-line"
+        sx={{
+          width: 3,
+          height: 36,
+          borderRadius: 999,
+          bgcolor: 'rgba(148,163,184,0.65)',
+          transition: 'all .15s',
+        }}
+      />
+    </Box>
+  )
+}
 
 function ImageFrame({
   src,
@@ -367,6 +462,12 @@ export default function ArticleDetailPage() {
   const [publishing, setPublishing] = useState(false)
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
   const [dragImagePos, setDragImagePos] = useState<number | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const [layout, setLayout] = useState(getInitialEditorLayout)
+  const [viewport, setViewport] = useState(() => ({
+    width: typeof window === 'undefined' ? 1440 : window.innerWidth,
+    height: typeof window === 'undefined' ? 900 : window.innerHeight,
+  }))
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const selectedCount = selectedConvoIds.length
@@ -389,6 +490,48 @@ export default function ArticleDetailPage() {
       ...group.items.map(conversation => ({ type: 'conversation' as const, key: `conversation-${conversation.id}`, conversation })),
     ])
   }, [convos, isAdmin])
+
+  useEffect(() => {
+    localStorage.setItem(EDITOR_LAYOUT_KEY, JSON.stringify(layout))
+  }, [layout])
+
+  useEffect(() => {
+    const handleResize = () => {
+      const rootWidth = rootRef.current?.getBoundingClientRect().width || window.innerWidth
+      setViewport({ width: window.innerWidth, height: window.innerHeight })
+      setLayout(prev => fitEditorLayout(prev, rootWidth))
+    }
+    window.addEventListener('resize', handleResize)
+    handleResize()
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const startColumnResize = useCallback((side: 'left' | 'right') => (e: ReactMouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const rootWidth = rootRef.current?.getBoundingClientRect().width || window.innerWidth
+    const startX = e.clientX
+    const start = { ...layout }
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX
+      const draft = side === 'left'
+        ? { ...start, left: start.left + dx }
+        : { ...start, right: start.right - dx }
+      setLayout(fitEditorLayout(draft, rootWidth))
+    }
+    const onUp = () => {
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [layout])
 
   const refreshConvos = useCallback(() => {
     listConversations().then(all => {
@@ -569,6 +712,23 @@ export default function ArticleDetailPage() {
   if (!art) return null
 
   const visualImages = [art.cover_image, ...(art.images || [])].filter(Boolean) as string[]
+  const bodyRows = adaptiveBodyRows(art.body)
+  const previewScale = clamp(Math.min(
+    1,
+    (viewport.height - 118) / 660,
+    (layout.right - 28) / 340,
+  ), 0.58, 1)
+  const textFieldSx = {
+    '& .MuiOutlinedInput-root': {
+      borderRadius: 2,
+      bgcolor: '#fff',
+      alignItems: 'flex-start',
+      '& fieldset': { borderColor: 'rgba(15,23,42,0.12)' },
+      '&:hover fieldset': { borderColor: 'rgba(15,23,42,0.28)' },
+      '&.Mui-focused fieldset': { borderColor: '#FF2741', borderWidth: 1.2 },
+    },
+    '& .MuiInputLabel-root.Mui-focused': { color: '#FF2741' },
+  }
   const imageBindingForPosition = (pos: number) => (
     pos === 0
       ? { article_id: art.id, role: 'cover' as const }
@@ -648,7 +808,7 @@ export default function ArticleDetailPage() {
   }
 
   const scorePanel = getScoreValue(art.score, 'overall') > 0 ? (
-    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2, bgcolor: 'background.paper', width: 340 }}>
+    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2, bgcolor: 'background.paper', width: 'min(340px, 100%)' }}>
       <Stack direction="row" alignItems="center" spacing={1}>
         <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
           五维评分
@@ -674,23 +834,26 @@ export default function ArticleDetailPage() {
 
   return (
     <Box
+      ref={rootRef}
       sx={{
         height: 'calc(100dvh - 56px)',
         minHeight: 0,
         display: 'flex',
-        bgcolor: 'background.paper',
+        bgcolor: '#F8F7F5',
+        background: 'linear-gradient(135deg, #FFF7F3 0%, #F8FAFC 36%, #FFFFFF 100%)',
         overflow: 'hidden',
       }}
     >
       {/* left: chat panel */}
       <Box
         sx={{
-          width: { lg: 320, xl: 360 },
+          width: { lg: layout.left },
           flexShrink: 0,
-          borderRight: 1,
-          borderColor: 'divider',
           display: { xs: 'none', lg: 'flex' },
           flexDirection: 'column',
+          minHeight: 0,
+          bgcolor: 'rgba(255,255,255,0.86)',
+          backdropFilter: 'blur(10px)',
         }}
       >
         <Stack
@@ -739,10 +902,15 @@ export default function ArticleDetailPage() {
           ]}
         />
       </Box>
+      <ResizeGrip
+        minBreakpoint="lg"
+        title="拖动调整 Agent 栏宽度"
+        onMouseDown={startColumnResize('left')}
+      />
 
       {/* middle: editor */}
       <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
-        <Box sx={{ p: { xs: 1.5, sm: 2, lg: 2.5, xl: 3 }, maxWidth: { xs: '100%', lg: 940, xl: 980 }, mx: 'auto' }}>
+        <Box sx={{ p: { xs: 1.25, sm: 1.5, lg: 1.75, xl: 2 }, pb: 'max(28px, env(safe-area-inset-bottom))', maxWidth: 'none', mx: 'auto' }}>
           <Stack
             direction="row"
             spacing={1}
@@ -751,11 +919,15 @@ export default function ArticleDetailPage() {
               position: 'sticky',
               top: 0,
               zIndex: 5,
-              mb: 2,
-              py: 1,
-              bgcolor: 'background.paper',
-              borderBottom: '1px solid',
-              borderColor: 'divider',
+              mb: 1.4,
+              px: 1.1,
+              py: 0.85,
+              bgcolor: 'rgba(255,255,255,0.92)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid',
+              borderColor: 'rgba(15,23,42,0.08)',
+              borderRadius: 2.5,
+              boxShadow: '0 10px 30px rgba(15,23,42,0.06)',
               flexWrap: 'wrap',
               gap: 0.8,
             }}
@@ -877,14 +1049,24 @@ export default function ArticleDetailPage() {
             ))}
           </Menu>
 
-          <Stack spacing={2}>
-            <Box>
+          <Stack spacing={1.25}>
+            <Box
+              sx={{
+                p: 1.25,
+                borderRadius: 2.5,
+                bgcolor: 'rgba(255,255,255,0.88)',
+                border: '1px solid rgba(15,23,42,0.08)',
+                boxShadow: '0 8px 24px rgba(15,23,42,0.04)',
+              }}
+            >
               <TextField
                 label="标题"
                 fullWidth
+                size="small"
                 value={art.title}
                 onChange={e => setArt({ ...art, title: e.target.value })}
-                InputProps={{ sx: { fontSize: 18, fontWeight: 600 } }}
+                InputProps={{ sx: { fontSize: 17, fontWeight: 700, bgcolor: '#fff' } }}
+                sx={textFieldSx}
                 error={art.title.length > 20}
               />
               <Typography
@@ -898,27 +1080,37 @@ export default function ArticleDetailPage() {
                 {art.title.length}/20
               </Typography>
             </Box>
-            <Box>
+            <Box
+              sx={{
+                p: 1.25,
+                borderRadius: 2.5,
+                bgcolor: 'rgba(255,255,255,0.9)',
+                border: '1px solid rgba(15,23,42,0.08)',
+                boxShadow: '0 8px 24px rgba(15,23,42,0.04)',
+              }}
+            >
               <TextField
                 label="正文"
                 fullWidth
                 multiline
-                minRows={12}
+                minRows={bodyRows}
+                maxRows={44}
                 value={art.body}
                 onChange={e => setArt({ ...art, body: e.target.value })}
                 InputProps={{
                   sx: {
-                    fontSize: 14.5,
-                    lineHeight: 1.75,
+                    fontSize: 14.2,
+                    lineHeight: 1.72,
                     '& textarea': {
-                      minHeight: { lg: 'min(42dvh, 520px)' },
+                      resize: 'vertical',
                     },
                   },
                 }}
+                sx={textFieldSx}
               />
               <Typography
                 sx={{
-                  mt: 0.5,
+                  mt: 0.45,
                   fontSize: 11,
                   textAlign: 'right',
                   color: art.body.length < 300 ? '#D97706' : art.body.length > 1000 ? '#D97706' : 'text.secondary',
@@ -930,10 +1122,19 @@ export default function ArticleDetailPage() {
                 {art.body.length >= 300 && art.body.length <= 1000 && ' · 字数合适'}
               </Typography>
             </Box>
-            <TagInput
-              tags={art.tags || []}
-              onChange={tags => setArt({ ...art, tags })}
-            />
+            <Box
+              sx={{
+                p: 1.15,
+                borderRadius: 2.5,
+                bgcolor: 'rgba(255,255,255,0.86)',
+                border: '1px solid rgba(15,23,42,0.08)',
+              }}
+            >
+              <TagInput
+                tags={art.tags || []}
+                onChange={tags => setArt({ ...art, tags })}
+              />
+            </Box>
 
             {/* banned words warning */}
             {bannedHits.length > 0 && (
@@ -957,7 +1158,7 @@ export default function ArticleDetailPage() {
             )}
 
             {/* images queue */}
-            <Box sx={{ mt: 0.5 }}>
+            <Box sx={{ mt: 0.2, p: 1.25, borderRadius: 2.5, bgcolor: 'rgba(255,255,255,0.86)', border: '1px solid rgba(15,23,42,0.08)' }}>
               <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" sx={{ gap: 0.8, mb: 1 }}>
                 <Typography sx={{ fontSize: 12, color: 'text.secondary', fontWeight: 700 }}>
                   图片队列（第 1 张 = 首图/封面）
@@ -972,8 +1173,8 @@ export default function ArticleDetailPage() {
                 <Box
                   sx={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))',
-                    gap: 1,
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))',
+                    gap: 0.85,
                   }}
                 >
                   {visualImages.map((u, pos) => {
@@ -1017,7 +1218,7 @@ export default function ArticleDetailPage() {
               ) : (
                 <Box
                   sx={{
-                    minHeight: 150,
+                    minHeight: 126,
                     border: '1px dashed',
                     borderColor: 'divider',
                     borderRadius: 2,
@@ -1035,8 +1236,8 @@ export default function ArticleDetailPage() {
               {art.image_context && (
                 <Box
                   sx={{
-                    mt: 1.5,
-                    p: 1.5,
+                    mt: 1.15,
+                    p: 1.1,
                     borderRadius: 2,
                     bgcolor: 'rgba(255,36,66,0.035)',
                     border: '1px solid rgba(255,36,66,0.10)',
@@ -1081,7 +1282,7 @@ export default function ArticleDetailPage() {
             </Box>
 
             {/* version history */}
-            <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2 }}>
+            <Box sx={{ border: '1px solid rgba(15,23,42,0.08)', bgcolor: 'rgba(255,255,255,0.86)', borderRadius: 2.5, p: 1.35 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ cursor: 'pointer' }} onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}>
                 <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
                   版本历史
@@ -1118,28 +1319,37 @@ export default function ArticleDetailPage() {
         </Box>
       </Box>
 
+      <ResizeGrip
+        minBreakpoint="xl"
+        title="拖动调整预览栏宽度"
+        onMouseDown={startColumnResize('right')}
+      />
+
       {/* right: phone preview */}
       <Box
         sx={{
-          width: { xl: 352 },
+          width: { xl: layout.right },
           flexShrink: 0,
-          borderLeft: 1,
-          borderColor: 'divider',
           display: { xs: 'none', xl: 'flex' },
-          alignItems: 'center',
-          justifyContent: 'flex-start',
-          bgcolor: 'background.default',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          bgcolor: 'rgba(255,255,255,0.54)',
+          backdropFilter: 'blur(10px)',
+          minHeight: 0,
           overflow: 'auto',
-          py: 3,
+          px: 1,
+          pt: 1.2,
+          pb: 'max(16px, env(safe-area-inset-bottom))',
         }}
       >
-        <Stack spacing={2} alignItems="center">
+        <Stack spacing={1.2} alignItems="center" sx={{ width: '100%', minHeight: 'max-content' }}>
           <PhonePreview
             title={art.title}
             body={art.body}
             tags={art.tags || []}
             coverImage={art.cover_image || undefined}
             images={art.images || undefined}
+            scale={previewScale}
           />
           {scorePanel}
         </Stack>
@@ -1378,10 +1588,10 @@ export default function ArticleDetailPage() {
         anchor="bottom"
         open={mobileChat}
         onClose={() => setMobileChat(false)}
-        PaperProps={{ sx: { height: '85vh', borderTopLeftRadius: 16, borderTopRightRadius: 16 } }}
+        PaperProps={{ sx: { height: 'min(85dvh, calc(100dvh - 20px))', borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: 'hidden' } }}
         sx={{ display: { xs: 'block', lg: 'none' } }}
       >
-        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <Stack direction="row" alignItems="center" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
             <Typography sx={{ fontSize: 14, fontWeight: 600, flex: 1 }}>AI 助手</Typography>
             <IconButton size="small" onClick={() => setMobileChat(false)}>
