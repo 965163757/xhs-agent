@@ -76,7 +76,7 @@ class _FailIfCalledClient:
 
 
 class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_public_app_static_url_can_fallback_to_local_upload(self):
+    async def test_public_app_static_url_uploads_file_when_url_capability_disabled(self):
         with tempfile.TemporaryDirectory() as image_dir:
             ref_path = Path(image_dir) / "ref.png"
             ref_path.write_bytes(TINY_IMAGE_BYTES)
@@ -84,7 +84,8 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
                 image_dir=image_dir,
                 public_base_url="https://xhs.example.com/app",
                 image_api_key="test-key",
-                image_base_url="https://api.openai.com/v1",
+                image_base_url="https://image-gateway.invalid/v1",
+                image_supports_image_url=False,
             )
             own_public_url = "https://xhs.example.com/app/static/images/ref.png"
 
@@ -93,16 +94,20 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(llm._provider_image_url(own_public_url, settings), own_public_url)
 
             async def fail_url_native(**_kwargs):
-                raise RuntimeError("provider does not accept image_url")
+                raise AssertionError("URL-native edit should be skipped when supports_image_url=false")
 
-            fake_client = _FakeClient()
+            async def raw_multipart_success(**_kwargs):
+                return ["/static/images/edited.png"]
+
             orig_get_settings = llm.get_settings
             orig_url_native = llm._edit_image_url_raw_http
             orig_get_client = llm.get_client
+            orig_multipart = llm._edit_image_multipart_raw_http
             try:
                 llm.get_settings = lambda: settings
                 llm._edit_image_url_raw_http = fail_url_native
-                llm.get_client = lambda _settings=None, kind="chat": fake_client
+                llm._edit_image_multipart_raw_http = raw_multipart_success
+                llm.get_client = lambda _settings=None, kind="chat": _FailIfCalledClient()
 
                 saved = await llm.edit_image(
                     image_url=own_public_url,
@@ -117,13 +122,9 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
                 llm.get_settings = orig_get_settings
                 llm._edit_image_url_raw_http = orig_url_native
                 llm.get_client = orig_get_client
+                llm._edit_image_multipart_raw_http = orig_multipart
 
-            self.assertEqual(len(saved), 1)
-            self.assertTrue(saved[0].startswith("/static/images/"))
-            self.assertIsNotNone(fake_client.images.last_edit_kwargs)
-            uploaded = fake_client.images.last_edit_kwargs["image"]
-            self.assertEqual(uploaded[0], "ref.png")
-            self.assertEqual(uploaded[2], "image/png")
+            self.assertEqual(saved, ["/static/images/edited.png"])
 
     async def test_sdk_edit_retries_without_quality_when_sdk_does_not_support_it(self):
         with tempfile.TemporaryDirectory() as image_dir:
@@ -191,7 +192,7 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("mask", fake_client.images.calls[1])
             self.assertNotIn("quality", fake_client.images.calls[1])
 
-    async def test_sdk_edit_empty_data_falls_back_to_raw_multipart(self):
+    async def test_sdk_edit_empty_data_fast_fails_current_model_without_raw_fallback(self):
         with tempfile.TemporaryDirectory() as image_dir:
             (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)
             settings = Settings(
@@ -201,8 +202,8 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
                 public_base_url="",
             )
 
-            async def raw_multipart_success(**_kwargs):
-                return ["/static/images/fallback.png"]
+            async def raw_multipart_should_not_run(**_kwargs):
+                raise AssertionError("raw multipart should be skipped in fast-failover mode")
 
             orig_get_settings = llm.get_settings
             orig_get_client = llm.get_client
@@ -210,22 +211,21 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
             try:
                 llm.get_settings = lambda: settings
                 llm.get_client = lambda _settings=None, kind="chat": _EmptyEditClient()
-                llm._edit_image_multipart_raw_http = raw_multipart_success
-                saved = await llm.edit_image(
-                    image_url="/static/images/ref.png",
-                    mask_url=None,
-                    prompt="整体风格化",
-                    size="1024x1024",
-                    n=1,
-                    quality="high",
-                    settings=settings,
-                )
+                llm._edit_image_multipart_raw_http = raw_multipart_should_not_run
+                with self.assertRaisesRegex(RuntimeError, "upstream did not return any image output"):
+                    await llm.edit_image(
+                        image_url="/static/images/ref.png",
+                        mask_url=None,
+                        prompt="整体风格化",
+                        size="1024x1024",
+                        n=1,
+                        quality="high",
+                        settings=settings,
+                    )
             finally:
                 llm.get_settings = orig_get_settings
                 llm.get_client = orig_get_client
                 llm._edit_image_multipart_raw_http = orig_multipart
-
-            self.assertEqual(saved, ["/static/images/fallback.png"])
 
     async def test_sdk_edit_empty_data_reports_gateway_error_instead_of_typeerror(self):
         with tempfile.TemporaryDirectory() as image_dir:
@@ -273,7 +273,7 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(items), 1)
         self.assertTrue(items[0]["b64_json"].startswith("data:image/png;base64,"))
 
-    async def test_app_static_image_uses_multipart_before_url_native_on_custom_gateway(self):
+    async def test_app_static_image_uses_multipart_when_url_capability_disabled_on_custom_gateway(self):
         with tempfile.TemporaryDirectory() as image_dir:
             (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)
             settings = Settings(
@@ -281,11 +281,12 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
                 image_api_key="test-key",
                 image_base_url="https://image-gateway.invalid/v1",
                 public_base_url="https://xhs.example.com/app",
+                image_supports_image_url=False,
             )
             seen = {}
 
             async def fail_if_url_native_called(**_kwargs):
-                raise AssertionError("app-owned local images should upload file bytes before URL-native edit")
+                raise AssertionError("URL-native edit should be skipped when supports_image_url=false")
 
             async def raw_multipart_success(**kwargs):
                 seen["timeout"] = kwargs.get("timeout")
@@ -318,6 +319,63 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved, ["/static/images/edited.png"])
             self.assertEqual(seen.get("timeout"), llm.IMAGE_GENERATION_TIMEOUT_SECONDS)
 
+    async def test_image_capability_flags_disable_url_and_quality_for_external_urls(self):
+        with tempfile.TemporaryDirectory() as image_dir:
+            ref_path = Path(image_dir) / "downloaded.png"
+            ref_path.write_bytes(TINY_IMAGE_BYTES)
+            settings = Settings(
+                image_dir=image_dir,
+                image_api_key="test-key",
+                image_base_url="https://image-gateway.invalid/v1",
+                public_base_url="https://xhs.example.com/app",
+                image_supports_image_url=False,
+                image_supports_quality=False,
+            )
+            seen = {}
+
+            async def fake_download(url, _settings, *, suffix="remote"):
+                seen["download_url"] = url
+                return ref_path
+
+            async def fail_if_url_native_called(**_kwargs):
+                raise AssertionError("external URL should be downloaded when supports_image_url=false")
+
+            async def raw_multipart_success(**kwargs):
+                seen["quality"] = kwargs.get("quality")
+                seen["img_path"] = kwargs.get("img_path")
+                return ["/static/images/edited.png"]
+
+            orig_download = llm._download_remote_image_to_local
+            orig_multipart = llm._edit_image_multipart_raw_http
+            orig_url_native = llm._edit_image_url_raw_http
+            try:
+                llm._download_remote_image_to_local = fake_download
+                llm._edit_image_multipart_raw_http = raw_multipart_success
+                llm._edit_image_url_raw_http = fail_if_url_native_called
+                attempts = []
+                saved = await llm.edit_image(
+                    image_url="https://cdn.example.com/ref.png",
+                    mask_url=None,
+                    prompt="整体风格化",
+                    size="1024x1024",
+                    n=1,
+                    quality="high",
+                    settings=settings,
+                    attempt_trace=attempts,
+                )
+            finally:
+                llm._download_remote_image_to_local = orig_download
+                llm._edit_image_multipart_raw_http = orig_multipart
+                llm._edit_image_url_raw_http = orig_url_native
+
+            self.assertEqual(saved, ["/static/images/edited.png"])
+            self.assertEqual(seen["download_url"], "https://cdn.example.com/ref.png")
+            self.assertEqual(seen["quality"], "")
+            self.assertEqual(seen["img_path"], ref_path)
+            self.assertEqual(attempts[0]["method"], "raw_multipart_edit")
+            self.assertFalse(attempts[0]["supports_image_url"])
+            self.assertFalse(attempts[0]["supports_quality"])
+
     async def test_chat_image_context_exposes_stable_path_and_server_public_url(self):
         settings = Settings(public_base_url="https://xhs.example.com/app")
         out = await llm.to_openai_messages(
@@ -329,7 +387,7 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[图片路径: /static/images/ref.png | 可访问URL: https://xhs.example.com/app/static/images/ref.png]", parts[1]["text"])
         self.assertEqual(parts[2]["image_url"]["url"], "https://xhs.example.com/app/static/images/ref.png")
 
-    async def test_custom_gateway_http_rejection_skips_slow_sdk_upload(self):
+    async def test_custom_gateway_http_rejection_fast_fails_without_slow_sdk_upload(self):
         with tempfile.TemporaryDirectory() as image_dir:
             (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)
             settings = Settings(
@@ -354,7 +412,7 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
                 llm.get_client = lambda _settings=None, kind="chat": _FailIfCalledClient()
                 llm._edit_image_multipart_raw_http = reject_multipart
                 llm._edit_image_url_raw_http = reject_data_url
-                with self.assertRaisesRegex(RuntimeError, "SDK upload: 已跳过"):
+                with self.assertRaisesRegex(RuntimeError, "raw multipart"):
                     await llm.edit_image(
                         image_url="/static/images/ref.png",
                         mask_url=None,
