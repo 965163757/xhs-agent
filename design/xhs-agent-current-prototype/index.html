@@ -25,6 +25,7 @@
       <div class="nav-section">页面</div>
       <button class="nav-item active" data-screen="overview">总览地图</button>
       <button class="nav-item" data-screen="login">登录注册</button>
+      <button class="nav-item" data-screen="variations">设计方向</button>
       <button class="nav-item" data-screen="chat">创作对话</button>
       <button class="nav-item" data-screen="articles">笔记列表</button>
       <button class="nav-item" data-screen="editor">笔记编辑器</button>
@@ -72,6 +73,49 @@
         <div class="page-map" id="page-map"></div>
       </section>
 
+      <section class="screen" id="screen-variations">
+        <div class="variations-page">
+          <div class="page-title">
+            <div><span class="eyebrow">Design Directions</span><h2>三套可落地的视觉方向</h2></div>
+            <span class="pill ok">基于当前代码资产</span>
+          </div>
+          <div class="brief-card">
+            <div>
+              <b>设计假设</b>
+              <p>这是一个「高密度 AI 内容生产工作台」，不是营销官网。用户的核心任务是持续创作、审稿、改图、追踪后台任务，因此界面需要优先表达可控性、上下文和恢复能力。</p>
+            </div>
+            <div>
+              <b>位置四问</b>
+              <p>叙事角色：工作台总览；观众距离：笔记本 60–90cm；视觉温度：温暖但专业；容量估算：每个主屏至少呈现 3 个真实产品差异化信息点。</p>
+            </div>
+          </div>
+          <div class="variation-grid">
+            <article class="variation-card selected">
+              <div class="variation-meta"><span>A · 推荐</span><b>Josef Müller-Brockmann 式信息建筑</b></div>
+              <p>用明确网格、紧凑密度和工具链状态表达「Agent 可控」。适合作为当前系统主方向，最利于承载后台任务、模型队列、诊断链路和管理员视角。</p>
+              <div class="mini-mock ops"><i></i><i></i><i></i><i></i></div>
+              <ul><li>高密度三栏工作台</li><li>少装饰，重状态和 trace</li><li>红色只用于关键动作</li></ul>
+            </article>
+            <article class="variation-card">
+              <div class="variation-meta"><span>B</span><b>Kenya Hara 式纸感留白</b></div>
+              <p>把「写笔记」的编辑体验变得更像创作纸张，适合面向普通用户降低工具压迫感。但后台任务和模型配置页面需要保留更强的信息密度。</p>
+              <div class="mini-mock paper"><i></i><i></i><i></i><i></i></div>
+              <ul><li>奶白纸感背景</li><li>编辑区更轻、更安静</li><li>图片队列像素材纸夹</li></ul>
+            </article>
+            <article class="variation-card">
+              <div class="variation-meta"><span>C</span><b>Charles Eames 式创作控制室</b></div>
+              <p>强调「创作流水线」和可视化决策，适合未来做团队版、运营版。视觉更有动态感，但若过度使用会让个人创作者觉得负担稍重。</p>
+              <div class="mini-mock studio"><i></i><i></i><i></i><i></i></div>
+              <ul><li>任务、评分、图片并列监控</li><li>流程节点显性化</li><li>适合多人协作扩展</li></ul>
+            </article>
+          </div>
+          <div class="decision-card">
+            <b>本次原型采用 A 为主，吸收 B 的纸感背景和 C 的任务可观察性。</b>
+            <p>理由：系统目前最需要解决的是「Agent 到底在做什么、失败在哪里、用户能不能恢复」；视觉表达优先服务稳定感和控制感，而不是单纯漂亮。</p>
+          </div>
+        </div>
+      </section>
+
       <section class="screen" id="screen-login">
         <div class="login-stage">
           <div class="login-copy">
@@ -108,7 +152,7 @@
               <h2>今天想写什么笔记？</h2>
               <p>说出灵感，AI 会根据意图自主选择生成笔记、改写、配图、诊断或反问。</p>
               <div class="quick-grid">
-                <button>📝 一键成稿</button><button>🎨 生成图片</button><button>🪞 参考仿写</button><button>🔍 发布前诊断</button>
+                <button>一键成稿</button><button>生成图片</button><button>参考仿写</button><button>发布前诊断</button>
               </div>
             </div>
             <div class="message-stack">
@@ -207,7 +251,7 @@
   </div>
 
   <div class="modal" id="command-modal"><div class="command-box"><input value="搜索笔记、跳转页面…" readonly><div class="cmd active">新建对话 <span>↵</span></div><div class="cmd">笔记列表</div><div class="cmd">秋冬护肤封面这样做</div><div class="cmd">任务中心</div><p>↑↓ 导航 · ↵ 打开 · Esc 关闭</p></div></div>
-  <div class="modal" id="onboarding-modal"><div class="onboard"><button class="modal-close">×</button><div class="big-emoji">💬</div><h2>智能创作对话</h2><p>在「创作」页直接告诉 AI 你想写什么，它会帮你生成标题、正文、标签和封面图。支持多轮对话持续优化。</p><div class="dots"><i class="on"></i><i></i><i></i><i></i><i></i></div><button class="primary">下一步</button></div></div>
+  <div class="modal" id="onboarding-modal"><div class="onboard"><button class="modal-close">×</button><div class="big-emoji">红</div><h2>智能创作对话</h2><p>在「创作」页直接告诉 AI 你想写什么，它会帮你生成标题、正文、标签和封面图。支持多轮对话持续优化。</p><div class="dots"><i class="on"></i><i></i><i></i><i></i><i></i></div><button class="primary">下一步</button></div></div>
   <div class="modal" id="image-editor-modal"><div class="image-editor"><div class="editor-head"><b>图片编辑器</b><button class="modal-close">×</button></div><div class="editor-tools"><button class="on">裁剪</button><button>局部重绘</button><button>消除</button><button>整体变体</button><span>画笔 32px</span></div><div class="editor-stage"><div class="poster skin"></div><div class="mask-stroke"></div></div><div class="editor-foot"><input value="保持构图，去掉行李箱，增加一位 20+ 年轻女性" readonly><button class="primary">执行编辑</button></div></div></div>
 
   <script src="./app.js"></script>
