@@ -691,7 +691,7 @@ export default function ArticleDetailPage() {
           showHeader={false}
           quickActions={[
             { label: '整体改写', prompt: '帮我整体改写这篇笔记，风格更有网感、更口语化' },
-            { label: '参考仿写', prompt: `参考笔记 #${art.id} 的中文小红书写法，仿写一篇同赛道新笔记；如果需要配图，就基于当前图片做同风格变体` },
+            { label: '参考仿写', prompt: `参考笔记 #${art.id} 的中文小红书写法，仿写一篇【新主题】的小红书笔记。主题可以变化，只参考结构、语气、节奏；如果需要配图，我会明确说“同时仿图”。` },
             { label: '细节优化', prompt: '优化这篇笔记的标题吸引力、开头钩子、情绪价值和标签' },
             { label: '标题候选', prompt: '为这篇笔记生成 6 个候选标题' },
             { label: '段落润色', prompt: '帮我润色正文，让表达更自然流畅' },
@@ -1284,7 +1284,7 @@ export default function ArticleDetailPage() {
             showHeader={false}
             quickActions={[
               { label: '整体改写', prompt: '帮我整体改写这篇笔记，风格更有网感、更口语化' },
-              { label: '参考仿写', prompt: `参考笔记 #${art.id} 的中文小红书写法，仿写一篇同赛道新笔记；如果需要配图，就基于当前图片做同风格变体` },
+              { label: '参考仿写', prompt: `参考笔记 #${art.id} 的中文小红书写法，仿写一篇【新主题】的小红书笔记。主题可以变化，只参考结构、语气、节奏；如果需要配图，我会明确说“同时仿图”。` },
               { label: '打分', prompt: '帮我从内容、视觉、增长、互动四个维度给这篇笔记打分' },
               { label: '生成封面', prompt: '为这篇笔记生成一张干净、有高级感的竖版封面' },
             ]}

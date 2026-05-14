@@ -41,6 +41,18 @@ class CopywritingPromptingTests(unittest.TestCase):
             self.assertIn("guest_reviews", props)
         self.assertIn("降低原帖连续文本/关键词重复", rewrite_props["instruction"]["description"])
 
+    def test_imitate_distinguishes_reference_style_from_new_topic(self):
+        imitate = tools.TOOLS["imitate_article_style"]["schema"]["function"]
+        self.assertIn("新主题", imitate["description"])
+        self.assertIn("北京攻略写上海攻略", imitate["description"])
+        self.assertIn("缺少新主题", imitate["description"])
+        self.assertIn("新主题", SYSTEM_PROMPT)
+        self.assertIn("北京", SYSTEM_PROMPT)
+        self.assertIn("上海", SYSTEM_PROMPT)
+
+    def test_chat_text_accepts_plain_string_gateway_fallback(self):
+        self.assertEqual(tools._chat_text('{"title":"测试"}'), '{"title":"测试"}')
+
 
 if __name__ == "__main__":
     unittest.main()

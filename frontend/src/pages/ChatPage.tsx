@@ -16,10 +16,12 @@ import {
   Chip,
   Menu,
   MenuItem,
+  useMediaQuery,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import CloseIcon from '@mui/icons-material/Close'
 import {
   listConversations,
   deleteConversation,
@@ -47,7 +49,9 @@ export default function ChatPage() {
   const articleId = params.get('article')
   const convId = params.get('c')
   const [article, setArticle] = useState<Article | null>(null)
-  const [sidebar, setSidebar] = useState(false)
+  const isDesktop = useMediaQuery('(min-width:900px)')
+  const [historyOpen, setHistoryOpen] = useState(() => localStorage.getItem('xhs_chat_history_open') !== 'false')
+  const [mobileSidebar, setMobileSidebar] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
   const [articleOptions, setArticleOptions] = useState<Article[]>([])
   const [articleMenuAnchor, setArticleMenuAnchor] = useState<HTMLElement | null>(null)
@@ -59,6 +63,10 @@ export default function ChatPage() {
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(articleId ? Number(articleId) : null)
   const selectedCount = selectedConvoIds.length
   const allSelected = convos.length > 0 && selectedCount === convos.length
+
+  useEffect(() => {
+    localStorage.setItem('xhs_chat_history_open', historyOpen ? 'true' : 'false')
+  }, [historyOpen])
 
   useEffect(() => {
     if (articleId) {
@@ -160,8 +168,147 @@ export default function ChatPage() {
     refreshConvos()
   }
 
+  const toggleHistory = () => {
+    refreshConvos()
+    if (isDesktop) setHistoryOpen(v => !v)
+    else setMobileSidebar(true)
+  }
+
+  const closeHistory = () => {
+    if (isDesktop) setHistoryOpen(false)
+    else setMobileSidebar(false)
+  }
+
+  const HistorySidebar = ({ temporary = false }: { temporary?: boolean }) => (
+    <Box sx={{ width: temporary ? 340 : 304, bgcolor: 'background.paper', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
+        <Typography sx={{ fontSize: 15, fontWeight: 800 }}>
+          历史对话
+        </Typography>
+        <Box sx={{ flex: 1 }} />
+        <Tooltip title="新对话">
+          <IconButton
+            size="small"
+            onClick={() => {
+              newChat()
+              if (temporary) setMobileSidebar(false)
+            }}
+          >
+            <AddIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={temporary ? '关闭' : '收起侧栏'}>
+          <IconButton size="small" onClick={closeHistory}>
+            <CloseIcon sx={{ fontSize: 17 }} />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+      {convos.length > 0 && (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 2, pb: 1.5 }}>
+          {!batchMode ? (
+            <Button size="small" onClick={() => { setBatchMode(true); setSelectedConvoIds([]) }} sx={{ fontSize: 12 }}>
+              批量管理
+            </Button>
+          ) : (
+            <Button size="small" onClick={toggleSelectAll} sx={{ fontSize: 12 }}>
+              {allSelected ? '取消全选' : '全选'}
+            </Button>
+          )}
+          <Typography sx={{ flex: 1, fontSize: 12, color: 'text.secondary' }}>
+            {batchMode ? (selectedCount > 0 ? `已选 ${selectedCount} 条` : '选择要删除的对话') : '像 ChatGPT 一样常驻'}
+          </Typography>
+          {batchMode && selectedCount > 0 && (
+            <Button
+              size="small"
+              color="error"
+              startIcon={<DeleteOutlineIcon sx={{ fontSize: 14 }} />}
+              onClick={() => setBatchDeleteIds(selectedConvoIds)}
+              sx={{ fontSize: 12 }}
+            >
+              删除
+            </Button>
+          )}
+          {batchMode && (
+            <Button size="small" onClick={() => { setBatchMode(false); setSelectedConvoIds([]) }} sx={{ fontSize: 12 }}>
+              取消
+            </Button>
+          )}
+        </Stack>
+      )}
+      <Divider />
+      <List dense sx={{ px: 0.75, py: 1, overflow: 'auto', flex: 1 }}>
+        {convos.map(c => (
+          <ListItemButton
+            key={c.id}
+            selected={convId === String(c.id)}
+            onClick={() => {
+              if (batchMode) {
+                toggleConvoSelection(c.id)
+                return
+              }
+              const next: Record<string, string> = { c: String(c.id) }
+              if (c.article_id) next.article = String(c.article_id)
+              setParams(next)
+              if (temporary) setMobileSidebar(false)
+            }}
+            sx={{ borderRadius: 2, mb: 0.35, py: 0.9 }}
+          >
+            {batchMode && (
+              <Checkbox
+                size="small"
+                checked={selectedConvoIds.includes(c.id)}
+                onClick={e => e.stopPropagation()}
+                onChange={() => toggleConvoSelection(c.id)}
+                sx={{ mr: 0.5, p: 0.5 }}
+              />
+            )}
+            <ListItemText
+              primary={c.title || '新对话'}
+              secondary={formatBeijingDateTime(c.updated_at)}
+              primaryTypographyProps={{ fontSize: 13.5, noWrap: true, fontWeight: convId === String(c.id) ? 700 : 500 }}
+              secondaryTypographyProps={{ fontSize: 11 }}
+            />
+            {!batchMode && (
+              <IconButton
+                size="small"
+                onClick={e => {
+                  e.stopPropagation()
+                  removeConvo(c.id)
+                }}
+              >
+                <DeleteOutlineIcon sx={{ fontSize: 15 }} />
+              </IconButton>
+            )}
+          </ListItemButton>
+        ))}
+        {convos.length === 0 && (
+          <Typography sx={{ px: 2, py: 3, fontSize: 13, color: 'text.secondary', textAlign: 'center' }}>
+            暂无对话
+          </Typography>
+        )}
+      </List>
+    </Box>
+  )
+
   return (
-    <Box sx={{ height: 'calc(100vh - 56px)', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ height: 'calc(100vh - 56px)', display: 'flex', overflow: 'hidden' }}>
+      {isDesktop && (
+        <Box
+          sx={{
+            width: historyOpen ? 304 : 0,
+            flexShrink: 0,
+            overflow: 'hidden',
+            borderRight: historyOpen ? 1 : 0,
+            borderColor: 'divider',
+            transition: 'width .22s ease',
+            bgcolor: 'background.paper',
+          }}
+        >
+          <HistorySidebar />
+        </Box>
+      )}
+
+      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
       {/* Top bar with context info */}
       <Stack
         direction="row"
@@ -176,7 +323,7 @@ export default function ChatPage() {
         }}
       >
         <Tooltip title="历史对话">
-          <IconButton onClick={() => { refreshConvos(); setSidebar(true) }} size="small">
+          <IconButton onClick={toggleHistory} size="small">
             <MenuIcon sx={{ fontSize: 18 }} />
           </IconButton>
         </Tooltip>
@@ -270,123 +417,25 @@ export default function ChatPage() {
                 ? [
                     { label: '加强钩子', prompt: '开头钩子不够戳人，帮我改得更痛一点' },
                     { label: '整体改写', prompt: '把整篇改写得更有网感、更口语化' },
-                    { label: '参考仿写', prompt: `参考笔记 #${article.id} 的中文小红书风格，仿写一篇同赛道新笔记；如果需要图片，调用图片编辑模仿参考图风格` },
+                    { label: '参考仿写', prompt: `参考笔记 #${article.id} 的中文小红书写法，仿写一篇【新主题】的小红书笔记。参考它的结构、语气和节奏，但主题可以变化；如果需要同风格图片，我会明确说“同时仿图”。` },
                     { label: '打分', prompt: '先读一次当前正文，然后给它做五维打分' },
                     { label: '诊断', prompt: '做发布前诊断，重点查违禁词和 CTA' },
                     { label: '生成封面', prompt: '为这篇笔记生成一张干净、高级感的竖版封面' },
                   ]
                 : [
-                    { label: '参考仿写', prompt: '我想从库里选一篇笔记做参考仿写，请先让我选择参考笔记，或告诉你参考笔记 ID' },
-                    { label: '一键成稿', prompt: '帮我一键成稿：主题是「」，默认生成 3:4 竖版图片；如果我写 2K/4K 或 16:9，请按我的分辨率和比例来' },
-                    { label: '生成图片', prompt: '生成一张小红书风格图片，默认 3:4 竖版；如我指定 2K/4K/比例请严格按指定 size' },
+                    { label: '参考仿写', prompt: '我想参考笔记 #【参考ID】 的中文小红书写法，仿写一篇【新主题】的小红书笔记。请先确认参考笔记、新主题、是否写成新草稿，以及是否需要同风格图片。' },
+                    { label: '一键成稿', prompt: '帮我完成一篇【主题】的小红书笔记，目标受众是【人群】，包含标题候选、标签、封面方向和发布前自检。先不要真实生成图片，除非我明确说要出图。' },
+                    { label: '生成图片', prompt: '帮我生成一张【主题】的小红书风格图片，比例【3:4】，分辨率【1536x2048】，不绑定笔记。' },
                   ]
             }
           />
         </Box>
       </Box>
+      </Box>
 
-      {/* History drawer */}
-      <Drawer open={sidebar} onClose={() => setSidebar(false)}>
-        <Box sx={{ width: 340, bgcolor: 'background.paper', height: '100%' }}>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2.5 }}>
-            <Typography sx={{ fontSize: 15, fontWeight: 700 }}>
-              历史对话
-            </Typography>
-            <Box sx={{ flex: 1 }} />
-            <Button
-              size="small"
-              startIcon={<AddIcon sx={{ fontSize: 14 }} />}
-              onClick={() => {
-                newChat()
-                setSidebar(false)
-              }}
-              sx={{ fontSize: 12 }}
-            >
-              新建
-            </Button>
-          </Stack>
-          {convos.length > 0 && (
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 2.5, pb: 1.5 }}>
-              {!batchMode ? (
-                <Button size="small" onClick={() => { setBatchMode(true); setSelectedConvoIds([]) }} sx={{ fontSize: 12 }}>
-                  批量管理
-                </Button>
-              ) : (
-                <Button size="small" onClick={toggleSelectAll} sx={{ fontSize: 12 }}>
-                  {allSelected ? '取消全选' : '全选'}
-                </Button>
-              )}
-              <Typography sx={{ flex: 1, fontSize: 12, color: 'text.secondary' }}>
-                {batchMode ? (selectedCount > 0 ? `已选 ${selectedCount} 条` : '选择要删除的对话') : '点击对话继续'}
-              </Typography>
-              {batchMode && selectedCount > 0 && (
-                <Button
-                  size="small"
-                  color="error"
-                  startIcon={<DeleteOutlineIcon sx={{ fontSize: 14 }} />}
-                  onClick={() => setBatchDeleteIds(selectedConvoIds)}
-                  sx={{ fontSize: 12 }}
-                >
-                  批量删除
-                </Button>
-              )}
-              {batchMode && (
-                <Button size="small" onClick={() => { setBatchMode(false); setSelectedConvoIds([]) }} sx={{ fontSize: 12 }}>
-                  取消
-                </Button>
-              )}
-            </Stack>
-          )}
-          <Divider />
-          <List dense sx={{ px: 0.5, py: 1 }}>
-            {convos.map(c => (
-              <ListItemButton
-                key={c.id}
-                onClick={() => {
-                  if (batchMode) {
-                    toggleConvoSelection(c.id)
-                    return
-                  }
-                  const next: Record<string, string> = { c: String(c.id) }
-                  if (c.article_id) next.article = String(c.article_id)
-                  setParams(next)
-                  setSidebar(false)
-                }}
-                sx={{ borderRadius: 2, mb: 0.3 }}
-              >
-                {batchMode && (
-                  <Checkbox
-                    size="small"
-                    checked={selectedConvoIds.includes(c.id)}
-                    onClick={e => e.stopPropagation()}
-                    onChange={() => toggleConvoSelection(c.id)}
-                    sx={{ mr: 0.5, p: 0.5 }}
-                  />
-                )}
-                <ListItemText
-                  primary={c.title || '新对话'}
-                  secondary={formatBeijingDateTime(c.updated_at)}
-                  primaryTypographyProps={{ fontSize: 13.5, noWrap: true, fontWeight: 500 }}
-                  secondaryTypographyProps={{ fontSize: 11 }}
-                />
-                <IconButton
-                  size="small"
-                  onClick={e => {
-                    e.stopPropagation()
-                    removeConvo(c.id)
-                  }}
-                >
-                  <DeleteOutlineIcon sx={{ fontSize: 15 }} />
-                </IconButton>
-              </ListItemButton>
-            ))}
-            {convos.length === 0 && (
-              <Typography sx={{ px: 2, py: 3, fontSize: 13, color: 'text.secondary', textAlign: 'center' }}>
-                暂无对话
-              </Typography>
-            )}
-          </List>
-        </Box>
+      {/* Mobile history drawer */}
+      <Drawer open={!isDesktop && mobileSidebar} onClose={() => setMobileSidebar(false)}>
+        <HistorySidebar temporary />
       </Drawer>
 
       <ConfirmDialog

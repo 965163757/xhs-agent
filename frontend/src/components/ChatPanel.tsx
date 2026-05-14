@@ -67,6 +67,7 @@ export default function ChatPanel({
   const { messages, input, pendingImages, streaming, status } = session
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' })
   }, [messages, streaming, status])
@@ -83,6 +84,12 @@ export default function ChatPanel({
   async function handleUpload(file: File) {
     const url = await uploadImage(file)
     storeSetPendingImages(sessionKey, [...pendingImages, url])
+  }
+
+  function fillQuickAction(prompt: string) {
+    if (streaming) return
+    storeSetInput(sessionKey, prompt)
+    requestAnimationFrame(() => inputRef.current?.focus())
   }
 
   return (
@@ -279,7 +286,8 @@ export default function ChatPanel({
                     label={q.label}
                     size="small"
                     clickable
-                    onClick={() => handleSend(q.prompt)}
+                    disabled={streaming}
+                    onClick={() => fillQuickAction(q.prompt)}
                     sx={{
                       bgcolor: 'background.paper',
                       border: '1px solid',
@@ -340,7 +348,8 @@ export default function ChatPanel({
                   label={q.label}
                   size="small"
                   clickable={!streaming}
-                  onClick={() => { if (!streaming) handleSend(q.prompt) }}
+                  disabled={streaming}
+                  onClick={() => fillQuickAction(q.prompt)}
                   sx={{
                     bgcolor: 'background.default',
                     border: '1px solid',
@@ -428,6 +437,7 @@ export default function ChatPanel({
               </IconButton>
             </Tooltip>
             <TextField
+              inputRef={inputRef}
               multiline
               minRows={1}
               maxRows={8}

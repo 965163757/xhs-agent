@@ -315,6 +315,33 @@ def _safe_json(text: str) -> Dict[str, Any]:
     return {}
 
 
+def _chat_text(resp: Any) -> str:
+    """Return assistant text from OpenAI-compatible responses or loose string fallbacks.
+
+    Some gateways/test doubles return a plain string or dict-like payload instead
+    of the official `ChatCompletion` object. Tool code should not explode with
+    `'str' object has no attribute choices'`; it should parse whatever text is
+    available and then fall back gracefully.
+    """
+    if resp is None:
+        return ""
+    if isinstance(resp, str):
+        return resp
+    if isinstance(resp, dict):
+        try:
+            choices = resp.get("choices") or []
+            if choices:
+                message = (choices[0] or {}).get("message") or {}
+                return str(message.get("content") or choices[0].get("text") or "")
+            return str(resp.get("content") or resp.get("text") or "")
+        except Exception:
+            return ""
+    try:
+        return str(resp.choices[0].message.content or "")
+    except Exception:
+        return str(resp or "")
+
+
 def _configured_public_base_url() -> str:
     settings = get_current_settings() or get_settings()
     base = (getattr(settings, "public_base_url", "") or "").strip().rstrip("/")
@@ -1245,7 +1272,7 @@ async def tool_generate_article(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.9,
     )
-    content = resp.choices[0].message.content or ""
+    content = _chat_text(resp)
     data = _safe_json(content)
     title = _normalize_title(data.get("title"), topic)
     body = data.get("body") or content
@@ -1325,7 +1352,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         ],
         temperature=0.85,
     )
-    data = _safe_json(resp.choices[0].message.content or "")
+    data = _safe_json(_chat_text(resp))
     emit_tool_progress("已完成初稿生成，正在整理标题、正文、标签和图片方向", step="draft_ready")
 
     title = _normalize_title(data.get("title"), topic)
@@ -1395,7 +1422,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             ],
             temperature=0.65,
         )
-        opt = _safe_json(opt_resp.choices[0].message.content or "")
+        opt = _safe_json(_chat_text(opt_resp))
         if opt:
             title = _normalize_title(opt.get("title"), title)
             body = str(opt.get("body") or body).strip()
@@ -1606,7 +1633,7 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.92,
     )
-    content = resp.choices[0].message.content or ""
+    content = _chat_text(resp)
     data = _safe_json(content)
 
     async with SessionLocal() as s:
@@ -1649,6 +1676,22 @@ async def tool_imitate_article_style(args: Dict[str, Any]) -> Dict[str, Any]:
         assert target is not None
         await _snapshot_article(target_id, f"imitate_style:{ref_id}")
 
+    placeholder_topic = bool(re.search(r"[【{].*?(主题|新主题|选题).*?[】}]", topic)) or topic in {
+        "同赛道",
+        "同领域",
+        "沿用参考",
+        "沿用参考笔记",
+        "按参考来",
+    }
+    if not target and (not topic or placeholder_topic):
+        return {
+            "ok": False,
+            "needs_clarification": True,
+            "error": "仿写前还差新主题/目标笔记：请说明要仿写成什么主题（例如把参考的北京攻略改成上海攻略）、是否新建草稿，以及是否需要同风格图片。",
+            "missing": ["topic_or_target_article", "write_mode"],
+            "suggestion": f"可以回复：参考笔记 #{ref_id} 的写法，仿写一篇【上海周末旅行攻略】，新建草稿，暂不出图。",
+        }
+
     from .research_data import detect_category
 
     seed_title = target.title if target else topic
@@ -1674,7 +1717,8 @@ async def tool_imitate_article_style(args: Dict[str, Any]) -> Dict[str, Any]:
                 "role": "system",
                 "content": (
                     "你是小红书风格仿写专家。你的任务不是复制原文，而是提取参考笔记的结构、语气、节奏、标题套路、"
-                    "信息组织和视觉风格，再生成一篇新的小红书笔记。避免照搬连续 12 个字以上的原句，避免虚构无法从主题推出的事实。\n"
+                    "信息组织和视觉风格，再按新主题生成一篇新的小红书笔记。参考笔记的城市/商品/场景不是必须沿用；"
+                    "如果新主题是上海，就不要继续写北京。避免照搬连续 12 个字以上的原句，避免虚构无法从主题推出的事实。\n"
                     "严格按 JSON 返回："
                     "{"
                     '"style_profile":{"tone":"语气","structure":"结构","hook":"开头钩子套路","visual_style":"图片风格"},'
@@ -1691,15 +1735,16 @@ async def tool_imitate_article_style(args: Dict[str, Any]) -> Dict[str, Any]:
                     f"【参考笔记】\n{_article_prompt_context(ref, body_limit=5000)}\n\n"
                     f"【参考图片完整 URL】\n{ref_image_lines}\n\n"
                     + (f"【要改写/仿写到的目标笔记】\n{_article_prompt_context(target, body_limit=5000)}\n\n" if target else "")
-                    + f"【新主题/要求】\n主题：{topic or '沿用目标笔记主题/参考笔记同赛道'}\n补充要求：{instruction or '保持信息真实、口语化、有收藏价值'}\n"
+                    + f"【新主题/要求】\n主题：{topic or '沿用目标笔记主题'}\n补充要求：{instruction or '保持信息真实、口语化、有收藏价值'}\n"
                     f"{playbook}\n"
+                    "请只复用参考笔记的写法、结构、节奏和视觉气质，不复用参考笔记的具体事实/城市/价格/路线。"
                     "请输出可直接写入草稿箱的标题、正文、标签；如果需要生成图片，image_plan 要让 edit_image 基于参考图做同风格变体，而不是原图复制。"
                 ),
             },
         ],
         temperature=0.78,
     )
-    data = _safe_json(resp.choices[0].message.content or "")
+    data = _safe_json(_chat_text(resp))
     title = _normalize_title(data.get("title"), target.title if target else topic or ref.title or "仿写笔记")
     body = str(data.get("body") or (target.body if target else "")).strip()
     fallback_tags = (target.tags or "").split(",") if target else (ref.tags or "").split(",")
@@ -1830,7 +1875,7 @@ async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.7,
     )
-    content = resp.choices[0].message.content or ""
+    content = _chat_text(resp)
     data = _safe_json(content)
 
     async with SessionLocal() as s:
@@ -1863,7 +1908,7 @@ async def tool_polish_paragraph(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.7,
     )
-    text = (resp.choices[0].message.content or "").strip()
+    text = (_chat_text(resp)).strip()
     return {"ok": True, "paragraph": text}
 
 
@@ -1896,7 +1941,7 @@ async def tool_score_article(args: Dict[str, Any]) -> Dict[str, Any]:
             ],
             temperature=0.3,
         )
-        raw = _safe_json(resp.choices[0].message.content or "")
+        raw = _safe_json(_chat_text(resp))
         data = _normalize_score_payload(raw, fallback)
     except Exception as e:
         data = dict(fallback)
@@ -2011,7 +2056,7 @@ async def tool_suggest_tags(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.6,
     )
-    data = _safe_json(resp.choices[0].message.content or "")
+    data = _safe_json(_chat_text(resp))
     return {"ok": True, "tags": data.get("tags", [])}
 
 
@@ -2035,7 +2080,7 @@ async def tool_suggest_titles(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.95,
     )
-    data = _safe_json(resp.choices[0].message.content or "")
+    data = _safe_json(_chat_text(resp))
     titles = [_normalize_title(x) for x in (data.get("titles") or []) if _normalize_title(x)]
     return {"ok": True, "titles": titles[:n]}
 
@@ -2056,7 +2101,7 @@ async def tool_outline_article(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.7,
     )
-    data = _safe_json(resp.choices[0].message.content or "")
+    data = _safe_json(_chat_text(resp))
     return {"ok": True, "outline": data}
 
 
@@ -2094,7 +2139,7 @@ async def tool_cover_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.8,
     )
-    data = _safe_json(resp.choices[0].message.content or "")
+    data = _safe_json(_chat_text(resp))
     return {"ok": True, "cover": data}
 
 
@@ -2389,7 +2434,7 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.8,
     )
-    data = _safe_json(resp.choices[0].message.content or "")
+    data = _safe_json(_chat_text(resp))
     normalized = _normalize_shots(data.get("shots", [])[:n], limit=n)
     if not normalized:
         normalized = _fallback_storyboard_shots(str(title or topic), str(body), n)
@@ -2870,7 +2915,7 @@ async def tool_apply_template(args: Dict[str, Any]) -> Dict[str, Any]:
         ],
         temperature=0.8,
     )
-    data = _safe_json(resp.choices[0].message.content or "")
+    data = _safe_json(_chat_text(resp))
     title = _normalize_title(data.get("title"), topic)
     body = data.get("body") or ""
     tags = _normalize_tags(data.get("tags") or [])
@@ -3112,11 +3157,11 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_imitate_article_style,
         "schema": _fn_schema(
             "imitate_article_style",
-            "参考某篇笔记的中文小红书写法/结构/视觉风格做仿写。可写回目标笔记或新建笔记；需要仿图时会用 edit_image 基于参考图生成同风格变体并绑定。",
+            "参考某篇笔记的中文小红书写法/结构/视觉风格做仿写。仿写主题可以与参考笔记不同，例如参考北京攻略写上海攻略；缺少新主题且没有目标笔记时应先反问，不要默认照搬参考主题。可写回目标笔记或新建笔记；需要仿图时会用 edit_image 基于参考图生成同风格变体并绑定。",
             {
                 "reference_article_id": {"type": "integer", "description": "作为风格参考的笔记 ID"},
                 "target_article_id": {"type": "integer", "description": "要写回的目标笔记 ID；不传则新建笔记"},
-                "topic": {"type": "string", "description": "新主题/选题；为空时沿用目标笔记或参考笔记同赛道"},
+                "topic": {"type": "string", "description": "新主题/选题，可以与参考笔记不同；例如参考北京笔记写上海。无目标笔记且用户未给新主题时不要调用本工具，先反问"},
                 "instruction": {"type": "string", "description": "额外仿写要求、受众、禁用点等"},
                 "generate_images": {"type": "boolean", "description": "是否同时仿图，默认 false"},
                 "image_count": {"type": "integer", "description": "仿图数量 0-6"},
