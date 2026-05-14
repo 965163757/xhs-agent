@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
@@ -23,6 +23,7 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft'
 import ChecklistIcon from '@mui/icons-material/Checklist'
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline'
 import {
   listConversations,
   deleteConversation,
@@ -44,6 +45,14 @@ const suggestions = [
   { icon: '🎨', title: '生成封面图', prompt: '帮我生成一张小红书风格的封面图，主题是「秋冬护肤」，要干净高级感' },
   { icon: '🧪', title: '诊断我的笔记', prompt: '帮我诊断笔记 #1，看看哪里可以优化' },
 ]
+
+type ConversationRow =
+  | { type: 'group'; key: string; ownerName: string; count: number }
+  | { type: 'conversation'; key: string; conversation: Conversation }
+
+function conversationOwnerName(c: Conversation) {
+  return c.owner_user?.username || (c.user_id ? `用户 ${c.user_id}` : '未归属用户')
+}
 
 export default function ChatPage() {
   const nav = useNavigate()
@@ -67,6 +76,24 @@ export default function ChatPage() {
   const currentSessionKey = convId ? `conv:${convId}` : sessionKeyFor(articleId ? Number(articleId) : null)
   const selectedCount = selectedConvoIds.length
   const allSelected = convos.length > 0 && selectedCount === convos.length
+
+  const conversationRows = useMemo<ConversationRow[]>(() => {
+    if (!isAdmin) {
+      return convos.map(conversation => ({ type: 'conversation', key: `conversation-${conversation.id}`, conversation }))
+    }
+    const groups = new Map<string, { ownerName: string; items: Conversation[] }>()
+    convos.forEach(conversation => {
+      const ownerName = conversationOwnerName(conversation)
+      const key = String(conversation.user_id ?? ownerName)
+      const group = groups.get(key) || { ownerName, items: [] }
+      group.items.push(conversation)
+      groups.set(key, group)
+    })
+    return Array.from(groups.entries()).flatMap(([key, group]) => [
+      { type: 'group' as const, key: `group-${key}`, ownerName: group.ownerName, count: group.items.length },
+      ...group.items.map(conversation => ({ type: 'conversation' as const, key: `conversation-${conversation.id}`, conversation })),
+    ])
+  }, [convos, isAdmin])
 
   useEffect(() => {
     localStorage.setItem('xhs_chat_history_open', historyOpen ? 'true' : 'false')
@@ -253,9 +280,28 @@ export default function ChatPage() {
       )}
       <Divider />
       <List dense sx={{ px: 0.75, py: 1, overflow: 'auto', flex: 1 }}>
-        {convos.map(c => (
+        {conversationRows.map(row => {
+          if (row.type === 'group') {
+            return (
+              <Stack
+                key={row.key}
+                direction="row"
+                alignItems="center"
+                spacing={0.75}
+                sx={{ px: 1, pt: 1.1, pb: 0.45 }}
+              >
+                <PersonOutlineIcon sx={{ fontSize: 15, color: '#2563EB' }} />
+                <Typography noWrap sx={{ fontSize: 12, fontWeight: 800, color: 'text.primary', flex: 1 }}>
+                  {row.ownerName}
+                </Typography>
+                <Chip size="small" label={`${row.count}`} sx={{ height: 18, fontSize: 10, bgcolor: 'action.hover' }} />
+              </Stack>
+            )
+          }
+          const c = row.conversation
+          return (
           <ListItemButton
-            key={c.id}
+            key={row.key}
             selected={convId === String(c.id)}
             onClick={() => {
               if (batchMode) {
@@ -296,7 +342,8 @@ export default function ChatPage() {
               </IconButton>
             )}
           </ListItemButton>
-        ))}
+          )
+        })}
         {convos.length === 0 && (
           <Typography sx={{ px: 2, py: 3, fontSize: 13, color: 'text.secondary', textAlign: 'center' }}>
             暂无对话

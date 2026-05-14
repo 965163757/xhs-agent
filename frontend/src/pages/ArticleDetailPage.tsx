@@ -1,4 +1,4 @@
-import { type DragEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Box,
@@ -54,6 +54,7 @@ import PhonePreview from '../components/PhonePreview'
 import TagInput from '../components/TagInput'
 import { getSession, loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor } from '../chatStore'
 import { appDateTimestamp, formatBeijingDateTime } from '../utils/time'
+import { useAuth } from '../AuthContext'
 
 function ImageFrame({
   src,
@@ -321,6 +322,14 @@ function formatBytes(bytes?: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`
 }
 
+type ConversationRow =
+  | { type: 'group'; key: string; ownerName: string; count: number }
+  | { type: 'conversation'; key: string; conversation: Conversation }
+
+function conversationOwnerName(c: Conversation) {
+  return c.owner_user?.username || (c.user_id ? `用户 ${c.user_id}` : '未归属用户')
+}
+
 export default function ArticleDetailPage() {
   const { id } = useParams()
   const nav = useNavigate()
@@ -358,9 +367,28 @@ export default function ArticleDetailPage() {
   const [publishing, setPublishing] = useState(false)
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
   const [dragImagePos, setDragImagePos] = useState<number | null>(null)
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const selectedCount = selectedConvoIds.length
   const allSelected = convos.length > 0 && selectedCount === convos.length
   const selectedConversation = convId ? convos.find(c => c.id === Number(convId)) : undefined
+  const conversationRows = useMemo<ConversationRow[]>(() => {
+    if (!isAdmin) {
+      return convos.map(conversation => ({ type: 'conversation', key: `conversation-${conversation.id}`, conversation }))
+    }
+    const groups = new Map<string, { ownerName: string; items: Conversation[] }>()
+    convos.forEach(conversation => {
+      const ownerName = conversationOwnerName(conversation)
+      const key = String(conversation.user_id ?? ownerName)
+      const group = groups.get(key) || { ownerName, items: [] }
+      group.items.push(conversation)
+      groups.set(key, group)
+    })
+    return Array.from(groups.entries()).flatMap(([key, group]) => [
+      { type: 'group' as const, key: `group-${key}`, ownerName: group.ownerName, count: group.items.length },
+      ...group.items.map(conversation => ({ type: 'conversation' as const, key: `conversation-${conversation.id}`, conversation })),
+    ])
+  }, [convos, isAdmin])
 
   const refreshConvos = useCallback(() => {
     listConversations().then(all => {
@@ -645,15 +673,23 @@ export default function ArticleDetailPage() {
   ) : null
 
   return (
-    <Box sx={{ height: 'calc(100vh - 56px)', display: 'flex', bgcolor: 'background.paper' }}>
+    <Box
+      sx={{
+        height: 'calc(100dvh - 56px)',
+        minHeight: 0,
+        display: 'flex',
+        bgcolor: 'background.paper',
+        overflow: 'hidden',
+      }}
+    >
       {/* left: chat panel */}
       <Box
         sx={{
-          width: 380,
+          width: { lg: 320, xl: 360 },
           flexShrink: 0,
           borderRight: 1,
           borderColor: 'divider',
-          display: { xs: 'none', md: 'flex' },
+          display: { xs: 'none', lg: 'flex' },
           flexDirection: 'column',
         }}
       >
@@ -705,9 +741,25 @@ export default function ArticleDetailPage() {
       </Box>
 
       {/* middle: editor */}
-      <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-        <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 900, mx: 'auto' }}>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2.5 }}>
+      <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
+        <Box sx={{ p: { xs: 1.5, sm: 2, lg: 2.5, xl: 3 }, maxWidth: { xs: '100%', lg: 940, xl: 980 }, mx: 'auto' }}>
+          <Stack
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            sx={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 5,
+              mb: 2,
+              py: 1,
+              bgcolor: 'background.paper',
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              flexWrap: 'wrap',
+              gap: 0.8,
+            }}
+          >
             <IconButton onClick={() => nav(-1)} size="small">
               <ArrowBackIcon />
             </IconButton>
@@ -851,10 +903,18 @@ export default function ArticleDetailPage() {
                 label="正文"
                 fullWidth
                 multiline
-                minRows={14}
+                minRows={12}
                 value={art.body}
                 onChange={e => setArt({ ...art, body: e.target.value })}
-                InputProps={{ sx: { fontSize: 14.5, lineHeight: 1.75 } }}
+                InputProps={{
+                  sx: {
+                    fontSize: 14.5,
+                    lineHeight: 1.75,
+                    '& textarea': {
+                      minHeight: { lg: 'min(42dvh, 520px)' },
+                    },
+                  },
+                }}
               />
               <Typography
                 sx={{
@@ -1061,11 +1121,11 @@ export default function ArticleDetailPage() {
       {/* right: phone preview */}
       <Box
         sx={{
-          width: 370,
+          width: { xl: 352 },
           flexShrink: 0,
           borderLeft: 1,
           borderColor: 'divider',
-          display: { xs: 'none', lg: 'flex' },
+          display: { xs: 'none', xl: 'flex' },
           alignItems: 'center',
           justifyContent: 'flex-start',
           bgcolor: 'background.default',
@@ -1118,11 +1178,18 @@ export default function ArticleDetailPage() {
 
       {/* History drawer */}
       <Drawer open={sidebar} onClose={() => setSidebar(false)}>
-        <Box sx={{ width: 340, bgcolor: 'background.paper' }}>
+        <Box sx={{ width: { xs: 340, sm: 380 }, maxWidth: '92vw', height: '100%', bgcolor: 'background.paper', display: 'flex', flexDirection: 'column' }}>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2 }}>
             <Typography variant="subtitle1" fontWeight={700}>
-              全部对话记录
+              {isAdmin ? '全部对话记录' : '对话记录'}
             </Typography>
+            {isAdmin && (
+              <Chip
+                size="small"
+                label="按用户"
+                sx={{ height: 20, fontSize: 10.5, bgcolor: 'rgba(59,130,246,0.08)', color: '#2563EB' }}
+              />
+            )}
             <Box sx={{ flex: 1 }} />
             <Button
               size="small"
@@ -1165,13 +1232,31 @@ export default function ArticleDetailPage() {
             </Stack>
           )}
           <Divider />
-          <List dense>
-            {convos.map(c => {
+          <List dense sx={{ overflow: 'auto', flex: 1, px: 0.5, py: 0.75 }}>
+            {conversationRows.map(row => {
+              if (row.type === 'group') {
+                return (
+                  <Stack
+                    key={row.key}
+                    direction="row"
+                    alignItems="center"
+                    spacing={0.75}
+                    sx={{ px: 1.2, pt: 1.1, pb: 0.45 }}
+                  >
+                    <PersonOutlineIcon sx={{ fontSize: 15, color: '#2563EB' }} />
+                    <Typography noWrap sx={{ fontSize: 12, fontWeight: 800, color: 'text.primary', flex: 1 }}>
+                      {row.ownerName}
+                    </Typography>
+                    <Chip size="small" label={`${row.count}`} sx={{ height: 18, fontSize: 10, bgcolor: 'action.hover' }} />
+                  </Stack>
+                )
+              }
+              const c = row.conversation
               const isCurrentArticle = c.article_id === art.id
               const isOtherArticle = !!c.article_id && !isCurrentArticle
               return (
                 <ListItemButton
-                  key={c.id}
+                  key={row.key}
                   selected={convId === String(c.id)}
                   onClick={() => {
                     if (batchMode) {
@@ -1272,7 +1357,7 @@ export default function ArticleDetailPage() {
       <IconButton
         onClick={() => setMobileChat(true)}
         sx={{
-          display: { xs: 'flex', md: 'none' },
+          display: { xs: 'flex', lg: 'none' },
           position: 'fixed',
           bottom: 24,
           right: 24,
@@ -1294,7 +1379,7 @@ export default function ArticleDetailPage() {
         open={mobileChat}
         onClose={() => setMobileChat(false)}
         PaperProps={{ sx: { height: '85vh', borderTopLeftRadius: 16, borderTopRightRadius: 16 } }}
-        sx={{ display: { xs: 'block', md: 'none' } }}
+        sx={{ display: { xs: 'block', lg: 'none' } }}
       >
         <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Stack direction="row" alignItems="center" sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>

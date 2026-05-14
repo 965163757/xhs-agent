@@ -31,6 +31,9 @@ import { appDateTimestamp, formatBeijingDate } from '../utils/time'
 import { useAuth } from '../AuthContext'
 
 type SortKey = 'updated' | 'score' | 'title'
+type ArticleRow =
+  | { type: 'group'; key: string; ownerName: string; count: number }
+  | { type: 'article'; key: string; article: Article }
 
 const statusColors: Record<string, { bg: string; color: string }> = {
   draft: { bg: 'rgba(107,114,128,0.08)', color: '#6B7280' },
@@ -43,6 +46,10 @@ function articleScore(a: Article) {
   if (Number.isFinite(direct)) return Math.round(direct)
   const total = Number(a.score?.total_score ?? a.score?.overall_score ?? a.score?.model_a_score?.total_score)
   return Number.isFinite(total) ? Math.round(total) : 0
+}
+
+function articleOwnerName(a: Article) {
+  return a.owner_user?.username || (a.user_id ? `用户 ${a.user_id}` : '未归属用户')
 }
 
 export default function ArticlesPage() {
@@ -85,10 +92,28 @@ export default function ArticlesPage() {
     return list
   }, [items, query, statusFilter, sortBy])
 
+  const articleRows = useMemo<ArticleRow[]>(() => {
+    if (!isAdmin) {
+      return filtered.map(article => ({ type: 'article', key: `article-${article.id}`, article }))
+    }
+    const groups = new Map<string, { ownerName: string; items: Article[] }>()
+    filtered.forEach(article => {
+      const ownerName = articleOwnerName(article)
+      const key = String(article.user_id ?? ownerName)
+      const group = groups.get(key) || { ownerName, items: [] }
+      group.items.push(article)
+      groups.set(key, group)
+    })
+    return Array.from(groups.entries()).flatMap(([key, group]) => [
+      { type: 'group' as const, key: `group-${key}`, ownerName: group.ownerName, count: group.items.length },
+      ...group.items.map(article => ({ type: 'article' as const, key: `article-${article.id}`, article })),
+    ])
+  }, [filtered, isAdmin])
+
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1100, mx: 'auto' }}>
+    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: { xs: '100%', lg: 1120, xl: 1240 }, mx: 'auto' }}>
       {/* Header */}
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3.5 }}>
+      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3.5, flexWrap: 'wrap', gap: 1 }}>
         <Stack spacing={0.2}>
           <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
             {isAdmin ? '全部笔记' : '我的笔记'}
@@ -97,6 +122,20 @@ export default function ArticlesPage() {
             {items.length} 篇笔记{isAdmin ? ' · 管理员视图' : ''}
           </Typography>
         </Stack>
+        {isAdmin && (
+          <Chip
+            size="small"
+            icon={<PersonOutlineIcon sx={{ fontSize: '14px !important' }} />}
+            label="按用户分组"
+            sx={{
+              height: 24,
+              fontSize: 12,
+              bgcolor: 'rgba(59,130,246,0.08)',
+              color: '#2563EB',
+              '& .MuiChip-icon': { color: '#2563EB' },
+            }}
+          />
+        )}
         <Box sx={{ flex: 1 }} />
         <ToggleButtonGroup
           size="small"
@@ -139,7 +178,7 @@ export default function ArticlesPage() {
         </FormControl>
         <TextField
           size="small"
-          placeholder="搜索…"
+          placeholder={isAdmin ? '搜索标题 / 用户…' : '搜索…'}
           value={query}
           onChange={e => setQuery(e.target.value)}
           InputProps={{
@@ -149,7 +188,7 @@ export default function ArticlesPage() {
               </InputAdornment>
             ),
           }}
-          sx={{ width: 180 }}
+          sx={{ width: { xs: '100%', sm: 220 } }}
         />
         <Button
           variant="contained"
@@ -184,9 +223,34 @@ export default function ArticlesPage() {
       )}
 
       <Stack spacing={1.5}>
-        {filtered.map(a => (
+        {articleRows.map(row => {
+          if (row.type === 'group') {
+            return (
+              <Stack
+                key={row.key}
+                direction="row"
+                alignItems="center"
+                spacing={1}
+                sx={{
+                  pt: 1.2,
+                  pb: 0.2,
+                  color: 'text.secondary',
+                  '&:first-of-type': { pt: 0 },
+                }}
+              >
+                <PersonOutlineIcon sx={{ fontSize: 16, color: '#2563EB' }} />
+                <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: 'text.primary' }}>
+                  {row.ownerName}
+                </Typography>
+                <Chip size="small" label={`${row.count} 篇`} sx={{ height: 19, fontSize: 10.5, bgcolor: 'action.hover' }} />
+                <Box sx={{ flex: 1, height: 1, bgcolor: 'divider' }} />
+              </Stack>
+            )
+          }
+          const a = row.article
+          return (
           <Box
-            key={a.id}
+            key={row.key}
             onClick={() => nav(`/articles/${a.id}`)}
             sx={{
               display: 'flex',
@@ -347,7 +411,8 @@ export default function ArticlesPage() {
               </Stack>
             </Stack>
           </Box>
-        ))}
+          )
+        })}
       </Stack>
 
       <ConfirmDialog
