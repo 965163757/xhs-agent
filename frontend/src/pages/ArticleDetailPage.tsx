@@ -81,7 +81,7 @@ function adaptiveBodyRows(body: string) {
   const visualLines = body
     .split('\n')
     .reduce((total, line) => total + Math.max(1, Math.ceil((line.trim().length || 1) / 46)), 0)
-  return clamp(visualLines + 2, 10, 34)
+  return clamp(Math.ceil(visualLines * 0.62) + 1, 7, 16)
 }
 
 function fitEditorLayout(layout: { left: number; right: number }, rootWidth: number) {
@@ -753,15 +753,15 @@ export default function ArticleDetailPage() {
   }
   const sectionHeaderSx = {
     px: 1.25,
-    py: 0.85,
-    minHeight: 42,
+    py: 0.6,
+    minHeight: 34,
     borderBottom: '1px solid rgba(15,23,42,0.08)',
     bgcolor: 'rgba(248,250,252,0.72)',
     '& .MuiChip-root': { borderRadius: 1 },
   }
   const sectionBodySx = {
     px: 1.25,
-    py: 1.05,
+    py: 0.75,
     bgcolor: '#fff',
   }
   const imageBindingForPosition = (pos: number) => (
@@ -1159,7 +1159,7 @@ export default function ArticleDetailPage() {
                   }}
                 />
               </Stack>
-              <Box sx={{ ...sectionBodySx, py: 0.85 }}>
+              <Box sx={{ ...sectionBodySx, py: 0.7 }}>
                 <TextField
                   placeholder="输入一个抓人的小红书标题"
                   fullWidth
@@ -1176,7 +1176,7 @@ export default function ArticleDetailPage() {
                   fullWidth
                   multiline
                   minRows={bodyRows}
-                  maxRows={44}
+                  maxRows={20}
                   value={art.body}
                   onChange={e => setArt({ ...art, body: e.target.value })}
                   InputProps={{
@@ -1215,6 +1215,7 @@ export default function ArticleDetailPage() {
                 <TagInput
                   tags={art.tags || []}
                   onChange={tags => setArt({ ...art, tags })}
+                  showLabel={false}
                 />
               </Box>
             </Box>
@@ -1390,19 +1391,19 @@ export default function ArticleDetailPage() {
             </Box>
 
             {/* version history */}
-            <Box sx={{ order: 6, border: '1px solid rgba(15,23,42,0.08)', bgcolor: 'rgba(255,255,255,0.86)', borderRadius: 1, p: 1.35 }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ cursor: 'pointer' }} onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
+            <Box sx={{ order: 6, ...sectionCardSx }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ ...sectionHeaderSx, cursor: 'pointer' }} onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
                   版本历史
                 </Typography>
                 {versions.length > 0 && (
-                  <Chip size="small" label={`${versions.length}个版本`} sx={{ fontSize: 10, height: 18 }} />
+                  <Chip size="small" label={`${versions.length} 个版本`} sx={{ fontSize: 10.5, height: 20, fontWeight: 700, bgcolor: '#F1F5F9', color: '#64748B' }} />
                 )}
                 <Box flex={1} />
                 <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{showVersions ? '收起' : '展开'}</Typography>
               </Stack>
               {showVersions && (
-                <Stack spacing={1} sx={{ mt: 1.5 }}>
+                <Stack spacing={0.75} sx={sectionBodySx}>
                   {versions.length === 0 && (
                     <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>暂无版本记录（改写/优化时自动保存）</Typography>
                   )}

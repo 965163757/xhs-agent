@@ -13,10 +13,12 @@ export default function TagInput({
   tags,
   onChange,
   category,
+  showLabel = true,
 }: {
   tags: string[]
   onChange: (tags: string[]) => void
   category?: string
+  showLabel?: boolean
 }) {
   const [input, setInput] = useState('')
   const [suggestions, setSuggestions] = useState<HotTag[]>([])
@@ -93,9 +95,11 @@ export default function TagInput({
 
   return (
     <Box ref={containerRef} sx={{ position: 'relative' }}>
-      <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.5, fontWeight: 600 }}>
-        标签
-      </Typography>
+      {showLabel && (
+        <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.5, fontWeight: 600 }}>
+          标签
+        </Typography>
+      )}
       <Box
         sx={{
           display: 'flex',
