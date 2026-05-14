@@ -2,9 +2,10 @@ import axios from 'axios'
 
 export const api = axios.create({
   baseURL: '/api',
-  // Image generation can legitimately take several minutes on compatible
-  // gateways, especially for high quality / 2K requests.
-  timeout: 480000,
+  // Backend image jobs use an 8 minute processing budget. Keep the browser
+  // transport guard slightly above that so the server can return its structured
+  // timeout/error payload instead of Axios cutting the connection first.
+  timeout: 540000,
 })
 
 const TOKEN_KEY = 'xhs_token'
@@ -689,6 +690,7 @@ export async function testImageSettings(payload?: {
       supports_image_url?: boolean
       supports_quality?: boolean
       source_ref_kind?: string
+      timeout_budget_sec?: number
     }>
     size?: string
     quality?: string

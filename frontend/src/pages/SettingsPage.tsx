@@ -1060,6 +1060,7 @@ export default function SettingsPage() {
                               {deliveryLabel(a) && <Chip size="small" label={deliveryLabel(a)} variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
                               {a.supports_image_url === false && <Chip size="small" label="URL关闭" variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
                               {a.supports_quality === false && <Chip size="small" label="无quality" variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
+                              {a.timeout_budget_sec && <Chip size="small" label={`预算${Math.round(Number(a.timeout_budget_sec) / 60)}min`} variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
                               <Typography sx={{ fontSize: 11.5, color: 'text.secondary', ml: 'auto', whiteSpace: 'nowrap' }}>
                                 {a.elapsed_sec ?? 0}s
                               </Typography>

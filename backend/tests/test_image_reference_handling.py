@@ -76,6 +76,11 @@ class _FailIfCalledClient:
 
 
 class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
+    def test_image_edit_timeout_budget_is_eight_minutes(self):
+        self.assertEqual(llm.IMAGE_GENERATION_TIMEOUT_SECONDS, 8 * 60)
+        self.assertEqual(llm.IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS, llm.IMAGE_GENERATION_TIMEOUT_SECONDS)
+        self.assertTrue(llm._is_gateway_timeout_status(524))
+
     async def test_public_app_static_url_uploads_file_when_url_capability_disabled(self):
         with tempfile.TemporaryDirectory() as image_dir:
             ref_path = Path(image_dir) / "ref.png"
@@ -317,7 +322,7 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
                 llm._edit_image_url_raw_http = orig_url_native
 
             self.assertEqual(saved, ["/static/images/edited.png"])
-            self.assertEqual(seen.get("timeout"), llm.IMAGE_GENERATION_TIMEOUT_SECONDS)
+            self.assertAlmostEqual(seen.get("timeout"), llm.IMAGE_GENERATION_TIMEOUT_SECONDS, delta=1.0)
 
     async def test_app_static_url_native_rejection_falls_back_to_original_upload(self):
         with tempfile.TemporaryDirectory() as image_dir:
@@ -369,6 +374,7 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(attempts[0]["method"], "url_native_then_multipart_edit")
             self.assertEqual(attempts[0]["input_delivery"], "image_url_then_file_upload")
             self.assertEqual(attempts[0]["source_ref_kind"], "app_static")
+            self.assertEqual(attempts[0]["timeout_budget_sec"], 480)
             self.assertIn("url_native_error", attempts[0])
 
     async def test_image_capability_flags_disable_url_and_quality_for_external_urls(self):

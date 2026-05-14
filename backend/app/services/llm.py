@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import contextvars
 import io
 import ipaddress
@@ -26,9 +27,14 @@ _current_settings: contextvars.ContextVar[Optional[Settings]] = contextvars.Cont
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
 MODEL_FAILURE_COOLDOWN_SECONDS = 5 * 60.0
 IMAGE_GENERATION_TIMEOUT_SECONDS = 8 * 60.0
-# Secondary JSON/data-url compatibility probes should fail quickly, while the
-# primary image generation/edit upload path keeps the full 8 min cap.
-IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS = 25.0
+# Keep every image generation/edit transport on the same 8 minute budget.  Some
+# gateways front images/edits with Cloudflare and return HTTP 524 around
+# 100–130s; that is the upstream gateway ending the request, not our client
+# timeout.  For timeout-like gateway responses we retry within this 8 min budget
+# before surfacing a timeout to the user.
+IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS = IMAGE_GENERATION_TIMEOUT_SECONDS
+IMAGE_GATEWAY_TIMEOUT_STATUS_CODES = {408, 504, 524}
+IMAGE_TIMEOUT_RETRY_PAUSE_SECONDS = 0.8
 VISION_IMAGE_DETAIL = "auto"
 VISION_REMOTE_FETCH_TIMEOUT_SECONDS = 20.0
 REMOTE_IMAGE_DOWNLOAD_TIMEOUT_SECONDS = 60.0
@@ -1075,6 +1081,18 @@ def _looks_like_timeout_text(value: Any) -> bool:
     return any(x in text for x in ("timeout", "timed out", "readtimeout"))
 
 
+def _is_gateway_timeout_status(status_code: int) -> bool:
+    return int(status_code) in IMAGE_GATEWAY_TIMEOUT_STATUS_CODES
+
+
+async def _pause_before_timeout_retry(deadline: float) -> bool:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return False
+    await asyncio.sleep(min(IMAGE_TIMEOUT_RETRY_PAUSE_SECONDS, max(0.0, remaining)))
+    return time.monotonic() < deadline
+
+
 def _raw_gateway_rejected_request(errors: List[str]) -> bool:
     """Whether raw edit attempts reached the gateway and were rejected there.
 
@@ -1134,28 +1152,41 @@ async def _edit_image_url_raw_http(
         attempts = attempts[:1]
 
     errors: List[str] = []
+    deadline = time.monotonic() + timeout
     async with httpx.AsyncClient(timeout=timeout) as hc:
         for label, payload in attempts:
-            try:
-                r = await hc.post(url, headers=headers, json=payload)
-            except Exception as e:
-                errors.append(f"{label}: {type(e).__name__}: {e}")
-                if _looks_like_timeout_text(f"{type(e).__name__}: {e}"):
+            retry_count = 0
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    errors.append(f"{label}: reached {int(timeout)}s timeout budget")
                     break
-                continue
-            if r.status_code >= 400:
-                errors.append(f"{label}: HTTP {r.status_code}: {_response_detail(r)}")
-                continue
-            try:
-                data = r.json()
-            except Exception as e:
-                errors.append(f"{label}: invalid JSON from /images/edits: {r.text[:500]} ({e})")
-                continue
-            try:
-                return await _save_image_edit_response(data, settings=settings, n=n, endpoint="/images/edits")
-            except Exception as e:
-                errors.append(f"{label}: {e}")
-                continue
+                try:
+                    r = await hc.post(url, headers=headers, json=payload, timeout=min(timeout, remaining))
+                except Exception as e:
+                    retry_count += 1
+                    errors.append(f"{label}: {type(e).__name__}: {e}")
+                    if _looks_like_timeout_text(f"{type(e).__name__}: {e}") and await _pause_before_timeout_retry(deadline):
+                        continue
+                    break
+                if r.status_code >= 400:
+                    retry_count += 1
+                    detail = _response_detail(r)
+                    suffix = f"；timeout_retry={retry_count}" if _is_gateway_timeout_status(r.status_code) else ""
+                    errors.append(f"{label}: HTTP {r.status_code}: {detail}{suffix}")
+                    if _is_gateway_timeout_status(r.status_code) and await _pause_before_timeout_retry(deadline):
+                        continue
+                    break
+                try:
+                    data = r.json()
+                except Exception as e:
+                    errors.append(f"{label}: invalid JSON from /images/edits: {r.text[:500]} ({e})")
+                    break
+                try:
+                    return await _save_image_edit_response(data, settings=settings, n=n, endpoint="/images/edits")
+                except Exception as e:
+                    errors.append(f"{label}: {e}")
+                    break
     raise RuntimeError(_compact_attempt_errors(errors) or "all URL/data-url edit attempts failed")
 
 
@@ -1194,33 +1225,46 @@ async def _edit_image_multipart_raw_http(
     img_bytes = img_path.read_bytes()
     mask_bytes = mask_path.read_bytes() if mask_path else None
     errors: List[str] = []
+    deadline = time.monotonic() + timeout
     async with httpx.AsyncClient(timeout=timeout) as hc:
         for label, data in attempts:
-            files: Dict[str, Tuple[str, bytes, str]] = {
-                "image": (img_path.name, img_bytes, _mime_for_path(img_path)),
-            }
-            if mask_path and mask_bytes is not None:
-                files["mask"] = (mask_path.name, mask_bytes, _mime_for_path(mask_path))
-            try:
-                r = await hc.post(url, headers=headers, data=data, files=files)
-            except Exception as e:
-                errors.append(f"{label}: {type(e).__name__}: {e}")
-                if _looks_like_timeout_text(f"{type(e).__name__}: {e}"):
+            retry_count = 0
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    errors.append(f"{label}: reached {int(timeout)}s timeout budget")
                     break
-                continue
-            if r.status_code >= 400:
-                errors.append(f"{label}: HTTP {r.status_code}: {_response_detail(r)}")
-                continue
-            try:
-                payload = r.json()
-            except Exception as e:
-                errors.append(f"{label}: invalid JSON from /images/edits: {r.text[:500]} ({e})")
-                continue
-            try:
-                return await _save_image_edit_response(payload, settings=settings, n=n, endpoint="/images/edits")
-            except Exception as e:
-                errors.append(f"{label}: {e}")
-                continue
+                files: Dict[str, Tuple[str, bytes, str]] = {
+                    "image": (img_path.name, img_bytes, _mime_for_path(img_path)),
+                }
+                if mask_path and mask_bytes is not None:
+                    files["mask"] = (mask_path.name, mask_bytes, _mime_for_path(mask_path))
+                try:
+                    r = await hc.post(url, headers=headers, data=data, files=files, timeout=min(timeout, remaining))
+                except Exception as e:
+                    retry_count += 1
+                    errors.append(f"{label}: {type(e).__name__}: {e}")
+                    if _looks_like_timeout_text(f"{type(e).__name__}: {e}") and await _pause_before_timeout_retry(deadline):
+                        continue
+                    break
+                if r.status_code >= 400:
+                    retry_count += 1
+                    detail = _response_detail(r)
+                    suffix = f"；timeout_retry={retry_count}" if _is_gateway_timeout_status(r.status_code) else ""
+                    errors.append(f"{label}: HTTP {r.status_code}: {detail}{suffix}")
+                    if _is_gateway_timeout_status(r.status_code) and await _pause_before_timeout_retry(deadline):
+                        continue
+                    break
+                try:
+                    payload = r.json()
+                except Exception as e:
+                    errors.append(f"{label}: invalid JSON from /images/edits: {r.text[:500]} ({e})")
+                    break
+                try:
+                    return await _save_image_edit_response(payload, settings=settings, n=n, endpoint="/images/edits")
+                except Exception as e:
+                    errors.append(f"{label}: {e}")
+                    break
     raise RuntimeError(_compact_attempt_errors(errors) or "all multipart edit attempts failed")
 
 
@@ -1429,7 +1473,12 @@ async def edit_image(
     size = _normalize_image_size(size)
     n = _normalize_image_count(n)
     attempt_errors: List[str] = []
+    deadline = time.monotonic() + IMAGE_GENERATION_TIMEOUT_SECONDS
     for idx, candidate in enumerate(_ordered_model_candidates(s, "image")):
+        remaining_budget = deadline - time.monotonic()
+        if remaining_budget <= 0:
+            attempt_errors.append(f"图片编辑已达到 {int(IMAGE_GENERATION_TIMEOUT_SECONDS)}s 总超时预算")
+            break
         model_settings = _settings_for_model(s, "image", candidate)
         attempt = _new_image_attempt("edit", model_settings, idx)
         attempt_start = time.perf_counter()
@@ -1443,6 +1492,7 @@ async def edit_image(
                 quality=quality,
                 settings=model_settings,
                 attempt=attempt,
+                timeout_budget=remaining_budget,
             )
             _finish_image_attempt(attempt, start=attempt_start, status="success", images_count=len(urls))
             if attempt_trace is not None:
@@ -1469,6 +1519,7 @@ async def _edit_image_once(
     quality: str,
     settings: Settings,
     attempt: Optional[Dict[str, Any]] = None,
+    timeout_budget: float = IMAGE_GENERATION_TIMEOUT_SECONDS,
 ) -> List[str]:
     s = settings
     quality = _normalize_image_quality(quality, s.image_model)
@@ -1485,6 +1536,7 @@ async def _edit_image_once(
             attempt["mask_ref_kind"] = mask_ref_kind
         attempt["quality_requested"] = quality
         attempt["quality_sent"] = bool(effective_quality)
+        attempt["timeout_budget_sec"] = int(max(1, round(timeout_budget)))
 
     provider_image_url = _provider_image_url(image_url, s)
     provider_mask_url = _provider_image_url(mask_url, s) if mask_url else None
@@ -1514,6 +1566,7 @@ async def _edit_image_once(
                 size=size,
                 n=n,
                 quality=effective_quality,
+                timeout=timeout_budget,
                 fast_failover=True,
             )
         except Exception as e:
@@ -1618,7 +1671,7 @@ async def _edit_image_once(
                 size=size,
                 n=n,
                 quality=effective_quality,
-                timeout=IMAGE_GENERATION_TIMEOUT_SECONDS,
+                timeout=timeout_budget,
                 fast_failover=True,
             )
         except Exception as e:
@@ -1641,7 +1694,7 @@ async def _edit_image_once(
                 size=size,
                 n=n,
                 quality=effective_quality,
-                timeout=IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS,
+                timeout=min(IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS, timeout_budget),
             )
         except Exception as e:
             attempt_errors.append(f"raw data-url: {type(e).__name__}: {e}")
