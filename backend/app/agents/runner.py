@@ -133,6 +133,55 @@ def _short_text(value: Any, limit: int = 1800) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _merge_tool_name(current: str, incoming: str | None) -> str:
+    """Merge streamed tool/function names defensively.
+
+    The OpenAI stream normally sends function.name as delta chunks, but some
+    compatible gateways resend the full name on every chunk.  Blindly
+    concatenating those chunks turns `read_article` into
+    `read_articleread_article`, which then becomes an unknown tool.  This helper
+    accepts both behaviours and a small amount of overlap.
+    """
+    part = str(incoming or "")
+    if not part:
+        return current or ""
+    current = current or ""
+    if not current:
+        return part
+    if part == current or current.endswith(part):
+        return current
+    if part.startswith(current):
+        return part
+    # Handle partial overlap: current="read_art", part="article" -> "read_article"
+    max_overlap = min(len(current), len(part))
+    for size in range(max_overlap, 0, -1):
+        if current.endswith(part[:size]):
+            return current + part[size:]
+    return current + part
+
+
+def _parse_tool_arguments(raw: Any) -> tuple[Dict[str, Any], str | None]:
+    """Parse model-emitted tool arguments and prevent accidental empty calls.
+
+    Invalid or non-object JSON should not silently become `{}` because many
+    tools treat omitted fields as defaults or independent operations.  Returning
+    a model-visible tool error lets the agent repair the call in the next round.
+    """
+    text = raw if isinstance(raw, str) else str(raw or "")
+    text = text.strip()
+    if not text:
+        return {}, None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return {}, f"工具参数不是合法 JSON：第 {exc.lineno} 行第 {exc.colno} 列，{exc.msg}"
+    except Exception as exc:
+        return {}, f"工具参数解析失败：{type(exc).__name__}: {exc}"
+    if not isinstance(parsed, dict):
+        return {}, f"工具参数必须是 JSON 对象，实际收到 {type(parsed).__name__}"
+    return parsed, None
+
+
 def _safe_int(value: Any, default: int, *, min_value: int | None = None, max_value: int | None = None) -> int:
     try:
         out = int(value)
@@ -424,7 +473,7 @@ async def run_agent_stream(
                             slot["id"] = tc.id
                         if tc.function:
                             if tc.function.name:
-                                slot["name"] += tc.function.name
+                                slot["name"] = _merge_tool_name(slot["name"], tc.function.name)
                             if tc.function.arguments:
                                 slot["arguments"] += tc.function.arguments
         except Exception as e:
@@ -440,16 +489,14 @@ async def run_agent_stream(
         # the model's responsibility so ambiguous intent can be clarified in
         # natural language instead of being forced into a fallback tool.
         ordered = sorted(tool_calls_acc.items())
-        prepared_calls: List[tuple[str, str, Dict[str, Any]]] = []
+        prepared_calls: List[tuple[str, str, Dict[str, Any], str | None, str]] = []
         assistant_tool_calls: List[Dict[str, Any]] = []
         for i, slot in ordered:
             tid = _ensure_tool_id(slot["id"], i)
             name = slot["name"] or "unknown"
-            try:
-                args = json.loads(slot["arguments"] or "{}")
-            except Exception:
-                args = {}
-            prepared_calls.append((tid, name, args))
+            raw_arguments = slot["arguments"] or ""
+            args, parse_error = _parse_tool_arguments(raw_arguments)
+            prepared_calls.append((tid, name, args, parse_error, raw_arguments))
             assistant_tool_calls.append(
                 {
                     "id": tid,
@@ -471,8 +518,37 @@ async def run_agent_stream(
         )
 
         # Execute every tool call and append tool messages in the SAME order
-        for tid, name, args in prepared_calls:
+        for tid, name, args, parse_error, raw_arguments in prepared_calls:
             yield {"type": "tool_call", "name": name, "arguments": args, "id": tid}
+            tool_started = time.perf_counter()
+            if parse_error:
+                result = {
+                    "ok": False,
+                    "error": f"{parse_error}。已取消本次 {name} 调用，请重新组织参数后再试。",
+                    "raw_arguments": _short_text(raw_arguments, 1000),
+                    "retryable": True,
+                }
+                elapsed_ms = int((time.perf_counter() - tool_started) * 1000)
+                result.setdefault("elapsed_ms", elapsed_ms)
+                result.setdefault("elapsed_sec", round(elapsed_ms / 1000, 2))
+                yield {
+                    "type": "tool_result",
+                    "name": name,
+                    "result": result,
+                    "id": tid,
+                    "elapsed_ms": elapsed_ms,
+                    "ok": False,
+                }
+                working.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tid,
+                        "name": name,
+                        "content": json.dumps(_compact_tool_result_for_context(result), ensure_ascii=False),
+                    }
+                )
+                continue
+
             progress_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
 
             def emit_progress(ev: Dict[str, Any]) -> None:
@@ -483,7 +559,6 @@ async def run_agent_stream(
                 progress_queue.put_nowait(payload)
 
             token = set_tool_progress_emitter(emit_progress)
-            tool_started = time.perf_counter()
             task = asyncio.create_task(call_tool(name, args))
             try:
                 while not task.done():

@@ -1,4 +1,5 @@
 import inspect
+from types import SimpleNamespace
 import unittest
 
 import app.agents.runner as runner
@@ -31,6 +32,33 @@ class AgentRoutingTests(unittest.TestCase):
     def test_default_tool_round_limit_is_12(self):
         sig = inspect.signature(run_agent_stream)
         self.assertEqual(sig.parameters["max_tool_rounds"].default, 12)
+
+    def test_streamed_tool_name_merge_accepts_delta_chunks(self):
+        name = ""
+        for chunk in ("read_", "article"):
+            name = runner._merge_tool_name(name, chunk)
+        self.assertEqual(name, "read_article")
+
+    def test_streamed_tool_name_merge_ignores_repeated_full_name(self):
+        name = runner._merge_tool_name("", "read_article")
+        name = runner._merge_tool_name(name, "read_article")
+        self.assertEqual(name, "read_article")
+
+    def test_streamed_tool_name_merge_handles_overlap(self):
+        name = runner._merge_tool_name("imitate_article_", "article_style")
+        self.assertEqual(name, "imitate_article_style")
+
+    def test_invalid_tool_arguments_do_not_silently_become_empty_call(self):
+        args, err = runner._parse_tool_arguments('{"article_id": 1')
+        self.assertEqual(args, {})
+        self.assertIsNotNone(err)
+        self.assertIn("不是合法 JSON", err)
+
+    def test_non_object_tool_arguments_are_rejected(self):
+        args, err = runner._parse_tool_arguments('["read_article"]')
+        self.assertEqual(args, {})
+        self.assertIsNotNone(err)
+        self.assertIn("必须是 JSON 对象", err)
 
     def test_latest_uploaded_image_stays_attached(self):
         out = runner._compact_input_messages(
@@ -75,6 +103,61 @@ class AgentRoutingTests(unittest.TestCase):
         image_schema = TOOLS["generate_article_images"]["schema"]["function"]
         self.assertIn("展示队列图片", image_schema["description"])
         self.assertIn("队列第 1 张", image_schema["parameters"]["properties"]["include_cover"]["description"])
+
+
+class AgentRunnerStreamTests(unittest.IsolatedAsyncioTestCase):
+    async def test_invalid_streamed_tool_arguments_return_error_without_calling_tool(self):
+        calls = {"stream": 0, "tool": 0}
+
+        async def fake_stream(**_kwargs):
+            calls["stream"] += 1
+            if calls["stream"] == 1:
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                content=None,
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        index=0,
+                                        id="bad_args",
+                                        function=SimpleNamespace(name="read_article", arguments='{"article_id": 1'),
+                                    )
+                                ],
+                            )
+                        )
+                    ]
+                )
+            else:
+                yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="已重新组织参数。", tool_calls=None))])
+
+        async def fail_if_called(_name, _args):
+            calls["tool"] += 1
+            raise AssertionError("call_tool should not run when JSON arguments are invalid")
+
+        orig_stream = runner.chat_completion_stream
+        orig_call_tool = runner.call_tool
+        try:
+            runner.chat_completion_stream = fake_stream
+            runner.call_tool = fail_if_called
+            events = [
+                ev
+                async for ev in run_agent_stream(
+                    [{"role": "user", "content": "读取笔记 1"}],
+                    max_tool_rounds=2,
+                )
+            ]
+        finally:
+            runner.chat_completion_stream = orig_stream
+            runner.call_tool = orig_call_tool
+
+        self.assertEqual(calls["tool"], 0)
+        error_results = [ev for ev in events if ev.get("type") == "tool_result"]
+        self.assertEqual(len(error_results), 1)
+        self.assertFalse(error_results[0]["ok"])
+        self.assertIn("不是合法 JSON", error_results[0]["result"]["error"])
+        self.assertTrue(error_results[0]["result"]["retryable"])
+        self.assertEqual(events[-1]["type"], "done")
 
 
 if __name__ == "__main__":
