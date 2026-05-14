@@ -83,6 +83,16 @@ function parseBool(value: any, fallback = true) {
   return fallback
 }
 
+function deliveryLabel(attempt: any) {
+  const delivery = String(attempt?.input_delivery || '')
+  if (delivery === 'image_url') return '传URL'
+  if (delivery === 'file_upload') return '传原图'
+  if (delivery === 'image_url_then_file_upload') return 'URL失败→传原图'
+  if (attempt?.provider_readable === false) return '传原图'
+  if (attempt?.provider_readable === true) return '传URL'
+  return ''
+}
+
 function parseModelPool(value: string): ModelPoolRow[] {
   const raw = (value || '').trim()
   if (!raw) return []
@@ -265,8 +275,8 @@ function ModelQueueEditor({
             <TableCell sx={{ width: 64, fontSize: 11.5, color: 'text.secondary' }}>顺序</TableCell>
             <TableCell sx={{ width: isImage ? '21%' : '23%', fontSize: 11.5, color: 'text.secondary' }}>模型</TableCell>
             <TableCell sx={{ width: isImage ? '28%' : '34%', fontSize: 11.5, color: 'text.secondary' }}>Base URL</TableCell>
-            <TableCell sx={{ width: isImage ? '25%' : '31%', fontSize: 11.5, color: 'text.secondary' }}>API Key</TableCell>
             {isImage && <TableCell sx={{ width: 150, fontSize: 11.5, color: 'text.secondary' }}>能力</TableCell>}
+            <TableCell sx={{ width: isImage ? '25%' : '31%', fontSize: 11.5, color: 'text.secondary' }}>API Key</TableCell>
             <TableCell sx={{ width: 56 }} />
           </TableRow>
         </TableHead>
@@ -1047,6 +1057,9 @@ export default function SettingsPage() {
                                 {idx + 1}. {a.model || '-'}
                               </Typography>
                               {a.method && <Chip size="small" label={a.method} sx={{ height: 20, fontSize: 10.5 }} />}
+                              {deliveryLabel(a) && <Chip size="small" label={deliveryLabel(a)} variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
+                              {a.supports_image_url === false && <Chip size="small" label="URL关闭" variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
+                              {a.supports_quality === false && <Chip size="small" label="无quality" variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
                               <Typography sx={{ fontSize: 11.5, color: 'text.secondary', ml: 'auto', whiteSpace: 'nowrap' }}>
                                 {a.elapsed_sec ?? 0}s
                               </Typography>

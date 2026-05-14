@@ -684,6 +684,11 @@ export async function testImageSettings(payload?: {
       images_count?: number
       error?: string
       timeout?: boolean
+      input_delivery?: string
+      provider_readable?: boolean
+      supports_image_url?: boolean
+      supports_quality?: boolean
+      source_ref_kind?: string
     }>
     size?: string
     quality?: string

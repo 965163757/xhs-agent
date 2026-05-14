@@ -264,6 +264,25 @@ def _finish_image_attempt(
     return attempt
 
 
+def _image_ref_kind(url_or_path: str, settings: Settings) -> str:
+    value = str(url_or_path or "").strip()
+    if not value:
+        return "empty"
+    if value.startswith("data:"):
+        return "data_url"
+    if _is_app_static_image_reference(value, settings):
+        return "app_static"
+    if _is_http_url(value):
+        return "external_url" if _is_public_remote_url(value) else "private_url"
+    try:
+        p = Path(value)
+        if p.is_absolute():
+            return "local_file"
+    except Exception:
+        pass
+    return "relative_or_name"
+
+
 def _normalize_image_quality(quality: Optional[str], model: str = "") -> str:
     """Normalize quality while keeping "highest" as the default.
 
@@ -1458,6 +1477,14 @@ async def _edit_image_once(
     effective_quality = quality if supports_quality else ""
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
     attempt_errors: List[str] = []
+    source_ref_kind = _image_ref_kind(image_url, s)
+    mask_ref_kind = _image_ref_kind(mask_url, s) if mask_url else ""
+    if attempt is not None:
+        attempt["source_ref_kind"] = source_ref_kind
+        if mask_ref_kind:
+            attempt["mask_ref_kind"] = mask_ref_kind
+        attempt["quality_requested"] = quality
+        attempt["quality_sent"] = bool(effective_quality)
 
     provider_image_url = _provider_image_url(image_url, s)
     provider_mask_url = _provider_image_url(mask_url, s) if mask_url else None
@@ -1473,6 +1500,7 @@ async def _edit_image_once(
             attempt,
             "url_native_edit",
             provider_readable=True,
+            input_delivery="image_url",
             has_mask=bool(mask_url),
             supports_image_url=supports_url,
             supports_quality=supports_quality,
@@ -1489,10 +1517,30 @@ async def _edit_image_once(
                 fast_failover=True,
             )
         except Exception as e:
-            # Fast-failover mode: do not spend another compatibility pass on
-            # the same model. The outer loop will immediately try the next
-            # configured image candidate and expose this hop in image_attempts.
-            raise RuntimeError(f"图片编辑失败：上游未接受外部图片 URL: {e}") from e
+            url_error = RuntimeError(f"图片编辑失败：上游未接受外部图片 URL: {e}")
+            attempt_errors.append(f"URL-native edit: {type(e).__name__}: {e}")
+            if attempt is not None:
+                attempt["url_native_error"] = f"{type(e).__name__}: {e}"[:800]
+            # If this is an app-owned/static image, we still have the original
+            # bytes on disk.  Several OpenAI-compatible gateways return
+            # "image is required" for JSON image_url but work with multipart
+            # upload.  Try that single upload shape before demoting the model.
+            if source_ref_kind not in {"app_static", "local_file", "relative_or_name"} or (
+                mask_url and mask_ref_kind not in {"app_static", "local_file", "relative_or_name"}
+            ):
+                # For true external URLs keep the user's preference: do not
+                # silently download/copy unless this model is explicitly marked
+                # as not supporting URL.
+                raise url_error from e
+            _set_image_attempt_method(
+                attempt,
+                "url_native_then_multipart_edit",
+                provider_readable=False,
+                input_delivery="image_url_then_file_upload",
+                has_mask=bool(mask_url),
+                supports_image_url=supports_url,
+                supports_quality=supports_quality,
+            )
     if supports_url and (external_image_url or external_mask_url):
         raise RuntimeError(
             "图片编辑失败：公开外部 URL 默认不下载到本地；当前图片/mask 混合了外部 URL 与本地文件，"
@@ -1503,6 +1551,11 @@ async def _edit_image_once(
     img_path = await _ensure_local_image_path(image_url, s, suffix="ref", allow_remote_download=not supports_url)
     if not img_path.exists():
         raise FileNotFoundError(f"image not found: {image_url}")
+    if attempt is not None:
+        try:
+            attempt["local_image_bytes"] = img_path.stat().st_size
+        except Exception:
+            pass
 
     kwargs: Dict[str, Any] = {
         "model": s.image_model,
@@ -1596,12 +1649,13 @@ async def _edit_image_once(
 
     sdk_first = _is_official_openai_image_base(s)
     if sdk_first:
-        _set_image_attempt_method(attempt, "sdk_upload_edit", provider_readable=False, has_mask=bool(mask_url), supports_image_url=supports_url, supports_quality=supports_quality)
+        _set_image_attempt_method(attempt, "sdk_upload_edit", provider_readable=False, input_delivery="file_upload", has_mask=bool(mask_url), supports_image_url=supports_url, supports_quality=supports_quality)
         saved = await _attempt_sdk_upload()
         if saved:
             return saved
     else:
-        _set_image_attempt_method(attempt, "raw_multipart_edit", provider_readable=False, has_mask=bool(mask_url), supports_image_url=supports_url, supports_quality=supports_quality)
+        if not (attempt and attempt.get("method") == "url_native_then_multipart_edit"):
+            _set_image_attempt_method(attempt, "raw_multipart_edit", provider_readable=False, input_delivery="file_upload", has_mask=bool(mask_url), supports_image_url=supports_url, supports_quality=supports_quality)
         saved = await _attempt_raw_multipart()
         if saved:
             return saved
@@ -1613,6 +1667,8 @@ async def _edit_image_once(
             "如果当前网关不兼容文件上传/data-url 式 images.edit，请在设置页配置可公网访问的域名，"
             "并先运行“静态图片公网可访问测试”。"
         )
+    if not supports_url:
+        hint += " 当前模型已关闭“支持URL”，本次按原图文件 multipart 上传，并未把图片 URL 传给上游。"
     raise RuntimeError(
         "图片编辑失败：所有兼容调用方式均失败。"
         + hint

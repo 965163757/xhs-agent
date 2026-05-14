@@ -63,6 +63,16 @@ function formatElapsed(ms?: number) {
   return `${Math.floor(sec / 60)}m${Math.round(sec % 60)}s`
 }
 
+function deliveryLabel(attempt: any) {
+  const delivery = String(attempt?.input_delivery || '')
+  if (delivery === 'image_url') return '传URL'
+  if (delivery === 'file_upload') return '传原图'
+  if (delivery === 'image_url_then_file_upload') return 'URL失败→传原图'
+  if (attempt?.provider_readable === false) return '传原图'
+  if (attempt?.provider_readable === true) return '传URL'
+  return ''
+}
+
 function toAbs(url: string) {
   if (!url) return url
   if (url.startsWith('http') || url.startsWith('data:')) return url
@@ -294,6 +304,9 @@ function ToolCard({
                       {idx + 1}. {a?.model || '-'}
                     </Typography>
                     {a?.method && <Chip size="small" label={a.method} sx={{ height: 20, fontSize: 10.5 }} />}
+                    {deliveryLabel(a) && <Chip size="small" label={deliveryLabel(a)} variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
+                    {a?.supports_image_url === false && <Chip size="small" label="URL关闭" variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
+                    {a?.supports_quality === false && <Chip size="small" label="无quality" variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />}
                     <Typography sx={{ fontSize: 11.5, color: 'text.secondary', ml: 'auto', whiteSpace: 'nowrap' }}>
                       {formatElapsed(a?.elapsed_ms)}
                     </Typography>

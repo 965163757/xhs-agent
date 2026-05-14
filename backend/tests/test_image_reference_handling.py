@@ -319,6 +319,58 @@ class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved, ["/static/images/edited.png"])
             self.assertEqual(seen.get("timeout"), llm.IMAGE_GENERATION_TIMEOUT_SECONDS)
 
+    async def test_app_static_url_native_rejection_falls_back_to_original_upload(self):
+        with tempfile.TemporaryDirectory() as image_dir:
+            (Path(image_dir) / "ref.png").write_bytes(TINY_IMAGE_BYTES)
+            settings = Settings(
+                image_dir=image_dir,
+                image_api_key="test-key",
+                image_base_url="https://image-gateway.invalid/v1",
+                public_base_url="https://xhs.example.com/app",
+                image_supports_image_url=True,
+                image_supports_quality=True,
+            )
+            seen = {}
+
+            async def reject_url_native(**_kwargs):
+                raise RuntimeError('json:image_url: HTTP 400: {"error":{"message":"image is required"}}')
+
+            async def raw_multipart_success(**kwargs):
+                seen["img_path"] = kwargs.get("img_path")
+                seen["quality"] = kwargs.get("quality")
+                return ["/static/images/edited.png"]
+
+            orig_get_settings = llm.get_settings
+            orig_url_native = llm._edit_image_url_raw_http
+            orig_multipart = llm._edit_image_multipart_raw_http
+            try:
+                llm.get_settings = lambda: settings
+                llm._edit_image_url_raw_http = reject_url_native
+                llm._edit_image_multipart_raw_http = raw_multipart_success
+                attempts = []
+                saved = await llm.edit_image(
+                    image_url="/static/images/ref.png",
+                    mask_url=None,
+                    prompt="保持构图，增强清晰度",
+                    size="1024x1024",
+                    n=1,
+                    quality="high",
+                    settings=settings,
+                    attempt_trace=attempts,
+                )
+            finally:
+                llm.get_settings = orig_get_settings
+                llm._edit_image_url_raw_http = orig_url_native
+                llm._edit_image_multipart_raw_http = orig_multipart
+
+            self.assertEqual(saved, ["/static/images/edited.png"])
+            self.assertEqual(Path(seen["img_path"]).resolve(), (Path(image_dir) / "ref.png").resolve())
+            self.assertEqual(seen["quality"], "high")
+            self.assertEqual(attempts[0]["method"], "url_native_then_multipart_edit")
+            self.assertEqual(attempts[0]["input_delivery"], "image_url_then_file_upload")
+            self.assertEqual(attempts[0]["source_ref_kind"], "app_static")
+            self.assertIn("url_native_error", attempts[0])
+
     async def test_image_capability_flags_disable_url_and_quality_for_external_urls(self):
         with tempfile.TemporaryDirectory() as image_dir:
             ref_path = Path(image_dir) / "downloaded.png"
