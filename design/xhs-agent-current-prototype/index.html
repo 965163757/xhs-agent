@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>小红书创作助手 · 全页面高保真原型</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!--
+    Assumptions / Reasoning / Placeholders
+    - 原型基于当前 frontend/src 代码静态梳理生成，不连接真实后端。
+    - 使用当前产品主色、AppBar、三栏编辑器、Agent 工具链与模型队列概念做高保真表达。
+    - 图片素材使用 CSS 质感占位，不伪造真实用户图片；重点验证信息架构与交互状态。
+  -->
+  <div id="app">
+    <aside class="nav-rail">
+      <div class="brand" data-screen="overview">
+        <div class="brand-mark">红</div>
+        <div>
+          <b>小红书创作助手</b>
+          <span>Current UI Prototype</span>
+        </div>
+      </div>
+      <div class="nav-section">页面</div>
+      <button class="nav-item active" data-screen="overview">总览地图</button>
+      <button class="nav-item" data-screen="login">登录注册</button>
+      <button class="nav-item" data-screen="chat">创作对话</button>
+      <button class="nav-item" data-screen="articles">笔记列表</button>
+      <button class="nav-item" data-screen="editor">笔记编辑器</button>
+      <button class="nav-item" data-screen="diagnose">发布前诊断</button>
+      <button class="nav-item" data-screen="templates">模板库</button>
+      <button class="nav-item" data-screen="analytics">数据页</button>
+      <button class="nav-item" data-screen="tasks">任务中心</button>
+      <button class="nav-item" data-screen="settings">设置页</button>
+      <button class="nav-item" data-screen="hidden-lab">隐藏图片实验</button>
+      <div class="nav-section">全局组件</div>
+      <button class="nav-item ghost" id="open-command">⌘K 命令面板</button>
+      <button class="nav-item ghost" id="open-onboarding">新手引导</button>
+      <button class="nav-item ghost" id="open-image-editor">图片编辑器</button>
+      <div class="nav-footer">
+        <span class="dot ok"></span> 依据当前代码生成<br />
+        <span class="muted">2026-05-15 · Asia/Shanghai</span>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="top-tabs">
+          <span class="tab active">创作</span><span class="tab">笔记</span><span class="tab">模板</span><span class="tab">数据</span><span class="tab">任务</span><span class="tab">设置</span>
+        </div>
+        <div class="top-actions">
+          <span class="pill">管理员</span>
+          <span class="avatar">yu</span>
+        </div>
+      </header>
+
+      <section class="screen active" id="screen-overview">
+        <div class="hero-grid">
+          <div class="hero-card large">
+            <div class="eyebrow">Information Architecture</div>
+            <h1>从「创作」到「发布诊断」的一体化 Agent 工作台</h1>
+            <p>当前系统包含 9 个主路由、3 个全局组件、1 个隐藏实验页。原型重点呈现：对话后台续跑、笔记三栏编辑、图片队列、诊断历史、模型候选队列。</p>
+            <div class="hero-flow">
+              <span>灵感输入</span><i></i><span>Agent 工具链</span><i></i><span>笔记编辑</span><i></i><span>图片/诊断</span><i></i><span>发布</span>
+            </div>
+          </div>
+          <div class="hero-card stat"><b>9</b><span>主页面</span></div>
+          <div class="hero-card stat"><b>42+</b><span>Agent 工具能力</span></div>
+          <div class="hero-card stat"><b>8min</b><span>图片任务预算</span></div>
+        </div>
+        <div class="page-map" id="page-map"></div>
+      </section>
+
+      <section class="screen" id="screen-login">
+        <div class="login-stage">
+          <div class="login-copy">
+            <span class="eyebrow">Auth</span>
+            <h2>登录 / 注册</h2>
+            <p>简洁鉴权入口，登录成功后回到创作台；错误信息直接展示，保留注册开关能力。</p>
+            <ul class="feature-list"><li>Tab 切换登录/注册</li><li>表单 busy 状态</li><li>鉴权后 ProtectedRoute</li></ul>
+          </div>
+          <div class="login-card">
+            <div class="seg"><button class="on">登录</button><button>注册</button></div>
+            <label>用户名<input value="admin" readonly></label>
+            <label>密码<input value="••••••••" readonly></label>
+            <button class="primary wide">进入创作助手</button>
+            <p class="form-note">未登录用户会被重定向到 /login</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-chat">
+        <div class="chat-layout">
+          <aside class="history-panel">
+            <div class="panel-head"><b>对话历史</b><button class="icon-btn">⇤</button></div>
+            <div class="context-switcher"><span>当前参考笔记</span><b>#42 秋冬护肤</b></div>
+            <div class="batch-row"><button>批量管理</button><button>全选</button></div>
+            <div class="conversation-group"><span>admin</span></div>
+            <div class="conv active"><b>威海海景民宿成稿</b><small>后台任务继续中 · 2 张图</small></div>
+            <div class="conv"><b>秋冬护肤封面优化</b><small>图片编辑失败可重试</small></div>
+            <div class="conv"><b>上海旅行仿写</b><small>已绑定笔记 #38</small></div>
+            <div class="conversation-group"><span>testlogin</span></div>
+            <div class="conv"><b>北京攻略图文</b><small>管理员可见</small></div>
+          </aside>
+          <div class="chat-main">
+            <div class="chat-hero">
+              <h2>今天想写什么笔记？</h2>
+              <p>说出灵感，AI 会根据意图自主选择生成笔记、改写、配图、诊断或反问。</p>
+              <div class="quick-grid">
+                <button>📝 一键成稿</button><button>🎨 生成图片</button><button>🪞 参考仿写</button><button>🔍 发布前诊断</button>
+              </div>
+            </div>
+            <div class="message-stack">
+              <div class="bubble user">帮我完成一篇【威海海景民宿】的小红书笔记，包含标题候选、标签、封面方向和发布前自检。</div>
+              <div class="tool-card"><div><b>create_complete_note_workflow</b><span class="pill ok">成功</span><span>3.2s</span></div><pre>{ topic: "威海海景民宿", generate_images: false }</pre></div>
+              <div class="bubble ai">已生成笔记草稿 #58。这里的「封面方向」按文字方案处理，没有自动生图。</div>
+            </div>
+            <div class="composer"><span class="clip">＋</span><input value="上传参考图后，也可以直接说：把这张图去掉行李箱，增加一位年轻女性" readonly><button>发送</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-articles">
+        <div class="list-page">
+          <div class="page-title"><div><span class="eyebrow">Library</span><h2>笔记列表</h2></div><button class="primary">新建笔记</button></div>
+          <div class="filter-bar"><input value="搜索标题 / 标签 / 用户" readonly><span class="chip on">全部</span><span class="chip">草稿</span><span class="chip">已发布</span><span class="chip">按更新时间</span></div>
+          <div class="article-table">
+            <div class="table-group">admin · 3 篇</div>
+            <div class="article-row"><div class="thumb skin"></div><div><b>秋冬护肤封面这样做，高级感拉满</b><p>#护肤 #秋冬保湿 · 4 图 · 评分 86</p></div><span class="status draft">草稿</span><button>编辑</button></div>
+            <div class="article-row"><div class="thumb travel"></div><div><b>3 天 2 晚北京旅行攻略</b><p>#北京旅行 #路线 · 6 图 · 已诊断</p></div><span class="status pub">已发布</span><button>编辑</button></div>
+            <div class="table-group">testlogin · 1 篇（管理员视图）</div>
+            <div class="article-row"><div class="thumb home"></div><div><b>威海海景民宿种草文</b><p>#民宿 #威海 · 2 图</p></div><span class="status draft">草稿</span><button>查看</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-editor">
+        <div class="editor-shell">
+          <aside class="editor-chat">
+            <div class="mini-head"><button>☰</button><span>对话 #91 · 笔记 #42</span><button>＋</button></div>
+            <div class="mini-bubble">帮我把第 2 张内容图改成更温柔的奶油色。</div>
+            <div class="tool-card compact"><b>edit_image</b><span class="pill">传原图</span><span class="pill">预算8min</span></div>
+            <div class="mini-input">继续对这篇笔记说…</div>
+          </aside>
+          <div class="resize-line"></div>
+          <section class="editor-center">
+            <div class="editor-toolbar"><button>←</button><b>笔记 #42</b><span class="status draft">草稿</span><button>切换：秋冬护肤</button><button>提取模板</button><button>诊断</button><button class="primary">保存</button><button>推到已发布</button></div>
+            <div class="content-card">
+              <div class="content-head"><button>版本历史</button><span>923 字 · 字数合适</span></div>
+              <label>标题<input value="秋冬护肤封面这样做，高级感拉满" readonly></label>
+              <label>正文<textarea readonly>最近天气一冷，皮肤状态真的很容易变得干、暗、紧绷。我的秋冬护肤思路其实很简单：先稳住屏障，再把保湿做扎实……</textarea></label>
+              <label>标签<input value="#秋冬护肤 #保湿 #敏感肌护理 #护肤分享" readonly></label>
+              <div class="banned-box"><b>违禁词检测</b><span>重复词已合并展示 · 建议替换 2 处</span></div>
+            </div>
+            <div class="image-queue">
+              <div class="queue-head"><b>图片队列</b><span>共 4 张 · 可拖拽调换顺序，也可设为首图、前移、后移或删除。</span><button>查看图片上下文</button></div>
+              <div class="queue-grid"><div class="img-card skin"><span>1</span><button>编辑</button></div><div class="img-card cream"><span>2</span></div><div class="img-card travel"><span>3</span></div><div class="img-card home"><span>4</span></div></div>
+            </div>
+          </section>
+          <div class="resize-line"></div>
+          <aside class="phone-col">
+            <div class="phone"><div class="phone-img skin"></div><div class="phone-body"><b>秋冬护肤封面这样做，高级感拉满</b><p>最近天气一冷，皮肤状态真的很容易变得干、暗、紧绷……</p><span>#秋冬护肤 #保湿</span></div></div>
+            <div class="score-card"><b>五维评分 86</b><div class="radar"></div><p>标题吸引力高，图片文字区需进一步减少密集信息。</p></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-diagnose">
+        <div class="diagnose-layout">
+          <div class="diagnose-main">
+            <div class="page-title"><div><span class="eyebrow">Diagnosis</span><h2>发布前诊断</h2></div><button class="primary">重新诊断</button><button>查看历史结果</button></div>
+            <div class="stepper"><span class="done">内容质量</span><span class="done">视觉表现</span><span class="active">增长潜力</span><span>模拟评论</span></div>
+            <div class="diagnose-report"><div class="grade">A-<small>综合 84</small></div><div class="radar big"></div><div><h3>核心建议</h3><ol><li>标题保留「秋冬护肤」，加入更明确场景词。</li><li>封面留白区域更清晰，避免中文小字。</li><li>结尾 CTA 改为收藏导向。</li></ol><button class="primary">应用优化方案</button></div></div>
+            <div class="agent-grid"><div><b>内容专家</b><p>正文结构完整，但开头钩子还可更生活化。</p></div><div><b>视觉专家</b><p>首图氛围合适，第二张可降低饱和。</p></div><div><b>增长专家</b><p>标签覆盖精准，但搜索词可前置。</p></div></div>
+          </div>
+          <aside class="history-card"><b>历史诊断</b><div class="hist active">今天 16:20 · A- · 已应用</div><div class="hist">昨天 23:10 · B+ · 未应用</div><div class="task-chip">后台任务 #dg_102 断线可重连</div></aside>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-templates">
+        <div class="templates-page"><div class="page-title"><div><span class="eyebrow">Templates</span><h2>模板库</h2></div><button class="primary">创建模板</button></div><div class="template-grid"><div class="template-card active"><b>清单攻略式</b><p>适合旅行/护肤/美食攻略，结构清晰。</p><button>套用主题</button></div><div class="template-card"><b>反转种草式</b><p>先抑后扬，用真实体验制造转折。</p><button>套用主题</button></div><div class="template-card"><b>情绪共鸣式</b><p>以场景切入，引发评论互动。</p><button>删除</button></div></div><div class="template-form"><input value="主题：上海周末 City Walk" readonly><button class="primary">生成新笔记</button><button>从当前笔记提取模板</button></div></div>
+      </section>
+
+      <section class="screen" id="screen-analytics">
+        <div class="analytics-page"><div class="page-title"><div><span class="eyebrow">Analytics</span><h2>数据页</h2></div></div><div class="stats-row"><div><b>128</b><span>总笔记</span></div><div><b>43</b><span>已发布</span></div><div><b>82.6</b><span>平均分</span></div><div><b>16</b><span>本月新增</span></div></div><div class="chart-grid"><div class="bar-chart"><h3>热门标签</h3><p><i style="width:88%"></i>#护肤</p><p><i style="width:72%"></i>#旅行攻略</p><p><i style="width:54%"></i>#民宿</p><p><i style="width:43%"></i>#穿搭</p></div><div class="donut-card"><h3>状态分布</h3><div class="donut"></div><p>草稿 62% · 已发布 33% · 定时 5%</p></div><div class="calendar-card"><h3>发布月历</h3><div class="calendar" id="calendar"></div></div></div></div>
+      </section>
+
+      <section class="screen" id="screen-tasks">
+        <div class="tasks-page"><div class="page-title"><div><span class="eyebrow">Tasks</span><h2>任务中心</h2></div><button>刷新</button></div><div class="task-list"><div class="task-row running"><div><b>图片生成 · 秋冬护肤封面</b><p>running · 已等待 2m12s · tool: generate_image</p></div><button>取消</button></div><div class="task-row"><div><b>发布前诊断 · 笔记 #42</b><p>completed · 23.4s · events 18 · tools 4</p></div><button>详情</button></div><div class="task-detail"><b>Trace</b><pre>{ tools: ["read_article", "score_article", "diagnose_article"], timings_ms: { total: 23410 } }</pre></div></div></div>
+      </section>
+
+      <section class="screen" id="screen-settings">
+        <div class="settings-page"><div class="page-title"><div><span class="eyebrow">Settings</span><h2>设置页</h2></div><button class="primary">保存配置</button></div><div class="settings-grid"><div class="settings-card wide"><h3>我的模型队列</h3><div class="model-row main"><span>主</span><input value="gpt-image-2" readonly><input value="https://yituoshiai.com/v1" readonly><button>获取模型</button><label><input type="checkbox"> 支持URL</label><label><input type="checkbox"> 支持quality</label></div><div class="model-row"><span>备1</span><input value="gpt-image-2" readonly><input value="https://dm-fox.rjj.cc/codex/v1" readonly><button>获取模型</button><label><input type="checkbox" checked> 支持URL</label><label><input type="checkbox" checked> 支持quality</label></div><p class="muted">拖拽调整顺序；失败立即切备用；冷却后恢复原队列位置。</p></div><div class="settings-card"><h3>静态图片公网测试</h3><p>/static/images/... 可访问：成功</p><button>生成测试图片 URL</button></div><div class="settings-card"><h3>生图真实调用测试</h3><p>展示模型、耗时、错误和返回图片。</p><button>测试生图模型</button></div><div class="settings-card"><h3>账号安全</h3><input value="当前密码" readonly><input value="新密码" readonly><button>修改密码</button></div><div class="settings-card"><h3>管理员</h3><p>用户权限、注册开关、MCP 工具列表。</p><div class="user-row">admin <span>管理员</span></div><div class="user-row">testlogin <span>用户</span></div></div></div></div>
+      </section>
+
+      <section class="screen" id="screen-hidden-lab">
+        <div class="lab-page"><div class="page-title"><div><span class="eyebrow">Hidden</span><h2>AI 图片实验页（未挂路由）</h2></div><span class="pill warn">隐藏</span></div><div class="lab-grid"><div class="lab-canvas"><div class="poster skin"></div><div class="selection-box"></div></div><div class="layer-panel"><h3>实验能力</h3><ul><li>整图生成 / 上传图片</li><li>像素拆层和语义伪图层</li><li>框选区域生成蒙版</li><li>图层拖动、复制、删除、文字编辑</li><li>局部重绘 / 消除 / 整体变体</li></ul><p>当前隐藏，主产品通过图片编辑弹窗暴露稳定能力。</p></div></div></div>
+      </section>
+    </main>
+
+    <aside class="inspector">
+      <div class="inspector-card"><span class="eyebrow">Current Screen</span><h3 id="screen-title">总览地图</h3><p id="screen-desc">当前原型基于真实前端路由与组件能力生成。</p></div>
+      <div class="inspector-card"><h3>全局交互</h3><ul><li>点击左侧切换页面</li><li>点击 ⌘K 打开命令面板</li><li>点击图片编辑器查看弹窗</li><li>原型不连接后端，仅表达交互结构</li></ul></div>
+      <div class="inspector-card"><h3>设计检查点</h3><div class="check"><span class="dot ok"></span>覆盖全部主路由</div><div class="check"><span class="dot ok"></span>保留 Agent 工具链可见性</div><div class="check"><span class="dot ok"></span>包含后台任务/诊断续跑</div><div class="check"><span class="dot ok"></span>包含管理员视角</div></div>
+    </aside>
+  </div>
+
+  <div class="modal" id="command-modal"><div class="command-box"><input value="搜索笔记、跳转页面…" readonly><div class="cmd active">新建对话 <span>↵</span></div><div class="cmd">笔记列表</div><div class="cmd">秋冬护肤封面这样做</div><div class="cmd">任务中心</div><p>↑↓ 导航 · ↵ 打开 · Esc 关闭</p></div></div>
+  <div class="modal" id="onboarding-modal"><div class="onboard"><button class="modal-close">×</button><div class="big-emoji">💬</div><h2>智能创作对话</h2><p>在「创作」页直接告诉 AI 你想写什么，它会帮你生成标题、正文、标签和封面图。支持多轮对话持续优化。</p><div class="dots"><i class="on"></i><i></i><i></i><i></i><i></i></div><button class="primary">下一步</button></div></div>
+  <div class="modal" id="image-editor-modal"><div class="image-editor"><div class="editor-head"><b>图片编辑器</b><button class="modal-close">×</button></div><div class="editor-tools"><button class="on">裁剪</button><button>局部重绘</button><button>消除</button><button>整体变体</button><span>画笔 32px</span></div><div class="editor-stage"><div class="poster skin"></div><div class="mask-stroke"></div></div><div class="editor-foot"><input value="保持构图，去掉行李箱，增加一位 20+ 年轻女性" readonly><button class="primary">执行编辑</button></div></div></div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
