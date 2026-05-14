@@ -283,6 +283,13 @@ class EditImageRequest(BaseModel):
         return _validate_image_quality(v)
 
 
+class AnalyzeImageLayersRequest(BaseModel):
+    image_url: str
+    width: Optional[int] = None
+    height: Optional[int] = None
+    hint: str = ""
+
+
 class ApplyTemplateRequest(BaseModel):
     template_id: int
     topic: str

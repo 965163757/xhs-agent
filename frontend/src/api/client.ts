@@ -375,6 +375,37 @@ export async function editImage(payload: {
   return r.data as { ok: boolean; image: string }
 }
 
+export type AnalyzedImageLayer = {
+  id: string
+  type: 'text' | 'object' | 'background' | 'decoration'
+  label: string
+  text?: string
+  bbox_norm: [number, number, number, number]
+  confidence?: number
+  font_hint?: string
+  color_hint?: string
+  edit_prompt?: string
+  zIndex?: number
+}
+
+export async function analyzeImageLayers(payload: {
+  image_url: string
+  width?: number
+  height?: number
+  hint?: string
+}) {
+  const r = await api.post('/images/analyze_layers', payload)
+  return r.data as {
+    ok: boolean
+    image_url: string
+    canvas?: { width: number; height: number }
+    layers?: AnalyzedImageLayer[]
+    error?: string
+    elapsed_ms?: number
+    elapsed_sec?: number
+  }
+}
+
 export async function uploadMask(blob: Blob): Promise<string> {
   const fd = new FormData()
   fd.append('file', blob, 'mask.png')

@@ -31,6 +31,7 @@ from ..config import (
 )
 from ..database import Article, ArticleDiagnosis, ArticleVersion, Conversation, SessionLocal, Task, Template, User, UserMemory
 from ..schemas import (
+    AnalyzeImageLayersRequest,
     ApplyTemplateRequest,
     ApplyDiagnosisRequest,
     ArticleImageArrangeRequest,
@@ -61,7 +62,7 @@ from ..schemas import (
     SuggestTitlesRequest,
     TemplateCreate,
 )
-from ..services.llm import generate_image
+from ..services.llm import chat_completion, generate_image
 from ..time_utils import beijing_date_key, beijing_iso, beijing_now_naive
 
 router = APIRouter()
@@ -471,6 +472,148 @@ async def api_remove_object(payload: RemoveObjectRequest, request: Request, user
 @router.post("/images/edit")
 async def api_edit_image(payload: EditImageRequest, request: Request, user: User = Depends(get_current_user)):
     return await _call_user_tool("edit_image", payload.model_dump(), user, request)
+
+
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    value = (text or "").strip()
+    if value.startswith("```"):
+        value = value.strip("`")
+        if value.lower().startswith("json"):
+            value = value[4:].strip()
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+    start = value.find("{")
+    end = value.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            parsed = json.loads(value[start : end + 1])
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _clamp_norm_bbox(value: Any) -> List[int]:
+    if not isinstance(value, list) or len(value) < 4:
+        return [0, 0, 1000, 1000]
+    nums: List[int] = []
+    for item in value[:4]:
+        try:
+            nums.append(int(round(float(item))))
+        except Exception:
+            nums.append(0)
+    x, y, w, h = nums
+    x = max(0, min(999, x))
+    y = max(0, min(999, y))
+    w = max(1, min(1000 - x, w))
+    h = max(1, min(1000 - y, h))
+    return [x, y, w, h]
+
+
+def _local_image_size(image_url: str) -> Tuple[int, int]:
+    from PIL import Image
+    from ..services.llm import _resolve_local_path
+
+    try:
+        path = _resolve_local_path(image_url)
+        if path.exists():
+            with Image.open(path) as im:
+                return im.size
+    except Exception:
+        pass
+    return 0, 0
+
+
+@router.post("/images/analyze_layers")
+async def api_analyze_image_layers(
+    payload: AnalyzeImageLayersRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    """Use current vision/chat model to produce semantic pseudo-layers.
+
+    This is intentionally a semantic decomposition, not a claim that the flat
+    PNG/JPG contains real PS layers.  Frontend can use the returned text/object
+    regions for OCR-style text boxes, AI inpaint/delete, and movable overlays.
+    """
+    effective = with_public_base_url_if_missing(await get_effective_settings(user.id), str(request.base_url))
+    image_url = payload.image_url.strip()
+    if not image_url:
+        raise HTTPException(400, "image_url is required")
+    width, height = _local_image_size(image_url)
+    width = width or int(payload.width or 0)
+    height = height or int(payload.height or 0)
+    start = time.perf_counter()
+    prompt = (
+        "你是图片语义拆层引擎。请分析这张小红书海报/图片，把扁平图拆解成可编辑的语义伪图层。"
+        "不要解释，只返回严格 JSON。\n\n"
+        "目标：识别文本层、贴纸/标签/图标/主体等元素层、背景层。"
+        "bbox_norm 使用 [x,y,w,h]，坐标为 0-1000 相对坐标，不要使用像素坐标。"
+        "文本层必须尽量 OCR 出 text；不确定也要给 approximate text。"
+        "元素层 label 要简短，如 价格标签、评价卡片、房间主体、海浪背景、装饰贴纸。"
+        "每个层给 edit_prompt，描述如果用户想修改这个区域可如何局部重绘。"
+        "最多 18 个层，优先输出可编辑价值高的层。\n\n"
+        f"已知图片尺寸：{width or 'unknown'}x{height or 'unknown'}。\n"
+        f"用户提示：{payload.hint or '无'}\n\n"
+        'JSON格式：{"canvas":{"width":数字或0,"height":数字或0},'
+        '"layers":[{"id":"layer_1","type":"text|object|background|decoration","label":"名称",'
+        '"text":"文本层内容或空","bbox_norm":[0,0,100,100],"confidence":0.0到1.0,'
+        '"font_hint":"字体风格","color_hint":"#RRGGBB或颜色描述","edit_prompt":"局部编辑提示","zIndex":数字}]}'
+    )
+    try:
+        resp = await chat_completion(
+            messages=[
+                {"role": "system", "content": "你只输出可解析 JSON，不输出 markdown。"},
+                {"role": "user", "content": prompt, "images": [image_url]},
+            ],
+            temperature=0.1,
+            settings=effective,
+        )
+        content = resp.choices[0].message.content or ""
+        data = _extract_json_object(content)
+        raw_layers = data.get("layers") if isinstance(data.get("layers"), list) else []
+        layers: List[Dict[str, Any]] = []
+        for idx, item in enumerate(raw_layers[:24]):
+            if not isinstance(item, dict):
+                continue
+            layer_type = str(item.get("type") or "object").strip().lower()
+            if layer_type not in {"text", "object", "background", "decoration"}:
+                layer_type = "object"
+            layers.append(
+                {
+                    "id": str(item.get("id") or f"layer_{idx + 1}"),
+                    "type": layer_type,
+                    "label": str(item.get("label") or ("文本" if layer_type == "text" else "元素"))[:80],
+                    "text": str(item.get("text") or ""),
+                    "bbox_norm": _clamp_norm_bbox(item.get("bbox_norm") or item.get("bbox")),
+                    "confidence": float(item.get("confidence") or 0),
+                    "font_hint": str(item.get("font_hint") or ""),
+                    "color_hint": str(item.get("color_hint") or ""),
+                    "edit_prompt": str(item.get("edit_prompt") or ""),
+                    "zIndex": int(float(item.get("zIndex") or idx)),
+                }
+            )
+        elapsed = int((time.perf_counter() - start) * 1000)
+        return {
+            "ok": True,
+            "image_url": image_url,
+            "canvas": {"width": width, "height": height},
+            "layers": layers,
+            "raw": data,
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+        }
+    except Exception as e:
+        elapsed = int((time.perf_counter() - start) * 1000)
+        return {
+            "ok": False,
+            "error": f"图片拆解失败：{e}",
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+        }
 
 
 @router.post("/images/upload_mask")
