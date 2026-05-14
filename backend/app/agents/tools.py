@@ -3163,7 +3163,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_generate_image,
         "schema": _fn_schema(
             "generate_image",
-            "独立生成真实图片，不会创建笔记/帖子。只有用户明确要求“生成图片/生成首图/生成封面图/出图/生图/画一张/制作海报”时使用；“封面方向/封面建议/配图方向/视觉方案/prompt”只是文字方案，不要用本工具；不确定时先反问。只有在显式传 article_id 时才绑定到笔记（role=cover|content）；role=cover 表示放到展示队列第 1 位，role=content 表示后续队列图；若指定 replace_index，则替换后续队列图。",
+            "独立生成真实图片，不会创建笔记/帖子。只有用户明确要求“生成图片/生成首图/生成封面图/出图/生图/画一张/制作海报”时使用；“封面方向/封面建议/配图方向/视觉方案/prompt”只是文字方案，不要用本工具；不确定时优先一次性反问清楚是否真实出图、数量/尺寸、是否绑定笔记；若只缺一个关键点，可只问一个。只有在显式传 article_id 时才绑定到笔记（role=cover|content）；role=cover 表示放到展示队列第 1 位，role=content 表示后续队列图；若指定 replace_index，则替换后续队列图。",
             {
                 "prompt": {"type": "string"},
                 "size": {"type": "string", "description": "如 1152x1536 / 1536x2048 / 2048x1152；不传时会从 prompt 的 2K/4K/比例推断，默认 3:4"},

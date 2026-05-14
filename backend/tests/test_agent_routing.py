@@ -20,10 +20,13 @@ class AgentRoutingTests(unittest.TestCase):
         ):
             self.assertFalse(hasattr(runner, name), f"{name} should not exist")
 
-    def test_prompt_requires_clarification_for_ambiguous_intent(self):
+    def test_prompt_requires_batched_clarification_for_ambiguous_intent(self):
         self.assertIn("不要把模糊需求强行兜底到某个工具", SYSTEM_PROMPT)
-        self.assertIn("判断不清时先反问", SYSTEM_PROMPT)
+        self.assertIn("反问默认一次性完成", SYSTEM_PROMPT)
+        self.assertIn("避免无必要地分多轮逐个追问", SYSTEM_PROMPT)
+        self.assertIn("如果只有 1 个真正阻塞点，可以只问 1 个", SYSTEM_PROMPT)
         self.assertIn("不等同于真实生图", SYSTEM_PROMPT)
+        self.assertNotIn("先反问 1 个关键问题", SYSTEM_PROMPT)
 
     def test_default_tool_round_limit_is_12(self):
         sig = inspect.signature(run_agent_stream)
