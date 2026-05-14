@@ -103,22 +103,106 @@ def _mask_key(key: str) -> str:
     return (k[:6] + "…" + k[-4:]) if len(k) > 12 else ("已设置" if k else "")
 
 
-def parse_model_candidates(primary: str = "", extra: str = "") -> List[str]:
-    """Return unique model candidates, preserving user order.
-
-    `primary` remains the backward-compatible first choice.  `extra` can be a
-    comma/newline/semicolon separated fallback pool from the settings page.
-    """
-    raw = "\n".join([primary or "", extra or ""])
-    items = [x.strip() for x in re.split(r"[\n,，;；]+", raw) if x.strip()]
-    out: List[str] = []
+def _dedupe_model_configs(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
     seen = set()
     for item in items:
-        key = item.lower()
+        model = str(item.get("model") or "").strip()
+        if not model:
+            continue
+        base_url = str(item.get("base_url") or "").strip()
+        api_key = str(item.get("api_key") or "").strip()
+        key = (model.lower(), base_url.rstrip("/"), api_key)
         if key in seen:
             continue
         seen.add(key)
-        out.append(item)
+        out.append({"model": model, "base_url": base_url, "api_key": api_key})
+    return out
+
+
+def parse_model_config_candidates(
+    primary_model: str,
+    primary_base_url: str,
+    primary_api_key: str,
+    extra: str = "",
+) -> List[Dict[str, str]]:
+    """Parse model fallback pool.
+
+    Backward compatible inputs:
+    - plain lines: `model-name` (uses the primary base_url/api_key)
+    - pipe lines: `model-name | https://base/v1 | sk-...`
+    - JSON array: [{"model":"...", "base_url":"...", "api_key":"..."}]
+    """
+    primary = {
+        "model": str(primary_model or "").strip(),
+        "base_url": str(primary_base_url or "").strip(),
+        "api_key": str(primary_api_key or "").strip(),
+    }
+    items: List[Dict[str, str]] = [primary] if primary["model"] else []
+    raw = str(extra or "").strip()
+    if raw:
+        parsed_json = None
+        if raw.startswith("["):
+            try:
+                parsed_json = json.loads(raw)
+            except Exception:
+                parsed_json = None
+        if isinstance(parsed_json, list):
+            for row in parsed_json:
+                if not isinstance(row, dict):
+                    continue
+                model = str(row.get("model") or row.get("name") or "").strip()
+                if not model:
+                    continue
+                items.append({
+                    "model": model,
+                    "base_url": str(row.get("base_url") or row.get("url") or primary["base_url"]).strip(),
+                    "api_key": str(row.get("api_key") or row.get("key") or primary["api_key"]).strip(),
+                })
+        else:
+            for line in raw.splitlines():
+                value = line.strip()
+                if not value or value.startswith("#"):
+                    continue
+                parts = [p.strip() for p in value.split("|")]
+                # Also preserve the previous simple comma/semicolon model list.
+                if len(parts) == 1 and (";" in value or "；" in value or "，" in value or "," in value):
+                    for model in [x.strip() for x in re.split(r"[,，;；]+", value) if x.strip()]:
+                        items.append({"model": model, "base_url": primary["base_url"], "api_key": primary["api_key"]})
+                    continue
+                items.append({
+                    "model": parts[0],
+                    "base_url": parts[1] if len(parts) >= 2 and parts[1] else primary["base_url"],
+                    "api_key": parts[2] if len(parts) >= 3 and parts[2] else primary["api_key"],
+                })
+    return _dedupe_model_configs(items)
+
+
+def _model_names(configs: List[Dict[str, str]]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for cfg in configs:
+        model = str(cfg.get("model") or "").strip()
+        key = model.lower()
+        if model and key not in seen:
+            seen.add(key)
+            out.append(model)
+    return out
+
+
+def _public_model_configs(configs: List[Dict[str, str]], *, include_secrets: bool = False) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for cfg in configs:
+        api_key = str(cfg.get("api_key") or "")
+        row: Dict[str, Any] = {
+            "model": cfg.get("model") or "",
+            "base_url": cfg.get("base_url") or "",
+            "api_key_set": bool(api_key),
+            "api_key_mask": _mask_key(api_key),
+        }
+        if include_secrets:
+            row["api_key"] = api_key
+        out.append(row)
     return out
 
 
@@ -168,18 +252,36 @@ class Settings(BaseSettings):
         return self.image_base_url or self.chat_base_url or self.openai_base_url
 
     @property
+    def chat_model_configs(self) -> List[Dict[str, str]]:
+        return parse_model_config_candidates(
+            self.chat_model,
+            self.effective_chat_base_url,
+            self.effective_chat_api_key,
+            self.chat_models,
+        )
+
+    @property
+    def image_model_configs(self) -> List[Dict[str, str]]:
+        return parse_model_config_candidates(
+            self.image_model,
+            self.effective_image_base_url,
+            self.effective_image_api_key,
+            self.image_models,
+        )
+
+    @property
     def chat_model_candidates(self) -> List[str]:
-        return parse_model_candidates(self.chat_model, self.chat_models)
+        return _model_names(self.chat_model_configs)
 
     @property
     def image_model_candidates(self) -> List[str]:
-        return parse_model_candidates(self.image_model, self.image_models)
+        return _model_names(self.image_model_configs)
 
-    def public_dict(self) -> Dict[str, Any]:
+    def public_dict(self, *, include_secrets: bool = False) -> Dict[str, Any]:
         """What we expose via /api/settings. Mask the key."""
         chat_key = self.effective_chat_api_key
         image_key = self.effective_image_api_key
-        return {
+        out: Dict[str, Any] = {
             # Backward-compatible aliases map to the text/chat config.
             "openai_api_key_mask": _mask_key(chat_key),
             "openai_api_key_set": bool(chat_key),
@@ -197,8 +299,17 @@ class Settings(BaseSettings):
             "image_models": self.image_models,
             "chat_model_candidates": self.chat_model_candidates,
             "image_model_candidates": self.image_model_candidates,
+            "chat_model_configs": _public_model_configs(self.chat_model_configs, include_secrets=include_secrets),
+            "image_model_configs": _public_model_configs(self.image_model_configs, include_secrets=include_secrets),
             "public_base_url": self.public_base_url.rstrip("/"),
         }
+        if include_secrets:
+            out.update({
+                "openai_api_key": self.openai_api_key,
+                "chat_api_key": self.effective_chat_api_key,
+                "image_api_key": self.image_api_key,
+            })
+        return out
 
 
 _lock = threading.Lock()

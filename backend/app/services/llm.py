@@ -90,24 +90,48 @@ def get_client(settings: Optional[Settings] = None, kind: str = "chat") -> Async
     return _clients[key]
 
 
-def _model_candidates(s: Settings, kind: str, explicit_model: Optional[str] = None) -> List[str]:
+def _model_candidates(s: Settings, kind: str, explicit_model: Optional[str] = None) -> List[Dict[str, str]]:
     if explicit_model:
-        return [explicit_model]
-    candidates = s.image_model_candidates if kind == "image" else s.chat_model_candidates
-    fallback = s.image_model if kind == "image" else s.chat_model
-    return candidates or ([fallback] if fallback else [])
+        if kind == "image":
+            return [{
+                "model": explicit_model,
+                "base_url": s.effective_image_base_url,
+                "api_key": s.effective_image_api_key,
+            }]
+        return [{
+            "model": explicit_model,
+            "base_url": s.effective_chat_base_url,
+            "api_key": s.effective_chat_api_key,
+        }]
+    candidates = s.image_model_configs if kind == "image" else s.chat_model_configs
+    if candidates:
+        return candidates
+    if kind == "image":
+        return [{"model": s.image_model, "base_url": s.effective_image_base_url, "api_key": s.effective_image_api_key}]
+    return [{"model": s.chat_model, "base_url": s.effective_chat_base_url, "api_key": s.effective_chat_api_key}]
 
 
-def _settings_for_model(s: Settings, kind: str, model: str) -> Settings:
+def _settings_for_model(s: Settings, kind: str, candidate: Dict[str, str]) -> Settings:
     try:
         copied = s.model_copy(deep=True)
     except AttributeError:
         copied = s.copy(deep=True)  # type: ignore[attr-defined]
+    model = str(candidate.get("model") or "").strip()
+    base_url = str(candidate.get("base_url") or "").strip()
+    api_key = str(candidate.get("api_key") or "").strip()
     if kind == "image":
         copied.image_model = model
+        if base_url:
+            copied.image_base_url = base_url
+        if api_key:
+            copied.image_api_key = api_key
         copied.image_models = ""
     else:
         copied.chat_model = model
+        if base_url:
+            copied.chat_base_url = base_url
+        if api_key:
+            copied.chat_api_key = api_key
         copied.chat_models = ""
     return copied
 
@@ -555,14 +579,15 @@ async def chat_completion(
     settings: Optional[Settings] = None,
 ) -> Any:
     s = _effective_settings(settings)
-    client = get_client(s, kind="chat")
     openai_messages = await to_openai_messages(messages, settings=s)
     inline_messages: Optional[List[Dict[str, Any]]] = None
     has_images = _has_images(messages)
     errors: List[str] = []
     for candidate in _model_candidates(s, "chat", model):
+        candidate_settings = _settings_for_model(s, "chat", candidate)
+        client = get_client(candidate_settings, kind="chat")
         kwargs: Dict[str, Any] = {
-            "model": candidate,
+            "model": candidate_settings.chat_model,
             "messages": openai_messages,
             "temperature": temperature,
         }
@@ -575,7 +600,7 @@ async def chat_completion(
             # Public image URLs are optimal when the provider can fetch them.
             # Some OpenAI-compatible gateways cannot, so retry this same model
             # once by fetching server-side and sending original bytes as data URL.
-            errors.append(f"{candidate}: {type(e).__name__}: {e}")
+            errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url}: {type(e).__name__}: {e}")
             if not has_images or not _should_retry_inline_images(e):
                 continue
             try:
@@ -584,7 +609,7 @@ async def chat_completion(
                 kwargs["messages"] = inline_messages
                 return await client.chat.completions.create(**kwargs)
             except Exception as inline_e:
-                errors.append(f"{candidate} inline-images: {type(inline_e).__name__}: {inline_e}")
+                errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} inline-images: {type(inline_e).__name__}: {inline_e}")
                 continue
     raise _fallback_error("文本模型调用失败", errors)
 
@@ -597,15 +622,16 @@ async def chat_completion_stream(
     settings: Optional[Settings] = None,
 ) -> AsyncIterator[Any]:
     s = _effective_settings(settings)
-    client = get_client(s, kind="chat")
     openai_messages = await to_openai_messages(messages, settings=s)
     inline_messages: Optional[List[Dict[str, Any]]] = None
     has_images = _has_images(messages)
     errors: List[str] = []
 
     for candidate in _model_candidates(s, "chat", model):
+        candidate_settings = _settings_for_model(s, "chat", candidate)
+        client = get_client(candidate_settings, kind="chat")
         kwargs: Dict[str, Any] = {
-            "model": candidate,
+            "model": candidate_settings.chat_model,
             "messages": openai_messages,
             "temperature": temperature,
             "stream": True,
@@ -617,7 +643,7 @@ async def chat_completion_stream(
         try:
             stream = await client.chat.completions.create(**kwargs)
         except Exception as e:
-            errors.append(f"{candidate}: {type(e).__name__}: {e}")
+            errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url}: {type(e).__name__}: {e}")
             if has_images and _should_retry_inline_images(e):
                 try:
                     if inline_messages is None:
@@ -625,7 +651,7 @@ async def chat_completion_stream(
                     kwargs["messages"] = inline_messages
                     stream = await client.chat.completions.create(**kwargs)
                 except Exception as inline_e:
-                    errors.append(f"{candidate} inline-images: {type(inline_e).__name__}: {inline_e}")
+                    errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} inline-images: {type(inline_e).__name__}: {inline_e}")
                     continue
             else:
                 continue
@@ -639,7 +665,7 @@ async def chat_completion_stream(
         except Exception as e:
             if yielded:
                 raise
-            errors.append(f"{candidate} stream: {type(e).__name__}: {e}")
+            errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} stream: {type(e).__name__}: {e}")
             if has_images and _should_retry_inline_images(e):
                 try:
                     if inline_messages is None:
@@ -653,7 +679,7 @@ async def chat_completion_stream(
                 except Exception as inline_e:
                     if yielded:
                         raise
-                    errors.append(f"{candidate} inline-images stream: {type(inline_e).__name__}: {inline_e}")
+                    errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} inline-images stream: {type(inline_e).__name__}: {inline_e}")
             continue
     raise _fallback_error("文本流式模型调用失败", errors)
 
@@ -682,7 +708,7 @@ async def generate_image(
                 settings=model_settings,
             )
         except Exception as e:
-            attempt_errors.append(f"{candidate}: {type(e).__name__}: {e}")
+            attempt_errors.append(f"{model_settings.image_model}@{model_settings.effective_image_base_url}: {type(e).__name__}: {e}")
             continue
     raise _fallback_error("图片生成失败", attempt_errors)
 
@@ -1259,7 +1285,7 @@ async def edit_image(
                 settings=model_settings,
             )
         except Exception as e:
-            attempt_errors.append(f"{candidate}: {type(e).__name__}: {e}")
+            attempt_errors.append(f"{model_settings.image_model}@{model_settings.effective_image_base_url}: {type(e).__name__}: {e}")
             continue
     raise _fallback_error("图片编辑失败", attempt_errors)
 

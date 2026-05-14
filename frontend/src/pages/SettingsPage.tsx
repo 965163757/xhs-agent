@@ -103,7 +103,9 @@ export default function SettingsPage() {
   const load = async () => {
     const cur = await getSettings()
     setS(cur)
+    setChatApiKey(cur.chat_api_key || cur.openai_api_key || '')
     setChatBaseUrl(cur.chat_base_url || cur.openai_base_url)
+    setImageApiKey(cur.image_api_key || '')
     setImageBaseUrl(cur.image_base_url || cur.chat_base_url || cur.openai_base_url)
     setChatModel(cur.chat_model)
     setImageModel(cur.image_model)
@@ -115,7 +117,9 @@ export default function SettingsPage() {
     getMySettings().then(ms => {
       setMy(ms)
       setUseOwnKey(ms.use_own_key)
+      setMyChatKey(ms.chat_api_key || ms.openai_api_key || '')
       setMyChatBaseUrl(ms.chat_base_url || ms.openai_base_url)
+      setMyImageKey(ms.image_api_key || '')
       setMyImageBaseUrl(ms.image_base_url || ms.chat_base_url || ms.openai_base_url)
       setMyChatModel(ms.chat_model)
       setMyImageModel(ms.image_model)
@@ -151,8 +155,8 @@ export default function SettingsPage() {
         public_base_url: publicBaseUrl.trim(),
       })
       setS(next)
-      setChatApiKey('')
-      setImageApiKey('')
+      setChatApiKey(next.chat_api_key || next.openai_api_key || chatApiKey)
+      setImageApiKey(next.image_api_key || imageApiKey)
       setMsg({ kind: 'success', text: '全局配置已保存。' })
     } catch (e: any) {
       setMsg({ kind: 'error', text: e?.response?.data?.detail || e?.message || '保存失败' })
@@ -168,6 +172,8 @@ export default function SettingsPage() {
     try {
       const next = await updateSettings(kind === 'chat' ? { chat_api_key: '', openai_api_key: '' } : { image_api_key: '' })
       setS(next)
+      if (kind === 'chat') setChatApiKey('')
+      else setImageApiKey('')
       setMsg({ kind: 'success', text: kind === 'chat' ? '全局文本 Key 已清空。' : '全局生图 Key 已清空。' })
     } catch (e: any) {
       setMsg({ kind: 'error', text: e?.response?.data?.detail || e?.message || '清空失败' })
@@ -192,8 +198,8 @@ export default function SettingsPage() {
         image_models: myImageModels,
       })
       setMy(next)
-      setMyChatKey('')
-      setMyImageKey('')
+      setMyChatKey(next.chat_api_key || next.openai_api_key || myChatKey)
+      setMyImageKey(next.image_api_key || myImageKey)
       setMsg({ kind: 'success', text: '个人设置已保存。' })
     } catch (e: any) {
       setMsg({ kind: 'error', text: e?.message || '保存失败' })
@@ -208,6 +214,8 @@ export default function SettingsPage() {
     try {
       const next = await updateMySettings(kind === 'chat' ? { chat_api_key: '', openai_api_key: '' } : { image_api_key: '' })
       setMy(next)
+      if (kind === 'chat') setMyChatKey('')
+      else setMyImageKey('')
       setMsg({ kind: 'success', text: kind === 'chat' ? '个人文本 Key 已清空。' : '个人生图 Key 已清空。' })
     } catch (e: any) {
       setMsg({ kind: 'error', text: e?.message || '清空失败' })
@@ -386,14 +394,14 @@ export default function SettingsPage() {
                 onChange={e => setMyChatModel(e.target.value)}
               />
               <TextField
-                label="对话候选模型 / 兜底模型"
-                placeholder={'每行一个，失败时按顺序切换，例如：\ngpt-5.4\ngpt-4.1'}
+                label="对话候选模型配置 / 兜底模型"
+                placeholder={'每行一套，失败时按顺序切换：\n模型 | Base URL | API Key\n例如：gpt-5.4 | https://api.example.com/v1 | sk-xxx'}
                 fullWidth
                 multiline
                 minRows={2}
                 value={myChatModels}
                 onChange={e => setMyChatModels(e.target.value)}
-                helperText="会和上面的主模型自动去重；主模型优先，后面的模型作为失败兜底。"
+                helperText="每个候选都可以有独立 URL 和 Key；只写模型名时复用上方文本 Base URL / Key。"
               />
 
               <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
@@ -431,14 +439,14 @@ export default function SettingsPage() {
                 onChange={e => setMyImageModel(e.target.value)}
               />
               <TextField
-                label="生图候选模型 / 兜底模型"
-                placeholder={'每行一个，失败时按顺序切换，例如：\ngpt-image-2\ngpt-image-1'}
+                label="生图候选模型配置 / 兜底模型"
+                placeholder={'每行一套，失败时按顺序切换：\n模型 | Base URL | API Key\n例如：gpt-image-2 | https://image.example.com/v1 | sk-xxx'}
                 fullWidth
                 multiline
                 minRows={2}
                 value={myImageModels}
                 onChange={e => setMyImageModels(e.target.value)}
-                helperText="生成图片、图片编辑都会使用这个兜底顺序。"
+                helperText="每个候选都可以有独立 URL 和 Key；只写模型名时复用上方生图 Base URL / Key。"
               />
             </Stack>
           )}
@@ -582,14 +590,14 @@ export default function SettingsPage() {
                 onChange={e => setChatModel(e.target.value)}
               />
               <TextField
-                label="对话候选模型 / 兜底模型"
-                placeholder={'每行一个，失败时按顺序切换，例如：\ngpt-5.4\ngpt-4.1\ngpt-4o'}
+                label="对话候选模型配置 / 兜底模型"
+                placeholder={'每行一套，失败时按顺序切换：\n模型 | Base URL | API Key\n例如：gpt-5.4 | https://api.example.com/v1 | sk-xxx'}
                 fullWidth
                 multiline
                 minRows={2}
                 value={chatModels}
                 onChange={e => setChatModels(e.target.value)}
-                helperText="主模型优先；候选模型会自动去重。文本对话、Agent 工具调用失败时会依次兜底。"
+                helperText="每个候选都可以有独立 URL 和 Key；只写模型名时复用上方文本 Base URL / Key。文本对话、Agent 工具调用失败时会依次兜底。"
               />
 
               <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
@@ -626,14 +634,14 @@ export default function SettingsPage() {
                 onChange={e => setImageModel(e.target.value)}
               />
               <TextField
-                label="生图候选模型 / 兜底模型"
-                placeholder={'每行一个，失败时按顺序切换，例如：\ngpt-image-2\ngpt-image-1'}
+                label="生图候选模型配置 / 兜底模型"
+                placeholder={'每行一套，失败时按顺序切换：\n模型 | Base URL | API Key\n例如：gpt-image-2 | https://image.example.com/v1 | sk-xxx'}
                 fullWidth
                 multiline
                 minRows={2}
                 value={imageModels}
                 onChange={e => setImageModels(e.target.value)}
-                helperText="生成图片和编辑图片共用该兜底顺序；如果第一个模型超时/报错，会自动尝试后续模型。"
+                helperText="每个候选都可以有独立 URL 和 Key；只写模型名时复用上方生图 Base URL / Key。生成图片和编辑图片共用该兜底顺序。"
               />
 
               <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>

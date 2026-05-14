@@ -1351,13 +1351,13 @@ async def clear_user_memory(user: User = Depends(get_current_user)):
 
 @router.get("/settings")
 async def get_public_settings(user: User = Depends(get_current_user)):
-    return get_settings().public_dict()
+    return get_settings().public_dict(include_secrets=(user.role == "admin"))
 
 
 @router.put("/settings")
 async def put_settings(payload: SettingsUpdate, user: User = Depends(require_admin)):
     new = update_settings(payload.model_dump(exclude_unset=True))
-    return new.public_dict()
+    return new.public_dict(include_secrets=True)
 
 
 @router.post("/settings/test")

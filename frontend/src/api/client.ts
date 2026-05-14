@@ -125,12 +125,15 @@ export interface PublicSettings {
   // Legacy aliases map to text/chat settings.
   openai_api_key_mask: string
   openai_api_key_set: boolean
+  openai_api_key?: string
   openai_base_url: string
   chat_api_key_mask: string
   chat_api_key_set: boolean
+  chat_api_key?: string
   chat_base_url: string
   image_api_key_mask: string
   image_api_key_set: boolean
+  image_api_key?: string
   image_base_url: string
   chat_model: string
   image_model: string
@@ -138,7 +141,17 @@ export interface PublicSettings {
   image_models?: string
   chat_model_candidates?: string[]
   image_model_candidates?: string[]
+  chat_model_configs?: ModelCandidateConfig[]
+  image_model_configs?: ModelCandidateConfig[]
   public_base_url: string
+}
+
+export interface ModelCandidateConfig {
+  model: string
+  base_url: string
+  api_key?: string
+  api_key_set?: boolean
+  api_key_mask?: string
 }
 
 export async function listArticles(): Promise<Article[]> {
@@ -700,12 +713,15 @@ export interface MySettings {
   // Legacy aliases map to text/chat settings.
   openai_api_key_mask: string
   openai_api_key_set: boolean
+  openai_api_key?: string
   openai_base_url: string
   chat_api_key_mask: string
   chat_api_key_set: boolean
+  chat_api_key?: string
   chat_base_url: string
   image_api_key_mask: string
   image_api_key_set: boolean
+  image_api_key?: string
   image_base_url: string
   chat_model: string
   image_model: string
@@ -713,6 +729,8 @@ export interface MySettings {
   image_models?: string
   chat_model_candidates?: string[]
   image_model_candidates?: string[]
+  chat_model_configs?: ModelCandidateConfig[]
+  image_model_configs?: ModelCandidateConfig[]
 }
 
 export async function getMySettings(): Promise<MySettings> {
