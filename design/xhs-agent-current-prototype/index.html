@@ -26,6 +26,7 @@
       <button class="nav-item active" data-screen="overview">总览地图</button>
       <button class="nav-item" data-screen="login">登录注册</button>
       <button class="nav-item" data-screen="variations">设计方向</button>
+      <button class="nav-item" data-screen="motion">动效系统</button>
       <button class="nav-item" data-screen="chat">创作对话</button>
       <button class="nav-item" data-screen="articles">笔记列表</button>
       <button class="nav-item" data-screen="editor">笔记编辑器</button>
@@ -112,6 +113,58 @@
           <div class="decision-card">
             <b>本次原型采用 A 为主，吸收 B 的纸感背景和 C 的任务可观察性。</b>
             <p>理由：系统目前最需要解决的是「Agent 到底在做什么、失败在哪里、用户能不能恢复」；视觉表达优先服务稳定感和控制感，而不是单纯漂亮。</p>
+          </div>
+        </div>
+      </section>
+
+
+      <section class="screen" id="screen-motion">
+        <div class="motion-page">
+          <div class="page-title">
+            <div><span class="eyebrow">Motion Philosophy</span><h2>动态美学：让 Agent 工作被看见</h2></div>
+            <span class="pill ok">可感知 · 可接管 · 有重量</span>
+          </div>
+          <div class="motion-hero">
+            <div class="motion-copy">
+              <b>核心动效原则</b>
+              <h3>不是「页面会动」，而是「创作过程有物理感」。</h3>
+              <p>动效围绕 Agent 的工作流展开：理解、调用工具、等待上游、失败切换、恢复结果。每一次运动都要解释系统状态，不做无意义装饰。</p>
+              <div class="motion-rhythm"><span>触发</span><i></i><span>生成</span><i></i><span>过程</span><i></i><span>爆发</span><i></i><span>落幅</span></div>
+            </div>
+            <div class="motion-stage" aria-label="Agent motion demo">
+              <div class="motion-node node-user">用户意图</div>
+              <div class="motion-node node-agent">Agent 判断</div>
+              <div class="motion-node node-tool">工具调用</div>
+              <div class="motion-node node-result">结果写回</div>
+              <div class="motion-path path-a"></div><div class="motion-path path-b"></div><div class="motion-path path-c"></div>
+              <div class="cursor-dot"></div>
+            </div>
+          </div>
+          <div class="motion-grid">
+            <article class="motion-card">
+              <span>01</span><b>Agent 工具链：过程显性</b>
+              <p>工具调用卡不突然出现，而是从用户意图旁边「浮起」；成功落稳，失败抖一下并展开备用路径。</p>
+              <div class="tool-motion-demo"><em></em><em></em><em></em></div>
+            </article>
+            <article class="motion-card">
+              <span>02</span><b>图片生成：队列有呼吸</b>
+              <p>图片任务进入后台后，缩略图位显示低频呼吸光；完成时从占位变为结果，而不是整页跳变。</p>
+              <div class="image-motion-demo"><i></i><i></i><i></i></div>
+            </article>
+            <article class="motion-card">
+              <span>03</span><b>模型 fallback：路径可追踪</b>
+              <p>主模型失败时，备用模型不是静默接管，而是沿队列向下移动并标记冷却时间。</p>
+              <div class="fallback-motion-demo"><i>主</i><i>备1</i><i>备2</i></div>
+            </article>
+            <article class="motion-card">
+              <span>04</span><b>诊断报告：评分渐进</b>
+              <p>五维分数按「内容 → 视觉 → 增长 → 风险 → 综合」顺序出现，给用户理解时间。</p>
+              <div class="score-motion-demo"><i></i><i></i><i></i><i></i><i></i></div>
+            </article>
+          </div>
+          <div class="motion-rules">
+            <b>动效约束</b>
+            <ul><li>主 easing 使用 expo-out：像物体落位，不像数字淡入。</li><li>所有动画必须服务状态解释；装饰动画默认删除。</li><li>关键结果前保留 300–500ms 停顿，让用户有反应时间。</li><li>支持 reduced-motion：关闭漂浮、闪烁，只保留必要状态变化。</li></ul>
           </div>
         </div>
       </section>
