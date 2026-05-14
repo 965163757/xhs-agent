@@ -46,12 +46,161 @@ import { formatBeijingDate } from '../utils/time'
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: any }) {
   return (
-    <Paper sx={{ p: 3, mb: 2.5 }}>
-      <Typography sx={{ fontSize: 15, fontWeight: 700, color: 'text.primary', mb: 0.3 }}>{title}</Typography>
+    <Paper sx={{ p: { xs: 1.5, md: 2 }, mb: 1.5, borderRadius: 2.2 }}>
+      <Typography sx={{ fontSize: 15, fontWeight: 800, color: 'text.primary', mb: 0.2 }}>{title}</Typography>
       {desc && (
-        <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mb: 2 }}>{desc}</Typography>
+        <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 1.4 }}>{desc}</Typography>
       )}
       {children}
+    </Paper>
+  )
+}
+
+type ModelPoolRow = {
+  model: string
+  base_url: string
+  api_key: string
+}
+
+function parseModelPool(value: string): ModelPoolRow[] {
+  const raw = (value || '').trim()
+  if (!raw) return []
+  if (raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed.map(x => ({
+          model: String(x?.model || x?.name || ''),
+          base_url: String(x?.base_url || x?.url || ''),
+          api_key: String(x?.api_key || x?.key || ''),
+        }))
+      }
+    } catch {
+      // fall through to legacy parser
+    }
+  }
+  return raw
+    .split('\n')
+    .flatMap(line => {
+      const value = line.trim()
+      if (!value || value.startsWith('#')) return []
+      const parts = value.split('|').map(x => x.trim())
+      if (parts.length === 1 && /[,，;；]/.test(value)) {
+        return value.split(/[,，;；]+/).map(model => ({
+          model: model.trim(),
+          base_url: '',
+          api_key: '',
+        })).filter(x => x.model)
+      }
+      return [{
+        model: parts[0] || '',
+        base_url: parts[1] || '',
+        api_key: parts[2] || '',
+      }]
+    })
+}
+
+function serializeModelPool(rows: ModelPoolRow[]) {
+  const normalized = rows.map(r => ({
+    model: r.model.trim(),
+    base_url: r.base_url.trim(),
+    api_key: r.api_key.trim(),
+  }))
+  const hasData = normalized.some(r => r.model || r.base_url || r.api_key)
+  if (!hasData && normalized.length <= 1) return ''
+  return JSON.stringify(normalized, null, 2)
+}
+
+function ModelPoolEditor({
+  title,
+  value,
+  onChange,
+  modelPlaceholder,
+  sx,
+}: {
+  title: string
+  value: string
+  onChange: (value: string) => void
+  modelPlaceholder: string
+  sx?: any
+}) {
+  const rows = parseModelPool(value)
+  const displayRows = rows.length ? rows : [{ model: '', base_url: '', api_key: '' }]
+  const updateRow = (idx: number, patch: Partial<ModelPoolRow>) => {
+    const next = [...displayRows]
+    next[idx] = { ...next[idx], ...patch }
+    onChange(serializeModelPool(next))
+  }
+  const addRow = () => onChange(serializeModelPool([...displayRows, { model: '', base_url: '', api_key: '' }]))
+  const removeRow = (idx: number) => {
+    const next = displayRows.filter((_, i) => i !== idx)
+    onChange(serializeModelPool(next))
+  }
+
+  return (
+    <Paper variant="outlined" sx={{ p: 1.2, borderRadius: 2, bgcolor: 'rgba(15,23,42,0.015)', ...sx }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+        <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#334155' }}>{title}</Typography>
+        <Chip size="small" label={`${rows.filter(r => r.model.trim()).length} 个候选`} sx={{ height: 20, fontSize: 10.5 }} />
+        <Box sx={{ flex: 1 }} />
+        <Button size="small" variant="outlined" onClick={addRow} sx={{ minHeight: 26, fontSize: 11.5 }}>
+          添加一行
+        </Button>
+      </Stack>
+      <Table size="small" sx={{ '& td, & th': { px: 0.55, py: 0.45, borderBottomColor: 'rgba(15,23,42,0.06)' } }}>
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ width: '26%', fontSize: 11.5, color: 'text.secondary' }}>模型</TableCell>
+            <TableCell sx={{ width: '36%', fontSize: 11.5, color: 'text.secondary' }}>Base URL</TableCell>
+            <TableCell sx={{ width: '30%', fontSize: 11.5, color: 'text.secondary' }}>API Key</TableCell>
+            <TableCell sx={{ width: 56 }} />
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {displayRows.map((row, idx) => (
+            <TableRow key={idx}>
+              <TableCell>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder={modelPlaceholder}
+                  value={row.model}
+                  onChange={e => updateRow(idx, { model: e.target.value })}
+                  inputProps={{ style: { fontSize: 12.5 } }}
+                />
+              </TableCell>
+              <TableCell>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="留空复用主 URL"
+                  value={row.base_url}
+                  onChange={e => updateRow(idx, { base_url: e.target.value })}
+                  inputProps={{ style: { fontSize: 12.5 } }}
+                />
+              </TableCell>
+              <TableCell>
+                <TextField
+                  size="small"
+                  fullWidth
+                  placeholder="留空复用主 Key"
+                  value={row.api_key}
+                  onChange={e => updateRow(idx, { api_key: e.target.value })}
+                  inputProps={{ style: { fontSize: 12.5 } }}
+                />
+              </TableCell>
+              <TableCell align="right">
+                <Button size="small" color="warning" onClick={() => removeRow(idx)} sx={{ minWidth: 44, fontSize: 11 }}>
+                  删除
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <Typography sx={{ fontSize: 11.2, color: 'text.secondary', mt: 0.8 }}>
+        主模型仍优先；候选模型按上到下兜底。每一行都可以单独指定 URL / Key。
+      </Typography>
     </Paper>
   )
 }
@@ -71,8 +220,8 @@ export default function SettingsPage() {
   const [chatModels, setChatModels] = useState('')
   const [imageModels, setImageModels] = useState('')
   const [publicBaseUrl, setPublicBaseUrl] = useState('')
-  const [showChatKey, setShowChatKey] = useState(false)
-  const [showImageKey, setShowImageKey] = useState(false)
+  const [showChatKey, setShowChatKey] = useState(true)
+  const [showImageKey, setShowImageKey] = useState(true)
 
   const [my, setMy] = useState<MySettings | null>(null)
   const [myChatKey, setMyChatKey] = useState('')
@@ -84,8 +233,8 @@ export default function SettingsPage() {
   const [myChatModels, setMyChatModels] = useState('')
   const [myImageModels, setMyImageModels] = useState('')
   const [useOwnKey, setUseOwnKey] = useState(false)
-  const [showMyChatKey, setShowMyChatKey] = useState(false)
-  const [showMyImageKey, setShowMyImageKey] = useState(false)
+  const [showMyChatKey, setShowMyChatKey] = useState(true)
+  const [showMyImageKey, setShowMyImageKey] = useState(true)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -326,9 +475,17 @@ export default function SettingsPage() {
     }
   }
 
+  const fieldGridSx = {
+    display: 'grid',
+    gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' },
+    gap: 1.15,
+    alignItems: 'start',
+  }
+  const wideSx = { gridColumn: '1 / -1' }
+
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 760, mx: 'auto' }}>
-      <Stack spacing={0.3} sx={{ mb: 3 }}>
+    <Box sx={{ p: { xs: 1.25, md: 2.2 }, maxWidth: 1180, mx: 'auto' }}>
+      <Stack spacing={0.25} sx={{ mb: 1.8 }}>
         <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
           设置
         </Typography>
@@ -358,11 +515,12 @@ export default function SettingsPage() {
           />
 
           {useOwnKey && (
-            <Stack spacing={2}>
-              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary' }}>
+            <Box sx={fieldGridSx}>
+              <Typography sx={{ ...wideSx, fontSize: 13, fontWeight: 700, color: 'text.secondary' }}>
                 文本 / 对话模型
               </Typography>
               <TextField
+                size="small"
                 label="文本 API Key"
                 placeholder={my?.chat_api_key_set || my?.openai_api_key_set ? '留空则保持不变' : '填入 sk-...'}
                 fullWidth
@@ -380,6 +538,7 @@ export default function SettingsPage() {
                 }}
               />
               <TextField
+                size="small"
                 label="文本 Base URL"
                 placeholder="https://api.openai.com/v1"
                 fullWidth
@@ -387,27 +546,26 @@ export default function SettingsPage() {
                 onChange={e => setMyChatBaseUrl(e.target.value)}
               />
               <TextField
+                size="small"
                 label="对话模型"
                 placeholder="留空则用全局"
                 fullWidth
                 value={myChatModel}
                 onChange={e => setMyChatModel(e.target.value)}
               />
-              <TextField
-                label="对话候选模型配置 / 兜底模型"
-                placeholder={'每行一套，失败时按顺序切换：\n模型 | Base URL | API Key\n例如：gpt-5.4 | https://api.example.com/v1 | sk-xxx'}
-                fullWidth
-                multiline
-                minRows={2}
+              <ModelPoolEditor
+                title="对话候选模型 / 兜底"
                 value={myChatModels}
-                onChange={e => setMyChatModels(e.target.value)}
-                helperText="每个候选都可以有独立 URL 和 Key；只写模型名时复用上方文本 Base URL / Key。"
+                onChange={setMyChatModels}
+                modelPlaceholder="gpt-5.4"
+                sx={wideSx}
               />
 
-              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
+              <Typography sx={{ ...wideSx, fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 0.3 }}>
                 生图模型
               </Typography>
               <TextField
+                size="small"
                 label="生图 API Key"
                 placeholder={my?.image_api_key_set ? '留空则保持不变；不填则复用文本 Key' : '可留空复用文本 Key'}
                 fullWidth
@@ -425,6 +583,7 @@ export default function SettingsPage() {
                 }}
               />
               <TextField
+                size="small"
                 label="生图 Base URL"
                 placeholder="可留空复用文本 Base URL"
                 fullWidth
@@ -432,23 +591,21 @@ export default function SettingsPage() {
                 onChange={e => setMyImageBaseUrl(e.target.value)}
               />
               <TextField
+                size="small"
                 label="图片模型"
                 placeholder="留空则用全局"
                 fullWidth
                 value={myImageModel}
                 onChange={e => setMyImageModel(e.target.value)}
               />
-              <TextField
-                label="生图候选模型配置 / 兜底模型"
-                placeholder={'每行一套，失败时按顺序切换：\n模型 | Base URL | API Key\n例如：gpt-image-2 | https://image.example.com/v1 | sk-xxx'}
-                fullWidth
-                multiline
-                minRows={2}
+              <ModelPoolEditor
+                title="生图候选模型 / 兜底"
                 value={myImageModels}
-                onChange={e => setMyImageModels(e.target.value)}
-                helperText="每个候选都可以有独立 URL 和 Key；只写模型名时复用上方生图 Base URL / Key。"
+                onChange={setMyImageModels}
+                modelPlaceholder="gpt-image-2"
+                sx={wideSx}
               />
-            </Stack>
+            </Box>
           )}
 
           <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ gap: 1, mt: 2.5 }}>
@@ -555,11 +712,12 @@ export default function SettingsPage() {
               />
             </Stack>
 
-            <Stack spacing={2}>
-              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary' }}>
+            <Box sx={fieldGridSx}>
+              <Typography sx={{ ...wideSx, fontSize: 13, fontWeight: 700, color: 'text.secondary' }}>
                 文本 / 对话模型
               </Typography>
               <TextField
+                size="small"
                 label="文本 API Key"
                 placeholder={(s.chat_api_key_set || s.openai_api_key_set) ? '留空则保持不变' : '填入 sk-...'}
                 fullWidth
@@ -577,6 +735,7 @@ export default function SettingsPage() {
                 }}
               />
               <TextField
+                size="small"
                 label="文本 Base URL"
                 placeholder="https://api.openai.com/v1"
                 fullWidth
@@ -584,26 +743,25 @@ export default function SettingsPage() {
                 onChange={e => setChatBaseUrl(e.target.value)}
               />
               <TextField
+                size="small"
                 label="对话模型"
                 fullWidth
                 value={chatModel}
                 onChange={e => setChatModel(e.target.value)}
               />
-              <TextField
-                label="对话候选模型配置 / 兜底模型"
-                placeholder={'每行一套，失败时按顺序切换：\n模型 | Base URL | API Key\n例如：gpt-5.4 | https://api.example.com/v1 | sk-xxx'}
-                fullWidth
-                multiline
-                minRows={2}
+              <ModelPoolEditor
+                title="对话候选模型 / 兜底"
                 value={chatModels}
-                onChange={e => setChatModels(e.target.value)}
-                helperText="每个候选都可以有独立 URL 和 Key；只写模型名时复用上方文本 Base URL / Key。文本对话、Agent 工具调用失败时会依次兜底。"
+                onChange={setChatModels}
+                modelPlaceholder="gpt-5.4"
+                sx={wideSx}
               />
 
-              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
+              <Typography sx={{ ...wideSx, fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 0.3 }}>
                 生图模型
               </Typography>
               <TextField
+                size="small"
                 label="生图 API Key"
                 placeholder={s.image_api_key_set ? '留空则保持不变；不填则复用文本 Key' : '可留空复用文本 Key'}
                 fullWidth
@@ -621,6 +779,7 @@ export default function SettingsPage() {
                 }}
               />
               <TextField
+                size="small"
                 label="生图 Base URL"
                 placeholder="可留空复用文本 Base URL"
                 fullWidth
@@ -628,27 +787,26 @@ export default function SettingsPage() {
                 onChange={e => setImageBaseUrl(e.target.value)}
               />
               <TextField
+                size="small"
                 label="图片模型"
                 fullWidth
                 value={imageModel}
                 onChange={e => setImageModel(e.target.value)}
               />
-              <TextField
-                label="生图候选模型配置 / 兜底模型"
-                placeholder={'每行一套，失败时按顺序切换：\n模型 | Base URL | API Key\n例如：gpt-image-2 | https://image.example.com/v1 | sk-xxx'}
-                fullWidth
-                multiline
-                minRows={2}
+              <ModelPoolEditor
+                title="生图候选模型 / 兜底"
                 value={imageModels}
-                onChange={e => setImageModels(e.target.value)}
-                helperText="每个候选都可以有独立 URL 和 Key；只写模型名时复用上方生图 Base URL / Key。生成图片和编辑图片共用该兜底顺序。"
+                onChange={setImageModels}
+                modelPlaceholder="gpt-image-2"
+                sx={wideSx}
               />
 
-              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 1 }}>
+              <Typography sx={{ ...wideSx, fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 0.3 }}>
                 部署访问地址
               </Typography>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={wideSx}>
                 <TextField
+                  size="small"
                   label="服务公网地址 / 当前部署 Origin"
                   placeholder="例如 http://服务器IP:8787 或 https://xhs.example.com"
                   fullWidth
@@ -664,12 +822,13 @@ export default function SettingsPage() {
                   使用当前地址
                 </Button>
               </Stack>
-              <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mt: -1 }}>
+              <Typography sx={{ ...wideSx, fontSize: 11.5, color: 'text.secondary', mt: -0.5 }}>
                 当前浏览器访问地址：{currentOrigin || '-'}。本地开发经 Vite 代理时可不填；服务器直连 IP/域名部署时建议填写。
               </Typography>
               <Paper
                 variant="outlined"
                 sx={{
+                  ...wideSx,
                   p: 1.5,
                   borderRadius: 2,
                   bgcolor: staticTest
@@ -734,6 +893,7 @@ export default function SettingsPage() {
               <Paper
                 variant="outlined"
                 sx={{
+                  ...wideSx,
                   p: 1.5,
                   borderRadius: 2,
                   bgcolor: imageTest ? (imageTest.ok ? 'rgba(22,163,74,0.04)' : 'rgba(220,38,38,0.04)') : 'rgba(0,0,0,0.015)',
@@ -787,7 +947,7 @@ export default function SettingsPage() {
                   </Box>
                 )}
               </Paper>
-              <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ gap: 1 }}>
+              <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ ...wideSx, gap: 1 }}>
                 <Button
                   variant="contained"
                   onClick={saveGlobal}
@@ -806,7 +966,7 @@ export default function SettingsPage() {
                   清空全局生图 Key
                 </Button>
               </Stack>
-            </Stack>
+            </Box>
           </Section>
 
           <Section title="系统管理" desc="注册控制和用户角色管理。">
