@@ -462,6 +462,7 @@ export default function ArticleDetailPage() {
   const [publishing, setPublishing] = useState(false)
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
   const [dragImagePos, setDragImagePos] = useState<number | null>(null)
+  const [showImageContext, setShowImageContext] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [layout, setLayout] = useState(getInitialEditorLayout)
   const [viewport, setViewport] = useState(() => ({
@@ -635,6 +636,10 @@ export default function ArticleDetailPage() {
   }, [load])
 
   useEffect(() => {
+    setShowImageContext(false)
+  }, [id])
+
+  useEffect(() => {
     refreshConvos()
   }, [refreshConvos, convId])
 
@@ -728,6 +733,16 @@ export default function ArticleDetailPage() {
       '&.Mui-focused fieldset': { borderColor: '#FF2741', borderWidth: 1.2 },
     },
     '& .MuiInputLabel-root.Mui-focused': { color: '#FF2741' },
+  }
+  const toolbarButtonSx = {
+    height: 30,
+    borderRadius: 999,
+    px: 1.35,
+    fontSize: 12,
+    fontWeight: 700,
+    textTransform: 'none',
+    whiteSpace: 'nowrap',
+    boxShadow: 'none',
   }
   const imageBindingForPosition = (pos: number) => (
     pos === 0
@@ -961,9 +976,18 @@ export default function ArticleDetailPage() {
               size="small"
               variant="outlined"
               onClick={e => openArticleSwitcher(e.currentTarget)}
-              sx={{ fontSize: 12, borderColor: 'divider', color: 'text.secondary', maxWidth: 220 }}
+              sx={{
+                ...toolbarButtonSx,
+                maxWidth: { xs: 170, lg: 190 },
+                borderColor: 'rgba(15,23,42,0.12)',
+                color: '#475569',
+                bgcolor: '#fff',
+                '&:hover': { borderColor: 'rgba(15,23,42,0.26)', bgcolor: '#F8FAFC' },
+              }}
             >
-              切换笔记：{art.title?.slice(0, 12) || `#${art.id}`}
+              <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                切换：{art.title || `#${art.id}`}
+              </Box>
             </Button>
             {getScoreValue(art.score, 'overall') > 0 && (
               <Chip
@@ -989,7 +1013,13 @@ export default function ArticleDetailPage() {
               size="small"
               disabled={extractingTemplate}
               startIcon={extractingTemplate ? <CircularProgress size={14} /> : undefined}
-              sx={{ mr: 1 }}
+              sx={{
+                ...toolbarButtonSx,
+                borderColor: 'rgba(15,23,42,0.12)',
+                color: '#475569',
+                bgcolor: '#fff',
+                '&:hover': { borderColor: 'rgba(15,23,42,0.26)', bgcolor: '#F8FAFC' },
+              }}
             >
               {extractingTemplate ? '提取中' : '提取模板'}
             </Button>
@@ -997,7 +1027,13 @@ export default function ArticleDetailPage() {
               onClick={() => nav(`/articles/${art.id}/diagnose`)}
               variant="outlined"
               size="small"
-              sx={{ mr: 1, borderColor: '#FF7A00', color: '#FF7A00', '&:hover': { borderColor: '#E06800', bgcolor: '#FFF8F0' } }}
+              sx={{
+                ...toolbarButtonSx,
+                borderColor: 'rgba(99,102,241,0.22)',
+                color: '#4F46E5',
+                bgcolor: 'rgba(99,102,241,0.06)',
+                '&:hover': { borderColor: 'rgba(99,102,241,0.35)', bgcolor: 'rgba(99,102,241,0.10)' },
+              }}
             >
               诊断
             </Button>
@@ -1007,9 +1043,11 @@ export default function ArticleDetailPage() {
               size="small"
               disabled={publishing || art.status === 'published'}
               sx={{
-                mr: 1,
-                bgcolor: art.status === 'published' ? undefined : '#16A34A',
-                '&:hover': { bgcolor: art.status === 'published' ? undefined : '#15803D' },
+                ...toolbarButtonSx,
+                borderColor: art.status === 'published' ? 'rgba(15,23,42,0.12)' : 'transparent',
+                color: art.status === 'published' ? '#64748B' : '#fff',
+                bgcolor: art.status === 'published' ? '#F1F5F9' : '#16A34A',
+                '&:hover': { bgcolor: art.status === 'published' ? '#F1F5F9' : '#15803D', boxShadow: 'none' },
               }}
             >
               {art.status === 'published' ? '已发布' : publishing ? '发布中' : '发布'}
@@ -1019,7 +1057,12 @@ export default function ArticleDetailPage() {
               variant="contained"
               size="small"
               disabled={saving}
-              sx={{ bgcolor: '#FF2741', '&:hover': { bgcolor: '#D61030' } }}
+              sx={{
+                ...toolbarButtonSx,
+                color: '#fff',
+                background: 'linear-gradient(135deg,#FF2442,#FF6A3D)',
+                '&:hover': { background: 'linear-gradient(135deg,#E11D3C,#F05A2D)', boxShadow: 'none' },
+              }}
             >
               保存
             </Button>
@@ -1052,6 +1095,7 @@ export default function ArticleDetailPage() {
           <Stack spacing={1.25}>
             <Box
               sx={{
+                order: 1,
                 p: 1.25,
                 borderRadius: 2.5,
                 bgcolor: 'rgba(255,255,255,0.88)',
@@ -1059,8 +1103,25 @@ export default function ArticleDetailPage() {
                 boxShadow: '0 8px 24px rgba(15,23,42,0.04)',
               }}
             >
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.8 }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                  标题
+                </Typography>
+                <Box sx={{ flex: 1 }} />
+                <Chip
+                  size="small"
+                  label={`${art.title.length}/20`}
+                  sx={{
+                    height: 20,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    bgcolor: art.title.length > 20 ? '#FEF2F2' : '#F1F5F9',
+                    color: art.title.length > 20 ? '#DC2626' : '#64748B',
+                  }}
+                />
+              </Stack>
               <TextField
-                label="标题"
+                placeholder="输入一个抓人的小红书标题"
                 fullWidth
                 size="small"
                 value={art.title}
@@ -1069,19 +1130,10 @@ export default function ArticleDetailPage() {
                 sx={textFieldSx}
                 error={art.title.length > 20}
               />
-              <Typography
-                sx={{
-                  mt: 0.5,
-                  fontSize: 11,
-                  textAlign: 'right',
-                  color: art.title.length > 20 ? '#D61030' : '#8A8A8F',
-                }}
-              >
-                {art.title.length}/20
-              </Typography>
             </Box>
             <Box
               sx={{
+                order: 3,
                 p: 1.25,
                 borderRadius: 2.5,
                 bgcolor: 'rgba(255,255,255,0.9)',
@@ -1089,8 +1141,36 @@ export default function ArticleDetailPage() {
                 boxShadow: '0 8px 24px rgba(15,23,42,0.04)',
               }}
             >
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.8, flexWrap: 'wrap', gap: 0.6 }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                  正文
+                </Typography>
+                <Box sx={{ flex: 1 }} />
+                <Chip
+                  size="small"
+                  label={`${art.body.length} 字`}
+                  sx={{
+                    height: 20,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    bgcolor: '#F1F5F9',
+                    color: '#64748B',
+                  }}
+                />
+                <Chip
+                  size="small"
+                  label={art.body.length < 300 ? '建议 300 字以上' : art.body.length > 1000 ? '建议精简' : '字数合适'}
+                  sx={{
+                    height: 20,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    bgcolor: art.body.length < 300 || art.body.length > 1000 ? '#FFF7ED' : '#ECFDF3',
+                    color: art.body.length < 300 || art.body.length > 1000 ? '#C2410C' : '#15803D',
+                  }}
+                />
+              </Stack>
               <TextField
-                label="正文"
+                placeholder="输入正文，建议用短句、分段和情绪钩子增强小红书感"
                 fullWidth
                 multiline
                 minRows={bodyRows}
@@ -1108,22 +1188,10 @@ export default function ArticleDetailPage() {
                 }}
                 sx={textFieldSx}
               />
-              <Typography
-                sx={{
-                  mt: 0.45,
-                  fontSize: 11,
-                  textAlign: 'right',
-                  color: art.body.length < 300 ? '#D97706' : art.body.length > 1000 ? '#D97706' : 'text.secondary',
-                }}
-              >
-                {art.body.length} 字
-                {art.body.length < 300 && ' · 建议 300 字以上'}
-                {art.body.length > 1000 && ' · 建议控制在 1000 字内'}
-                {art.body.length >= 300 && art.body.length <= 1000 && ' · 字数合适'}
-              </Typography>
             </Box>
             <Box
               sx={{
+                order: 4,
                 p: 1.15,
                 borderRadius: 2.5,
                 bgcolor: 'rgba(255,255,255,0.86)',
@@ -1138,7 +1206,7 @@ export default function ArticleDetailPage() {
 
             {/* banned words warning */}
             {bannedHits.length > 0 && (
-              <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: '#FEF2F2', border: '1px solid #FECACA' }}>
+              <Box sx={{ order: 5, p: 1.5, borderRadius: 2, bgcolor: '#FEF2F2', border: '1px solid #FECACA' }}>
                 <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#DC2626', mb: 0.5 }}>
                   ⚠️ 检测到 {bannedHits.length} 个违禁/敏感词
                 </Typography>
@@ -1158,7 +1226,7 @@ export default function ArticleDetailPage() {
             )}
 
             {/* images queue */}
-            <Box sx={{ mt: 0.2, p: 1.25, borderRadius: 2.5, bgcolor: 'rgba(255,255,255,0.86)', border: '1px solid rgba(15,23,42,0.08)' }}>
+            <Box sx={{ order: 2, mt: 0.2, p: 1.25, borderRadius: 2.5, bgcolor: 'rgba(255,255,255,0.86)', border: '1px solid rgba(15,23,42,0.08)' }}>
               <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" sx={{ gap: 0.8, mb: 1 }}>
                 <Typography sx={{ fontSize: 12, color: 'text.secondary', fontWeight: 700 }}>
                   图片队列（第 1 张 = 首图/封面）
@@ -1234,55 +1302,75 @@ export default function ArticleDetailPage() {
               )}
 
               {art.image_context && (
-                <Box
-                  sx={{
-                    mt: 1.15,
-                    p: 1.1,
-                    borderRadius: 2,
-                    bgcolor: 'rgba(255,36,66,0.035)',
-                    border: '1px solid rgba(255,36,66,0.10)',
-                  }}
-                >
-                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ gap: 0.8, mb: 0.8 }}>
-                    <Typography sx={{ fontSize: 12, fontWeight: 700, color: 'text.secondary' }}>
-                      图片上下文
-                    </Typography>
-                    <Chip size="small" label={`总图 ${art.image_context.image_count}`} sx={{ height: 20, fontSize: 11 }} />
-                    <Chip size="small" label={`首图 ${art.image_context.has_cover ? '已设置' : '无'}`} sx={{ height: 20, fontSize: 11 }} />
-                    <Chip size="small" label={`后续图 ${art.image_context.content_image_count}`} sx={{ height: 20, fontSize: 11 }} />
-                  </Stack>
-                  {art.image_context.all_images.length > 0 ? (
-                    <Stack spacing={0.45}>
-                      {art.image_context.all_images.slice(0, 8).map((img, i) => {
-                        const meta = [
-                          img.width && img.height ? `${img.width}×${img.height}` : '',
-                          img.format || '',
-                          formatBytes(img.bytes),
-                          img.exists === false ? '文件未找到' : '',
-                        ].filter(Boolean).join(' · ')
-                        return (
-                          <Typography key={`${img.role}-${img.index ?? i}-${img.url}`} sx={{ fontSize: 11.5, color: img.exists === false ? '#B91C1C' : 'text.secondary' }} noWrap>
-                            {img.role === 'cover' ? '首图/封面' : `第 ${(img.index ?? 0) + 2} 张`}：{meta ? `${meta} · ` : ''}{img.full_url && img.full_url !== img.url ? `${img.url} → ${img.full_url}` : img.url}
-                          </Typography>
-                        )
-                      })}
-                      {art.image_context.all_images.length > 8 && (
+                <Box sx={{ mt: 0.9 }}>
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={() => setShowImageContext(v => !v)}
+                    sx={{
+                      minHeight: 24,
+                      px: 0.8,
+                      borderRadius: 999,
+                      fontSize: 11.5,
+                      color: '#64748B',
+                      textTransform: 'none',
+                      '&:hover': { bgcolor: 'rgba(15,23,42,0.05)' },
+                    }}
+                  >
+                    {showImageContext ? '收起图片上下文' : `查看图片上下文（${art.image_context.image_count} 张）`}
+                  </Button>
+                  {showImageContext && (
+                    <Box
+                      sx={{
+                        mt: 0.8,
+                        p: 1.1,
+                        borderRadius: 2,
+                        bgcolor: 'rgba(15,23,42,0.025)',
+                        border: '1px solid rgba(15,23,42,0.08)',
+                      }}
+                    >
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ gap: 0.8, mb: 0.8 }}>
+                        <Typography sx={{ fontSize: 12, fontWeight: 700, color: 'text.secondary' }}>
+                          图片上下文
+                        </Typography>
+                        <Chip size="small" label={`总图 ${art.image_context.image_count}`} sx={{ height: 20, fontSize: 11 }} />
+                        <Chip size="small" label={`首图 ${art.image_context.has_cover ? '已设置' : '无'}`} sx={{ height: 20, fontSize: 11 }} />
+                        <Chip size="small" label={`后续图 ${art.image_context.content_image_count}`} sx={{ height: 20, fontSize: 11 }} />
+                      </Stack>
+                      {art.image_context.all_images.length > 0 ? (
+                        <Stack spacing={0.45}>
+                          {art.image_context.all_images.slice(0, 8).map((img, i) => {
+                            const meta = [
+                              img.width && img.height ? `${img.width}×${img.height}` : '',
+                              img.format || '',
+                              formatBytes(img.bytes),
+                              img.exists === false ? '文件未找到' : '',
+                            ].filter(Boolean).join(' · ')
+                            return (
+                              <Typography key={`${img.role}-${img.index ?? i}-${img.url}`} sx={{ fontSize: 11.5, color: img.exists === false ? '#B91C1C' : 'text.secondary' }} noWrap>
+                                {img.role === 'cover' ? '首图/封面' : `第 ${(img.index ?? 0) + 2} 张`}：{meta ? `${meta} · ` : ''}{img.full_url && img.full_url !== img.url ? `${img.url} → ${img.full_url}` : img.url}
+                              </Typography>
+                            )
+                          })}
+                          {art.image_context.all_images.length > 8 && (
+                            <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
+                              还有 {art.image_context.all_images.length - 8} 张未展开
+                            </Typography>
+                          )}
+                        </Stack>
+                      ) : (
                         <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
-                          还有 {art.image_context.all_images.length - 8} 张未展开
+                          当前笔记还没有图片；Agent 打分会在视觉维度扣分，并可继续生成首图/内容配图。
                         </Typography>
                       )}
-                    </Stack>
-                  ) : (
-                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
-                      当前笔记还没有图片；Agent 打分会在视觉维度扣分，并可继续生成首图/内容配图。
-                    </Typography>
+                    </Box>
                   )}
                 </Box>
               )}
             </Box>
 
             {/* version history */}
-            <Box sx={{ border: '1px solid rgba(15,23,42,0.08)', bgcolor: 'rgba(255,255,255,0.86)', borderRadius: 2.5, p: 1.35 }}>
+            <Box sx={{ order: 6, border: '1px solid rgba(15,23,42,0.08)', bgcolor: 'rgba(255,255,255,0.86)', borderRadius: 2.5, p: 1.35 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ cursor: 'pointer' }} onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}>
                 <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
                   版本历史
