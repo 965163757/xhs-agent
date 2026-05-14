@@ -27,12 +27,14 @@ import { toast } from 'sonner'
 import {
   analyzeImageLayers,
   editImage,
+  extractPixelLayers,
   generateImage,
   inpaintImage,
   removeObject,
   uploadImage,
   uploadMask,
   type AnalyzedImageLayer,
+  type PixelExtractedLayer,
 } from '../api/client'
 
 type Quality = 'high' | 'medium' | 'low' | 'auto'
@@ -52,6 +54,7 @@ type DemoLayer = BoxRect & {
   fontWeight?: number
   imageUrl?: string
   edit_prompt?: string
+  opacity?: number
   zIndex: number
 }
 
@@ -166,6 +169,7 @@ export default function AiImageLabPage() {
   const [imageUrl, setImageUrl] = useState('')
   const [resultUrl, setResultUrl] = useState('')
   const [busy, setBusy] = useState('')
+  const [pixelSensitivity, setPixelSensitivity] = useState(0.58)
   const [natural, setNatural] = useState({ w: 0, h: 0 })
   const [display, setDisplay] = useState({ w: 0, h: 0 })
   const [selection, setSelection] = useState<BoxRect | null>(null)
@@ -195,6 +199,41 @@ export default function AiImageLabPage() {
 
   function updateLayer(id: string, patch: Partial<DemoLayer>) {
     setLayers(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)))
+  }
+
+  function normalizeZIndex(items: DemoLayer[]) {
+    return [...items]
+      .sort((a, b) => a.zIndex - b.zIndex)
+      .map((l, idx) => ({ ...l, zIndex: idx + 1 }))
+  }
+
+  function moveLayerOrder(id: string, direction: -1 | 1) {
+    setLayers(prev => {
+      const sorted = normalizeZIndex(prev)
+      const idx = sorted.findIndex(l => l.id === id)
+      const target = idx + direction
+      if (idx < 0 || target < 0 || target >= sorted.length) return prev
+      const next = [...sorted]
+      ;[next[idx], next[target]] = [next[target], next[idx]]
+      return normalizeZIndex(next)
+    })
+  }
+
+  function duplicateLayer(id: string) {
+    setLayers(prev => {
+      const src = prev.find(l => l.id === id)
+      if (!src) return prev
+      const next: DemoLayer = {
+        ...src,
+        id: `${src.type}_${Date.now()}`,
+        label: `${src.label} 副本`,
+        x: Math.min(natural.w - 1, src.x + Math.max(8, src.w * 0.04)),
+        y: Math.min(natural.h - 1, src.y + Math.max(8, src.h * 0.04)),
+        zIndex: Math.max(...prev.map(l => l.zIndex), 0) + 1,
+      }
+      setSelectedLayerId(next.id)
+      return [...prev, next]
+    })
   }
 
   function eventToImagePoint(e: ReactPointerEvent) {
@@ -286,6 +325,52 @@ export default function AiImageLabPage() {
       addLog({ ok: true, title: '上传图片成功', detail: file.name, image: url })
     } catch (e: any) {
       toast.error(e?.message || '上传失败')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function handlePixelExtract() {
+    if (!imageUrl) return toast.error('请先生成或上传图片')
+    setBusy('正在本地 PS 式拆层：生成清理背景和透明 PNG 图层…')
+    setResultUrl('')
+    const start = performance.now()
+    try {
+      const r = await extractPixelLayers({ image_url: imageUrl, sensitivity: pixelSensitivity, max_layers: 32 })
+      if (!r.ok) throw new Error(r.error || '像素拆层失败')
+      const width = natural.w || r.canvas?.width || 1000
+      const height = natural.h || r.canvas?.height || 1000
+      const next = (r.layers || []).map((item: PixelExtractedLayer, idx: number): DemoLayer => ({
+        id: item.id || `pixel_${idx + 1}`,
+        type: 'image_overlay',
+        label: item.label || `像素图层 ${idx + 1}`,
+        imageUrl: item.pixel_url,
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+        opacity: 1,
+        zIndex: item.zIndex ?? idx + 1,
+        edit_prompt: item.type === 'text_pixel'
+          ? '保持字体风格和排版位置，优化/替换这个文字或标识像素层'
+          : '保持整体风格一致，优化/替换这个元素像素层',
+      }))
+      setImageUrl(r.background_image || imageUrl)
+      setNatural({ w: width, h: height })
+      setSelection(null)
+      setLayers(normalizeZIndex(next))
+      setSelectedLayerId(next[0]?.id || '')
+      addLog({
+        ok: true,
+        title: 'PS式像素拆层完成',
+        detail: `生成清理背景 + ${next.length} 个真实透明 PNG 图层；可拖拽/缩放/删除/调层级`,
+        image: r.background_image,
+        elapsedSec: r.elapsed_sec ?? (performance.now() - start) / 1000,
+      })
+      toast.success(`已拆出 ${next.length} 个真实像素图层`)
+    } catch (e: any) {
+      addLog({ ok: false, title: 'PS式像素拆层失败', detail: e?.message || '未知错误', elapsedSec: (performance.now() - start) / 1000 })
+      toast.error(e?.message || '拆层失败')
     } finally {
       setBusy('')
     }
@@ -394,6 +479,38 @@ export default function AiImageLabPage() {
     }
   }
 
+  async function handleEditSelectedLayer() {
+    if (!selectedLayer) return toast.error('请先选择一个图层')
+    if (selectedLayer.type !== 'image_overlay') {
+      return handleInpaint(selectedLayer, selectedLayer.edit_prompt || editPrompt)
+    }
+    if (!selectedLayer.imageUrl) return toast.error('当前像素层缺少透明 PNG')
+    setBusy('正在单独编辑这个透明 PNG 图层…')
+    const start = performance.now()
+    try {
+      const layerSize = `${Math.max(64, Math.round(selectedLayer.w))}x${Math.max(64, Math.round(selectedLayer.h))}`
+      const finalPrompt = `${selectedLayer.edit_prompt || editPrompt}\n\n要求：保持透明背景和原图层边界，只修改该图层自身，不要生成整张海报背景。`
+      const r = await editImage({ image_url: selectedLayer.imageUrl, prompt: finalPrompt, size: layerSize, quality })
+      if (!r.ok) throw new Error((r as any).error || '图层编辑失败')
+      updateLayer(selectedLayer.id, { imageUrl: r.image })
+      setResultUrl(r.image)
+      addLog({ ok: true, title: '透明 PNG 图层编辑成功', detail: `${selectedLayer.label} · ${layerSize}`, image: r.image, elapsedSec: (performance.now() - start) / 1000 })
+      toast.success('已替换当前图层图片')
+    } catch (e: any) {
+      addLog({ ok: false, title: '透明 PNG 图层编辑失败', detail: e?.message || '未知错误', elapsedSec: (performance.now() - start) / 1000 })
+      toast.error(e?.message || '图层编辑失败')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  function removeSelectedLayer() {
+    if (!selectedLayer) return
+    setLayers(prev => prev.filter(l => l.id !== selectedLayer.id))
+    setSelectedLayerId('')
+    toast.success('已删除图层；合成导出后生效')
+  }
+
   function addTextLayer() {
     const rect = selection || { x: natural.w * 0.12, y: natural.h * 0.12, w: natural.w * 0.68, h: natural.h * 0.1 }
     const id = `text_${Date.now()}`
@@ -420,7 +537,7 @@ export default function AiImageLabPage() {
   }
 
   async function extractSelectedToMovableLayer() {
-    if (!selectedLayer || selectedLayer.type === 'text') return toast.error('请选择非文本元素层')
+    if (!selectedLayer || selectedLayer.type === 'text' || selectedLayer.type === 'image_overlay') return toast.error('请选择尚未像素化的语义元素层')
     setBusy('正在提取元素并清除原位置…')
     try {
       const dataUrl = await cropLayerAsDataUrl(selectedLayer)
@@ -456,11 +573,12 @@ export default function AiImageLabPage() {
       ctx.drawImage(base, 0, 0, natural.w, natural.h)
       const visible = [...layers].filter(l => !l.hidden).sort((a, b) => a.zIndex - b.zIndex)
       for (const layer of visible) {
+        ctx.save()
+        ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity ?? 1))
         if (layer.type === 'image_overlay' && layer.imageUrl) {
           const img = await loadImage(layer.imageUrl)
           ctx.drawImage(img, layer.x, layer.y, layer.w, layer.h)
         } else if (layer.type === 'text' && layer.text) {
-          ctx.save()
           const weight = layer.fontWeight || 700
           const fontSize = layer.fontSize || Math.max(18, layer.h * 0.45)
           const font = layer.fontFamily || 'PingFang SC'
@@ -472,8 +590,8 @@ export default function AiImageLabPage() {
           lines.slice(0, Math.max(1, Math.floor(layer.h / lineHeight) + 1)).forEach((line, idx) => {
             ctx.fillText(line, layer.x, layer.y + idx * lineHeight)
           })
-          ctx.restore()
         }
+        ctx.restore()
       }
       const blob = await canvasBlob(canvas)
       const file = new File([blob], `ai-layer-export-${Date.now()}.png`, { type: 'image/png' })
@@ -510,12 +628,12 @@ export default function AiImageLabPage() {
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1680, mx: 'auto' }}>
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} sx={{ mb: 2 }}>
         <Box flex={1}>
-          <Typography sx={{ fontSize: 26, fontWeight: 900, letterSpacing: -0.8 }}>AI Native 图片拆解编辑 Demo</Typography>
+          <Typography sx={{ fontSize: 26, fontWeight: 900, letterSpacing: -0.8 }}>PS式图片拆层编辑 Demo</Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary', mt: 0.5 }}>
-            用当前配置真实调用：整图生成 → AI 语义拆层/OCR → 文本框编辑/字体 → 元素删除/局部修改/提取移动 → 合成导出。
+            核心走本地像素拆层：扁平图 → 清理背景 + 透明 PNG 图层 → 拖拽/缩放/删除/调层级 → 合成导出；AI 只作为整体生成和局部重绘的增强能力。
           </Typography>
         </Box>
-        <Chip icon={<LayersIcon />} label="语义伪图层，不要求原图真的有 PS 图层" sx={{ alignSelf: { xs: 'flex-start', md: 'center' } }} />
+        <Chip icon={<LayersIcon />} label="真实透明 PNG 像素图层，不再只是画框" sx={{ alignSelf: { xs: 'flex-start', md: 'center' } }} />
       </Stack>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '360px minmax(0,1fr) 360px' }, gap: 2 }}>
@@ -531,7 +649,19 @@ export default function AiImageLabPage() {
           <Stack spacing={1} sx={{ mt: 1 }}>
             <Button variant="contained" startIcon={<AutoFixHighIcon />} disabled={!!busy || !prompt.trim()} onClick={handleGenerate}>用当前图片 API 生成整图</Button>
             <Button variant="outlined" component="label" startIcon={<UploadIcon />} disabled={!!busy}>上传已有图测试<input hidden type="file" accept="image/*" onChange={e => handleUpload(e.target.files?.[0])} /></Button>
-            <Button variant="outlined" color="secondary" startIcon={<LayersIcon />} disabled={!!busy || !imageUrl} onClick={handleAnalyze}>AI 拆解文本和元素</Button>
+            <Stack direction="row" spacing={1}>
+              <Button variant="contained" color="secondary" startIcon={<LayersIcon />} disabled={!!busy || !imageUrl} onClick={handlePixelExtract} sx={{ flex: 1 }}>PS式像素拆层</Button>
+              <TextField
+                size="small"
+                label="灵敏度"
+                type="number"
+                value={pixelSensitivity}
+                onChange={e => setPixelSensitivity(Math.max(0.1, Math.min(1, Number(e.target.value) || 0.58)))}
+                inputProps={{ min: 0.1, max: 1, step: 0.05 }}
+                sx={{ width: 96 }}
+              />
+            </Stack>
+            <Button variant="outlined" color="secondary" startIcon={<LayersIcon />} disabled={!!busy || !imageUrl} onClick={handleAnalyze}>AI 语义识别（可选）</Button>
           </Stack>
 
           <Typography sx={{ fontSize: 15, fontWeight: 800, mt: 3, mb: 1 }}>2. 选区/图层编辑 Prompt</Typography>
@@ -570,7 +700,7 @@ export default function AiImageLabPage() {
                   const isText = layer.type === 'text'
                   const isImage = layer.type === 'image_overlay'
                   return (
-                    <Box key={layer.id} onPointerDown={e => { e.stopPropagation(); setSelection(null); setSelectedLayerId(layer.id); setDrag({ id: layer.id, mode: 'move', start: eventToImagePoint(e), original: { x: layer.x, y: layer.y, w: layer.w, h: layer.h } }) }} sx={{ position: 'absolute', ...layerStyle(layer), border: selected ? '2px solid #FF2442' : '1px dashed rgba(255,36,66,0.65)', bgcolor: isText ? 'rgba(255,255,255,0.08)' : 'rgba(255,36,66,0.06)', cursor: 'move', overflow: 'hidden', zIndex: 20 + layer.zIndex, borderRadius: 0.8 }}>
+                    <Box key={layer.id} onPointerDown={e => { e.stopPropagation(); setSelection(null); setSelectedLayerId(layer.id); setDrag({ id: layer.id, mode: 'move', start: eventToImagePoint(e), original: { x: layer.x, y: layer.y, w: layer.w, h: layer.h } }) }} sx={{ position: 'absolute', ...layerStyle(layer), border: selected ? '2px solid #FF2442' : (isImage ? '1px solid transparent' : '1px dashed rgba(255,36,66,0.65)'), bgcolor: isText ? 'rgba(255,255,255,0.08)' : (isImage ? 'transparent' : 'rgba(255,36,66,0.06)'), cursor: 'move', overflow: 'hidden', zIndex: 20 + layer.zIndex, borderRadius: 0.8, opacity: layer.opacity ?? 1 }}>
                       {isImage && layer.imageUrl && <Box component="img" src={layer.imageUrl} sx={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }} />}
                       {isText && <Typography sx={{ p: 0.3, fontFamily: layer.fontFamily, fontWeight: layer.fontWeight, fontSize: `${Math.max(8, (layer.fontSize || 36) * (display.w / natural.w))}px`, lineHeight: 1.12, color: layer.color, whiteSpace: 'pre-wrap', overflow: 'hidden', textShadow: '0 1px 8px rgba(255,255,255,0.65)' }}>{layer.text || layer.label}</Typography>}
                       {!isText && !isImage && <Chip size="small" label={layer.label} sx={{ m: 0.4, height: 20, fontSize: 10, bgcolor: selected ? '#FF2442' : 'rgba(0,0,0,0.55)', color: '#fff' }} />}
@@ -582,18 +712,21 @@ export default function AiImageLabPage() {
               </Box>
             )}
           </Box>
-          <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 1 }}>拖拽图片生成手动选区；点击 AI 拆出的文本/元素层可拖拽、缩放，并在右侧编辑属性或调用 AI 修改。</Typography>
+          <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 1 }}>拖拽图片生成手动选区；PS式拆出的透明 PNG 层可直接拖拽、缩放、删除、调层级；AI 语义层主要用于辅助定位和局部重绘。</Typography>
         </Paper>
 
         <Stack spacing={2}>
           <Paper sx={{ p: 2, borderRadius: 3 }}>
             <Typography sx={{ fontSize: 15, fontWeight: 800, mb: 1 }}>图层面板</Typography>
-            {layers.length === 0 ? <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>点击「AI 拆解文本和元素」后会出现图层。</Typography> : layers.map(layer => (
+            {layers.length === 0 ? <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>点击「PS式像素拆层」后会出现可移动的真实透明 PNG 图层；AI 语义识别只作为辅助。</Typography> : [...layers].sort((a, b) => b.zIndex - a.zIndex).map(layer => (
               <Box key={layer.id} onClick={() => setSelectedLayerId(layer.id)} sx={{ p: 1, border: '1px solid', borderColor: layer.id === selectedLayerId ? '#FF2442' : 'divider', borderRadius: 2, mb: 1, cursor: 'pointer', bgcolor: layer.hidden ? 'action.hover' : 'background.paper' }}>
                 <Stack direction="row" spacing={0.6} alignItems="center">
+                  {layer.type === 'image_overlay' && layer.imageUrl && <Box component="img" src={layer.imageUrl} sx={{ width: 30, height: 30, objectFit: 'contain', bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1, border: '1px solid', borderColor: 'divider' }} />}
                   <Chip size="small" label={layer.type} sx={{ height: 20, fontSize: 10 }} />
                   <Typography sx={{ fontSize: 13, fontWeight: 800 }} noWrap>{layer.label}</Typography>
                   <Box flex={1} />
+                  <Button size="small" onClick={e => { e.stopPropagation(); moveLayerOrder(layer.id, 1) }} sx={{ minWidth: 28, px: 0.5 }}>↑</Button>
+                  <Button size="small" onClick={e => { e.stopPropagation(); moveLayerOrder(layer.id, -1) }} sx={{ minWidth: 28, px: 0.5 }}>↓</Button>
                   <IconButton size="small" onClick={e => { e.stopPropagation(); updateLayer(layer.id, { hidden: !layer.hidden }) }}><VisibilityOffIcon sx={{ fontSize: 15 }} /></IconButton>
                 </Stack>
                 <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{rectLabel(layer)}</Typography>
@@ -607,6 +740,22 @@ export default function AiImageLabPage() {
             {!selectedLayer ? <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>请选择一个图层。</Typography> : (
               <Stack spacing={1}>
                 <TextField size="small" label="名称" value={selectedLayer.label} onChange={e => updateLayer(selectedLayer.id, { label: e.target.value })} />
+                <Stack direction="row" spacing={1}>
+                  <TextField size="small" label="X" type="number" value={Math.round(selectedLayer.x)} onChange={e => updateLayer(selectedLayer.id, clampRect({ ...selectedLayer, x: Number(e.target.value) || 0 }, natural.w, natural.h))} />
+                  <TextField size="small" label="Y" type="number" value={Math.round(selectedLayer.y)} onChange={e => updateLayer(selectedLayer.id, clampRect({ ...selectedLayer, y: Number(e.target.value) || 0 }, natural.w, natural.h))} />
+                </Stack>
+                <Stack direction="row" spacing={1}>
+                  <TextField size="small" label="W" type="number" value={Math.round(selectedLayer.w)} onChange={e => updateLayer(selectedLayer.id, clampRect({ ...selectedLayer, w: Number(e.target.value) || 1 }, natural.w, natural.h))} />
+                  <TextField size="small" label="H" type="number" value={Math.round(selectedLayer.h)} onChange={e => updateLayer(selectedLayer.id, clampRect({ ...selectedLayer, h: Number(e.target.value) || 1 }, natural.w, natural.h))} />
+                </Stack>
+                <TextField
+                  size="small"
+                  label="透明度 0-1"
+                  type="number"
+                  value={selectedLayer.opacity ?? 1}
+                  onChange={e => updateLayer(selectedLayer.id, { opacity: Math.max(0, Math.min(1, Number(e.target.value) || 0)) })}
+                  inputProps={{ min: 0, max: 1, step: 0.05 }}
+                />
                 {selectedLayer.type === 'text' && (
                   <>
                     <TextField label="文本内容" multiline minRows={3} value={selectedLayer.text || ''} onChange={e => updateLayer(selectedLayer.id, { text: e.target.value })} />
@@ -621,13 +770,19 @@ export default function AiImageLabPage() {
                   </>
                 )}
                 <TextField label="AI 修改提示" multiline minRows={2} value={selectedLayer.edit_prompt || editPrompt} onChange={e => updateLayer(selectedLayer.id, { edit_prompt: e.target.value })} />
+                {selectedLayer.type === 'image_overlay' && (
+                  <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
+                    这是从原图真实抠出的透明 PNG 图层：移动、缩放、隐藏、删除会直接改变最终合成图；「AI 修改层」会单独编辑这个透明 PNG，而不是只在底图上画框。
+                  </Typography>
+                )}
                 <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-                  <Button size="small" variant="contained" color="warning" onClick={() => handleInpaint(selectedLayer, selectedLayer.edit_prompt || editPrompt)} disabled={!!busy}>AI 修改层</Button>
-                  <Button size="small" variant="outlined" color="error" onClick={() => handleErase(selectedLayer)} disabled={!!busy}>AI 删除层</Button>
-                  {selectedLayer.type !== 'text' && <Button size="small" variant="outlined" startIcon={<ContentCutIcon />} onClick={extractSelectedToMovableLayer} disabled={!!busy}>提取可移动</Button>}
-                  <Button size="small" variant="outlined" onClick={() => { setLayers(prev => prev.filter(l => l.id !== selectedLayer.id)); setSelectedLayerId('') }}>仅移除伪层</Button>
+                  <Button size="small" variant="contained" color="warning" onClick={handleEditSelectedLayer} disabled={!!busy}>AI 修改层</Button>
+                  {selectedLayer.type !== 'image_overlay' && <Button size="small" variant="outlined" color="error" onClick={() => handleErase(selectedLayer)} disabled={!!busy}>AI 删除层并补背景</Button>}
+                  {selectedLayer.type !== 'text' && selectedLayer.type !== 'image_overlay' && <Button size="small" variant="outlined" startIcon={<ContentCutIcon />} onClick={extractSelectedToMovableLayer} disabled={!!busy}>提取可移动</Button>}
+                  <Button size="small" variant="outlined" onClick={() => duplicateLayer(selectedLayer.id)}>复制图层</Button>
+                  <Button size="small" variant="outlined" color="error" onClick={removeSelectedLayer}>删除图层</Button>
                 </Stack>
-                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>提示：修改文字后点「合成导出」会把真实文本层渲染进新 PNG；AI 删除/修改会调用当前图片编辑接口。</Typography>
+                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>提示：修改文字或图层位置后点「合成导出」会生成新的 PNG；PS式拆层能改真实像素图层，但扁平 PNG 无法 100% 还原原始 PSD 的矢量/字体参数。</Typography>
               </Stack>
             )}
           </Paper>

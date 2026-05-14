@@ -406,6 +406,38 @@ export async function analyzeImageLayers(payload: {
   }
 }
 
+export type PixelExtractedLayer = {
+  id: string
+  type: 'pixel' | 'text_pixel'
+  label: string
+  pixel_url: string
+  x: number
+  y: number
+  w: number
+  h: number
+  area?: number
+  zIndex?: number
+}
+
+export async function extractPixelLayers(payload: {
+  image_url: string
+  sensitivity?: number
+  max_layers?: number
+}) {
+  const r = await api.post('/images/extract_pixel_layers', payload)
+  return r.data as {
+    ok: boolean
+    image_url: string
+    background_image?: string
+    canvas?: { width: number; height: number }
+    layers?: PixelExtractedLayer[]
+    error?: string
+    elapsed_ms?: number
+    elapsed_sec?: number
+    note?: string
+  }
+}
+
 export async function uploadMask(blob: Blob): Promise<string> {
   const fd = new FormData()
   fd.append('file', blob, 'mask.png')

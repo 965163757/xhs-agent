@@ -44,6 +44,7 @@ from ..schemas import (
     DiagnoseRequest,
     EditImageRequest,
     ExtractTemplateRequest,
+    ExtractPixelLayersRequest,
     GenerateArticleRequest,
     ImageGenRequest,
     ImageSettingsTestRequest,
@@ -525,6 +526,224 @@ def _local_image_size(image_url: str) -> Tuple[int, int]:
     except Exception:
         pass
     return 0, 0
+
+
+def _connected_components(mask, *, min_pixels: int = 60) -> List[Tuple[int, int, int, int, int]]:
+    """Pure-Pillow connected components on a binary L mask.
+
+    Returns small-image boxes as (x, y, w, h, pixels).  Kept local to avoid
+    adding OpenCV/skimage runtime dependencies for deploys.
+    """
+    width, height = mask.size
+    data = mask.tobytes()
+    visited = bytearray(width * height)
+    boxes: List[Tuple[int, int, int, int, int]] = []
+    for y in range(height):
+        row = y * width
+        for x in range(width):
+            idx = row + x
+            if visited[idx] or data[idx] < 128:
+                continue
+            stack = [idx]
+            visited[idx] = 1
+            min_x = max_x = x
+            min_y = max_y = y
+            count = 0
+            while stack:
+                cur = stack.pop()
+                cy, cx = divmod(cur, width)
+                count += 1
+                if cx < min_x:
+                    min_x = cx
+                if cx > max_x:
+                    max_x = cx
+                if cy < min_y:
+                    min_y = cy
+                if cy > max_y:
+                    max_y = cy
+                for nx, ny in ((cx - 1, cy), (cx + 1, cy), (cx, cy - 1), (cx, cy + 1)):
+                    if nx < 0 or ny < 0 or nx >= width or ny >= height:
+                        continue
+                    ni = ny * width + nx
+                    if not visited[ni] and data[ni] >= 128:
+                        visited[ni] = 1
+                        stack.append(ni)
+            if count >= min_pixels:
+                boxes.append((min_x, min_y, max_x - min_x + 1, max_y - min_y + 1, count))
+    return boxes
+
+
+def _merge_close_boxes(
+    boxes: List[Tuple[int, int, int, int, int]],
+    *,
+    width: int,
+    height: int,
+) -> List[Tuple[int, int, int, int, int]]:
+    """Merge nearby components into PS-like groups (text lines, stickers)."""
+    pad_x = max(6, int(width * 0.012))
+    pad_y = max(5, int(height * 0.008))
+    items = [list(b) for b in boxes]
+    changed = True
+    while changed:
+        changed = False
+        out: List[List[int]] = []
+        while items:
+            cur = items.pop()
+            x, y, w, h, c = cur
+            merged = False
+            for other in items:
+                ox, oy, ow, oh, oc = other
+                close = not (
+                    x + w + pad_x < ox
+                    or ox + ow + pad_x < x
+                    or y + h + pad_y < oy
+                    or oy + oh + pad_y < y
+                )
+                if close:
+                    nx = min(x, ox)
+                    ny = min(y, oy)
+                    nx2 = max(x + w, ox + ow)
+                    ny2 = max(y + h, oy + oh)
+                    other[:] = [nx, ny, nx2 - nx, ny2 - ny, c + oc]
+                    changed = True
+                    merged = True
+                    break
+            if not merged:
+                out.append(cur)
+        items = out
+    return [tuple(x) for x in items]  # type: ignore[return-value]
+
+
+def _png_bytes(img) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@router.post("/images/extract_pixel_layers")
+async def api_extract_pixel_layers(
+    payload: ExtractPixelLayersRequest,
+    user: User = Depends(get_current_user),
+):
+    """Local deterministic PS-like pixel decomposition.
+
+    Unlike /images/analyze_layers, this does not ask the model to describe boxes.
+    It extracts actual transparent PNG layer crops and a cleaned/blur-filled
+    background, so moving/deleting a layer changes real pixels like a rough PSD.
+    """
+    from PIL import Image, ImageChops, ImageFilter, ImageOps
+    from ..services.llm import _resolve_local_path
+
+    image_url = payload.image_url.strip()
+    if not image_url:
+        raise HTTPException(400, "image_url is required")
+    start = time.perf_counter()
+    try:
+        path = _resolve_local_path(image_url)
+    except Exception as e:
+        return {"ok": False, "error": f"只支持本系统 /static/images 图片做像素拆层：{e}"}
+    if not path.exists():
+        return {"ok": False, "error": f"image not found: {image_url}"}
+
+    try:
+        original = Image.open(path).convert("RGBA")
+        width, height = original.size
+        max_side = 900
+        scale = min(1.0, max_side / max(width, height))
+        small_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+        rgb_small = original.convert("RGB").resize(small_size, Image.Resampling.LANCZOS)
+        gray = ImageOps.grayscale(rgb_small)
+        blur_radius = max(6, int(max(small_size) / 34))
+        blurred = rgb_small.filter(ImageFilter.GaussianBlur(blur_radius))
+        diff = ImageChops.difference(rgb_small, blurred).convert("L")
+        edges = gray.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.MaxFilter(3))
+        hsv = rgb_small.convert("HSV")
+        saturation = hsv.getchannel("S")
+
+        threshold = int(42 - payload.sensitivity * 28)
+        diff_mask = diff.point(lambda p: 255 if p > threshold else 0, mode="L")
+        edge_mask = edges.point(lambda p: 255 if p > max(14, threshold - 8) else 0, mode="L")
+        sat_mask = saturation.point(lambda p: 255 if p > int(120 - payload.sensitivity * 45) else 0, mode="L")
+        fine_mask = ImageChops.lighter(ImageChops.lighter(diff_mask, edge_mask), sat_mask)
+        fine_mask = fine_mask.filter(ImageFilter.MaxFilter(3))
+        grouped_mask = fine_mask.filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(7))
+
+        small_w, small_h = small_size
+        min_pixels = max(50, int(small_w * small_h * 0.00018))
+        max_pixels = int(small_w * small_h * 0.38)
+        boxes = _connected_components(grouped_mask, min_pixels=min_pixels)
+        # Drop frame/noise components that span almost the entire canvas; edge
+        # detection often produces a sparse full-image border, which would merge
+        # every real element into one useless giant layer.
+        boxes = [
+            b
+            for b in boxes
+            if b[4] <= max_pixels
+            and b[2] >= 5
+            and b[3] >= 5
+            and not (b[2] > small_w * 0.92 and b[3] > small_h * 0.92)
+        ]
+        boxes = _merge_close_boxes(boxes, width=small_w, height=small_h)
+        boxes = [b for b in boxes if b[4] <= max_pixels]
+        boxes = sorted(boxes, key=lambda b: b[4], reverse=True)[: payload.max_layers]
+        boxes = sorted(boxes, key=lambda b: (b[1], b[0]))
+
+        fine_full = fine_mask.resize((width, height), Image.Resampling.NEAREST).filter(ImageFilter.MaxFilter(5))
+        cleanup_mask = Image.new("L", (width, height), 0)
+        # Build a cleanup mask from actual selected layer alpha, not from every detected speckle.
+        layers: List[Dict[str, Any]] = []
+        for idx, (sx, sy, sw, sh, pixels) in enumerate(boxes):
+            pad = max(3, int(8 / max(scale, 0.25)))
+            x = max(0, int(sx / scale) - pad)
+            y = max(0, int(sy / scale) - pad)
+            x2 = min(width, int((sx + sw) / scale) + pad)
+            y2 = min(height, int((sy + sh) / scale) + pad)
+            if x2 <= x or y2 <= y:
+                continue
+            bbox = (x, y, x2, y2)
+            alpha = fine_full.crop(bbox).filter(ImageFilter.MaxFilter(max(3, pad // 2 * 2 + 1)))
+            if not alpha.getbbox():
+                continue
+            crop = original.crop(bbox)
+            crop.putalpha(alpha)
+            url = _save_user_upload(_png_bytes(crop), user.id, ".png", suffix=f"layer_{idx + 1}")
+            mask_piece = Image.new("L", (width, height), 0)
+            mask_piece.paste(alpha, bbox)
+            cleanup_mask = ImageChops.lighter(cleanup_mask, mask_piece)
+            layer_type = "text_pixel" if (x2 - x) > (y2 - y) * 2.2 and (y2 - y) < height * 0.18 else "pixel"
+            layers.append(
+                {
+                    "id": f"pixel_{idx + 1}",
+                    "type": layer_type,
+                    "label": ("文本/标识像素层" if layer_type == "text_pixel" else "像素元素层") + f" {idx + 1}",
+                    "pixel_url": url,
+                    "x": x,
+                    "y": y,
+                    "w": x2 - x,
+                    "h": y2 - y,
+                    "area": int(pixels / max(scale * scale, 0.0001)),
+                    "zIndex": idx + 1,
+                }
+            )
+
+        cleanup_mask = cleanup_mask.filter(ImageFilter.MaxFilter(max(9, int(min(width, height) * 0.008) // 2 * 2 + 1)))
+        background_blur = original.filter(ImageFilter.GaussianBlur(max(10, int(max(width, height) * 0.018))))
+        cleaned = Image.composite(background_blur, original, cleanup_mask)
+        background_url = _save_user_upload(_png_bytes(cleaned), user.id, ".png", suffix="clean_bg")
+        elapsed = int((time.perf_counter() - start) * 1000)
+        return {
+            "ok": True,
+            "image_url": image_url,
+            "background_image": background_url,
+            "canvas": {"width": width, "height": height},
+            "layers": layers,
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+            "note": "本地像素拆层：返回真实透明 PNG 图层和清理背景；文字作为像素层，不等同于 OCR 可编辑文本。",
+        }
+    except Exception as e:
+        elapsed = int((time.perf_counter() - start) * 1000)
+        return {"ok": False, "error": f"像素拆层失败：{e}", "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
 
 
 @router.post("/images/analyze_layers")

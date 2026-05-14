@@ -290,6 +290,12 @@ class AnalyzeImageLayersRequest(BaseModel):
     hint: str = ""
 
 
+class ExtractPixelLayersRequest(BaseModel):
+    image_url: str
+    sensitivity: float = Field(default=0.58, ge=0.1, le=1.0)
+    max_layers: int = Field(default=24, ge=1, le=48)
+
+
 class ApplyTemplateRequest(BaseModel):
     template_id: int
     topic: str
