@@ -1257,11 +1257,14 @@ export default function ArticleDetailPage() {
             {/* images queue */}
             <Box sx={{ order: 2, mt: 0.2, ...sectionCardSx }}>
               <Box sx={sectionHeaderSx}>
-                <Stack direction="row" alignItems="center" spacing={1}>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ flexWrap: 'wrap', gap: 0.8 }}>
                   <Typography sx={{ fontSize: 12, color: '#334155', fontWeight: 800 }}>
                     图片队列
                   </Typography>
                   <Chip size="small" label={`共 ${visualImages.length} 张`} sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: '#F1F5F9', color: '#64748B' }} />
+                  <Typography sx={{ fontSize: 11.5, color: 'text.secondary', whiteSpace: { xs: 'normal', md: 'nowrap' } }}>
+                    可拖拽调换顺序，也可在菜单中设为首图、前移、后移或删除。
+                  </Typography>
                   <Box sx={{ flex: 1 }} />
                   {art.image_context && (
                     <Button
@@ -1283,9 +1286,6 @@ export default function ArticleDetailPage() {
                     </Button>
                   )}
                 </Stack>
-                <Typography sx={{ mt: 0.35, fontSize: 11.5, color: 'text.secondary' }}>
-                  可拖拽调换顺序，也可在菜单中设为首图、前移、后移或删除。
-                </Typography>
               </Box>
 
               <Box sx={sectionBodySx}>
