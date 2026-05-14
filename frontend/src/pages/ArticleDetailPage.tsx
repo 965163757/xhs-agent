@@ -77,11 +77,52 @@ function getInitialEditorLayout() {
   }
 }
 
-function adaptiveBodyRows(body: string) {
+function adaptiveBodyRows(
+  body: string,
+  viewport: { width: number; height: number },
+  layout: { left: number; right: number },
+  imageCount: number,
+  showVersions: boolean,
+  versionCount: number,
+  showImageContext: boolean,
+  bannedCount: number,
+) {
+  const leftWidth = viewport.width >= 1200 ? layout.left + 10 : 0
+  const rightWidth = viewport.width >= 1536 ? layout.right + 10 : 0
+  const centerWidth = clamp(viewport.width - leftWidth - rightWidth, 360, 1280)
+  const charsPerLine = clamp(Math.floor((centerWidth - 56) / 14), 30, 82)
   const visualLines = body
     .split('\n')
-    .reduce((total, line) => total + Math.max(1, Math.ceil((line.trim().length || 1) / 46)), 0)
-  return clamp(Math.ceil(visualLines * 0.62) + 1, 7, 16)
+    .reduce((total, line) => total + Math.max(1, Math.ceil((line.trim().length || 1) / charsPerLine)), 0)
+
+  const contentWidth = Math.max(280, centerWidth - 42)
+  const tileWidth = viewport.width < 720 ? 96 : 112
+  const tileGap = 7
+  const imageColumns = Math.max(1, Math.floor((contentWidth + tileGap) / (tileWidth + tileGap)))
+  const imageRows = imageCount > 0 ? Math.ceil(imageCount / imageColumns) : 1
+  const imageGridHeight = imageCount > 0
+    ? imageRows * (tileWidth * 4 / 3) + Math.max(0, imageRows - 1) * tileGap
+    : 126
+  const imageQueueHeight = 34 + 12 + imageGridHeight + (showImageContext ? 112 : 0)
+  const rootHeight = Math.max(560, viewport.height - 56)
+  const outerVerticalPadding = viewport.width >= 1536 ? 60 : viewport.width >= 900 ? 54 : 46
+  const toolbarHeight = viewport.width >= 1536 ? 56 : viewport.width >= 900 ? 72 : 96
+  const versionsHeight = showVersions ? Math.min(188, 30 + Math.max(1, versionCount) * 36) : 0
+  const bannedHeight = bannedCount > 0 ? 86 : 0
+  const contentChromeHeight = 34 + 38 + 27 + 72 + 18 + versionsHeight
+  const lineHeight = 14.2 * 1.72
+  const availableForTextarea = rootHeight
+    - outerVerticalPadding
+    - toolbarHeight
+    - 10
+    - imageQueueHeight
+    - bannedHeight
+    - contentChromeHeight
+  const fitRows = Math.floor(availableForTextarea / lineHeight)
+  const contentAwareRows = Math.min(Math.max(visualLines + 1, fitRows), fitRows + 3)
+  const minRows = viewport.height < 740 ? 4 : 6
+  const maxRows = viewport.height > 1080 ? 34 : viewport.height > 900 ? 28 : 22
+  return clamp(Math.max(fitRows, contentAwareRows), minRows, maxRows)
 }
 
 function fitEditorLayout(layout: { left: number; right: number }, rootWidth: number) {
@@ -717,7 +758,16 @@ export default function ArticleDetailPage() {
   if (!art) return null
 
   const visualImages = [art.cover_image, ...(art.images || [])].filter(Boolean) as string[]
-  const bodyRows = adaptiveBodyRows(art.body)
+  const bodyRows = adaptiveBodyRows(
+    art.body,
+    viewport,
+    layout,
+    visualImages.length,
+    showVersions,
+    versions.length,
+    showImageContext,
+    bannedHits.length,
+  )
   const previewScale = clamp(Math.min(
     1,
     (viewport.height - 118) / 660,
@@ -944,8 +994,20 @@ export default function ArticleDetailPage() {
       />
 
       {/* middle: editor */}
-      <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
-        <Box sx={{ p: { xs: 1.25, sm: 1.5, lg: 1.75, xl: 2 }, pb: 'max(28px, env(safe-area-inset-bottom))', maxWidth: 'none', mx: 'auto' }}>
+      <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        <Box
+          sx={{
+            height: '100%',
+            minHeight: 0,
+            boxSizing: 'border-box',
+            display: 'flex',
+            flexDirection: 'column',
+            p: { xs: 1.25, sm: 1.5, lg: 1.75, xl: 2 },
+            pb: { xs: 1.1, sm: 1.25, lg: 1.4, xl: 1.6 },
+            maxWidth: 'none',
+            mx: 'auto',
+          }}
+        >
           <Stack
             direction="row"
             spacing={1}
@@ -1113,7 +1175,16 @@ export default function ArticleDetailPage() {
             ))}
           </Menu>
 
-          <Stack spacing={1}>
+          <Stack
+            spacing={1}
+            sx={{
+              flex: 1,
+              minHeight: 0,
+              overflow: 'auto',
+              pr: 0.25,
+              pb: 'max(2px, env(safe-area-inset-bottom))',
+            }}
+          >
             <Box
               sx={{
                 order: 1,
@@ -1227,9 +1298,14 @@ export default function ArticleDetailPage() {
                   fullWidth
                   multiline
                   minRows={bodyRows}
-                  maxRows={20}
+                  maxRows={bodyRows}
                   value={art.body}
                   onChange={e => setArt({ ...art, body: e.target.value })}
+                  inputProps={{
+                    style: {
+                      overflowY: 'auto',
+                    },
+                  }}
                   InputProps={{
                     sx: {
                       fontSize: 14.2,
@@ -1237,7 +1313,7 @@ export default function ArticleDetailPage() {
                       px: 0,
                       py: 0,
                       '& textarea': {
-                        resize: 'vertical',
+                        resize: 'none',
                       },
                     },
                   }}
