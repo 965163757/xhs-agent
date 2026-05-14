@@ -50,6 +50,7 @@ from ..schemas import (
     ImageSettingsTestRequest,
     InpaintRequest,
     MCPCallRequest,
+    ModelListRequest,
     OptimizeRequest,
     OutlineRequest,
     PolishRequest,
@@ -1403,6 +1404,52 @@ async def test_settings(user: User = Depends(get_current_user)):
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@router.post("/settings/model-list")
+async def list_model_options(payload: ModelListRequest, user: User = Depends(get_current_user)):
+    """Fetch OpenAI-compatible /models for a specific row's base_url/key."""
+    import httpx
+
+    effective = await get_effective_settings(user.id)
+    kind = (payload.kind or "image").strip().lower()
+    base_url = (payload.base_url or "").strip().rstrip("/")
+    api_key = (payload.api_key or "").strip()
+    if not base_url:
+        base_url = effective.effective_image_base_url if kind == "image" else effective.effective_chat_base_url
+    if not api_key:
+        api_key = effective.effective_image_api_key if kind == "image" else effective.effective_chat_api_key
+    if not base_url:
+        return {"ok": False, "error": "base_url 不能为空"}
+    if not api_key:
+        return {"ok": False, "error": "api_key 不能为空"}
+    if not (base_url.startswith("http://") or base_url.startswith("https://")):
+        return {"ok": False, "error": "base_url 必须以 http:// 或 https:// 开头"}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as hc:
+            r = await hc.get(f"{base_url}/models", headers={"Authorization": f"Bearer {api_key}"})
+        if r.status_code >= 400:
+            detail = r.text[:800]
+            try:
+                detail = json.dumps(r.json(), ensure_ascii=False)[:800]
+            except Exception:
+                pass
+            return {"ok": False, "error": f"HTTP {r.status_code}: {detail}", "models": []}
+        data = r.json()
+        raw_items = data.get("data") if isinstance(data, dict) else data
+        models: List[str] = []
+        if isinstance(raw_items, list):
+            for item in raw_items:
+                mid = ""
+                if isinstance(item, dict):
+                    mid = str(item.get("id") or item.get("model") or item.get("name") or "").strip()
+                elif isinstance(item, str):
+                    mid = item.strip()
+                if mid and mid not in models:
+                    models.append(mid)
+        return {"ok": True, "models": models, "count": len(models), "base_url": base_url}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "models": []}
 
 
 @router.post("/settings/image-test")

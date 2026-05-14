@@ -37,6 +37,7 @@ import {
   updateSystemConfig,
   testImageSettings,
   testStaticImagePublicAccess,
+  fetchModelList,
   type PublicSettings,
   type MySettings,
   type AdminUser,
@@ -60,6 +61,26 @@ type ModelPoolRow = {
   model: string
   base_url: string
   api_key: string
+  supports_image_url?: boolean
+  supports_quality?: boolean
+}
+
+const defaultModelRow = (): ModelPoolRow => ({
+  model: '',
+  base_url: '',
+  api_key: '',
+  supports_image_url: true,
+  supports_quality: true,
+})
+
+function parseBool(value: any, fallback = true) {
+  if (value === undefined || value === null || value === '') return fallback
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  const text = String(value).trim().toLowerCase()
+  if (['1', 'true', 'yes', 'on', '支持', '是'].includes(text)) return true
+  if (['0', 'false', 'no', 'off', '不支持', '否'].includes(text)) return false
+  return fallback
 }
 
 function parseModelPool(value: string): ModelPoolRow[] {
@@ -73,6 +94,8 @@ function parseModelPool(value: string): ModelPoolRow[] {
           model: String(x?.model || x?.name || ''),
           base_url: String(x?.base_url || x?.url || ''),
           api_key: String(x?.api_key || x?.key || ''),
+          supports_image_url: parseBool(x?.supports_image_url, true),
+          supports_quality: parseBool(x?.supports_quality, true),
         }))
       }
     } catch {
@@ -90,21 +113,29 @@ function parseModelPool(value: string): ModelPoolRow[] {
           model: model.trim(),
           base_url: '',
           api_key: '',
+          supports_image_url: true,
+          supports_quality: true,
         })).filter(x => x.model)
       }
       return [{
         model: parts[0] || '',
         base_url: parts[1] || '',
         api_key: parts[2] || '',
+        supports_image_url: true,
+        supports_quality: true,
       }]
     })
 }
 
-function serializeModelPool(rows: ModelPoolRow[]) {
+function serializeModelPool(rows: ModelPoolRow[], includeImageOptions = false) {
   const normalized = rows.map(r => ({
     model: r.model.trim(),
     base_url: r.base_url.trim(),
     api_key: r.api_key.trim(),
+    ...(includeImageOptions ? {
+      supports_image_url: r.supports_image_url !== false,
+      supports_quality: r.supports_quality !== false,
+    } : {}),
   }))
   // Keep intentionally added blank rows so “添加模型” gives immediate visual
   // feedback and the user can fill the row next. Empty fallback rows can still
@@ -118,56 +149,79 @@ function ModelQueueEditor({
   model,
   baseUrl,
   apiKey,
+  supportsImageUrl,
+  supportsQuality,
   onModelChange,
   onBaseUrlChange,
   onApiKeyChange,
+  onSupportsImageUrlChange,
+  onSupportsQualityChange,
   value,
   onChange,
   modelPlaceholder,
+  kind = 'chat',
   sx,
 }: {
   title: string
   model: string
   baseUrl: string
   apiKey: string
+  supportsImageUrl?: boolean
+  supportsQuality?: boolean
   onModelChange: (value: string) => void
   onBaseUrlChange: (value: string) => void
   onApiKeyChange: (value: string) => void
+  onSupportsImageUrlChange?: (value: boolean) => void
+  onSupportsQualityChange?: (value: boolean) => void
   value: string
   onChange: (value: string) => void
   modelPlaceholder: string
+  kind?: 'chat' | 'image'
   sx?: any
 }) {
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null)
+  const [modelOptions, setModelOptions] = useState<Record<number, string[]>>({})
+  const [loadingOptions, setLoadingOptions] = useState<Record<number, boolean>>({})
   const fallbackRows = parseModelPool(value)
   const displayRows = [
-    { model, base_url: baseUrl, api_key: apiKey },
+    {
+      model,
+      base_url: baseUrl,
+      api_key: apiKey,
+      supports_image_url: supportsImageUrl !== false,
+      supports_quality: supportsQuality !== false,
+    },
     ...fallbackRows,
   ]
-  const rows = displayRows.length ? displayRows : [{ model: '', base_url: '', api_key: '' }]
+  const rows = displayRows.length ? displayRows : [defaultModelRow()]
   const filledCount = rows.filter(r => r.model.trim()).length
+  const isImage = kind === 'image'
 
   const commitRows = (nextRows: ModelPoolRow[]) => {
     const normalized = nextRows.map(r => ({
       model: r.model.trim(),
       base_url: r.base_url.trim(),
       api_key: r.api_key.trim(),
+      supports_image_url: r.supports_image_url !== false,
+      supports_quality: r.supports_quality !== false,
     }))
-    const first = normalized[0] || { model: '', base_url: '', api_key: '' }
+    const first = normalized[0] || defaultModelRow()
     onModelChange(first.model)
     onBaseUrlChange(first.base_url)
     onApiKeyChange(first.api_key)
-    onChange(serializeModelPool(normalized.slice(1)))
+    onSupportsImageUrlChange?.(first.supports_image_url !== false)
+    onSupportsQualityChange?.(first.supports_quality !== false)
+    onChange(serializeModelPool(normalized.slice(1), isImage))
   }
   const updateRow = (idx: number, patch: Partial<ModelPoolRow>) => {
     const next = [...rows]
     next[idx] = { ...next[idx], ...patch }
     commitRows(next)
   }
-  const addRow = () => commitRows([...rows, { model: '', base_url: '', api_key: '' }])
+  const addRow = () => commitRows([...rows, defaultModelRow()])
   const removeRow = (idx: number) => {
     const next = rows.filter((_, i) => i !== idx)
-    commitRows(next.length ? next : [{ model: '', base_url: '', api_key: '' }])
+    commitRows(next.length ? next : [defaultModelRow()])
   }
   const moveRow = (from: number, to: number) => {
     if (from === to || from < 0 || to < 0 || from >= rows.length || to >= rows.length) return
@@ -175,6 +229,23 @@ function ModelQueueEditor({
     const [item] = next.splice(from, 1)
     next.splice(to, 0, item)
     commitRows(next)
+  }
+  const loadModelOptions = async (idx: number) => {
+    const row = rows[idx] || defaultModelRow()
+    const primary = rows[0] || defaultModelRow()
+    const base_url = row.base_url || primary.base_url
+    const api_key = row.api_key || primary.api_key
+    setLoadingOptions(prev => ({ ...prev, [idx]: true }))
+    try {
+      const r = await fetchModelList({ base_url, api_key, kind })
+      if (!r.ok) throw new Error(r.error || '获取模型列表失败')
+      setModelOptions(prev => ({ ...prev, [idx]: r.models || [] }))
+    } catch (e: any) {
+      setModelOptions(prev => ({ ...prev, [idx]: [] }))
+      alert(e?.message || '获取模型列表失败')
+    } finally {
+      setLoadingOptions(prev => ({ ...prev, [idx]: false }))
+    }
   }
 
   return (
@@ -192,9 +263,10 @@ function ModelQueueEditor({
         <TableHead>
           <TableRow>
             <TableCell sx={{ width: 64, fontSize: 11.5, color: 'text.secondary' }}>顺序</TableCell>
-            <TableCell sx={{ width: '23%', fontSize: 11.5, color: 'text.secondary' }}>模型</TableCell>
-            <TableCell sx={{ width: '34%', fontSize: 11.5, color: 'text.secondary' }}>Base URL</TableCell>
-            <TableCell sx={{ width: '31%', fontSize: 11.5, color: 'text.secondary' }}>API Key</TableCell>
+            <TableCell sx={{ width: isImage ? '21%' : '23%', fontSize: 11.5, color: 'text.secondary' }}>模型</TableCell>
+            <TableCell sx={{ width: isImage ? '28%' : '34%', fontSize: 11.5, color: 'text.secondary' }}>Base URL</TableCell>
+            <TableCell sx={{ width: isImage ? '25%' : '31%', fontSize: 11.5, color: 'text.secondary' }}>API Key</TableCell>
+            {isImage && <TableCell sx={{ width: 150, fontSize: 11.5, color: 'text.secondary' }}>能力</TableCell>}
             <TableCell sx={{ width: 56 }} />
           </TableRow>
         </TableHead>
@@ -237,14 +309,41 @@ function ModelQueueEditor({
                 </Stack>
               </TableCell>
               <TableCell>
-                <TextField
-                  size="small"
-                  fullWidth
-                  placeholder={modelPlaceholder}
-                  value={row.model}
-                  onChange={e => updateRow(idx, { model: e.target.value })}
-                  inputProps={{ style: { fontSize: 12.5 } }}
-                />
+                <Stack spacing={0.4}>
+                  <Stack direction="row" spacing={0.5}>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      placeholder={modelPlaceholder}
+                      value={row.model}
+                      onChange={e => updateRow(idx, { model: e.target.value })}
+                      inputProps={{ style: { fontSize: 12.5 } }}
+                    />
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => loadModelOptions(idx)}
+                      disabled={!!loadingOptions[idx]}
+                      sx={{ minWidth: 46, fontSize: 10.5, px: 0.7 }}
+                    >
+                      {loadingOptions[idx] ? '...' : '获取'}
+                    </Button>
+                  </Stack>
+                  {(modelOptions[idx] || []).length > 0 && (
+                    <Select
+                      size="small"
+                      value=""
+                      displayEmpty
+                      onChange={e => updateRow(idx, { model: String(e.target.value) })}
+                      sx={{ height: 28, fontSize: 11.5 }}
+                    >
+                      <MenuItem value="" disabled>选择模型（{modelOptions[idx].length}）</MenuItem>
+                      {modelOptions[idx].map(m => (
+                        <MenuItem key={m} value={m}>{m}</MenuItem>
+                      ))}
+                    </Select>
+                  )}
+                </Stack>
               </TableCell>
               <TableCell>
                 <TextField
@@ -256,6 +355,22 @@ function ModelQueueEditor({
                   inputProps={{ style: { fontSize: 12.5 } }}
                 />
               </TableCell>
+              {isImage && (
+                <TableCell>
+                  <Stack spacing={0.2}>
+                    <FormControlLabel
+                      control={<Switch size="small" checked={row.supports_image_url !== false} onChange={e => updateRow(idx, { supports_image_url: e.target.checked })} />}
+                      label="支持URL"
+                      sx={{ m: 0, '& .MuiFormControlLabel-label': { fontSize: 11.5 } }}
+                    />
+                    <FormControlLabel
+                      control={<Switch size="small" checked={row.supports_quality !== false} onChange={e => updateRow(idx, { supports_quality: e.target.checked })} />}
+                      label="支持quality"
+                      sx={{ m: 0, '& .MuiFormControlLabel-label': { fontSize: 11.5 } }}
+                    />
+                  </Stack>
+                </TableCell>
+              )}
               <TableCell>
                 <TextField
                   size="small"
@@ -277,6 +392,7 @@ function ModelQueueEditor({
       </Table>
       <Typography sx={{ fontSize: 11.2, color: 'text.secondary', mt: 0.75 }}>
         可拖拽调整顺序。调用失败时自动降到下一行；失败模型进入冷却，稍后会按原队列顺序重新尝试并恢复主位。
+        {isImage ? ' 关闭“支持URL”后会由后端下载/读取原图并 multipart 上传；关闭“支持quality”后请求不会传 quality 参数。' : ''}
       </Typography>
     </Paper>
   )
@@ -296,6 +412,8 @@ export default function SettingsPage() {
   const [imageModel, setImageModel] = useState('')
   const [chatModels, setChatModels] = useState('')
   const [imageModels, setImageModels] = useState('')
+  const [imageSupportsImageUrl, setImageSupportsImageUrl] = useState(true)
+  const [imageSupportsQuality, setImageSupportsQuality] = useState(true)
   const [publicBaseUrl, setPublicBaseUrl] = useState('')
 
   const [my, setMy] = useState<MySettings | null>(null)
@@ -307,6 +425,8 @@ export default function SettingsPage() {
   const [myImageModel, setMyImageModel] = useState('')
   const [myChatModels, setMyChatModels] = useState('')
   const [myImageModels, setMyImageModels] = useState('')
+  const [myImageSupportsImageUrl, setMyImageSupportsImageUrl] = useState(true)
+  const [myImageSupportsQuality, setMyImageSupportsQuality] = useState(true)
   const [useOwnKey, setUseOwnKey] = useState(false)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -333,6 +453,8 @@ export default function SettingsPage() {
     setImageModel(cur.image_model)
     setChatModels(cur.chat_models || '')
     setImageModels(cur.image_models || '')
+    setImageSupportsImageUrl(cur.image_supports_image_url !== false)
+    setImageSupportsQuality(cur.image_supports_quality !== false)
     setPublicBaseUrl(cur.public_base_url || '')
     getMcpTools().then(setMcpTools).catch(() => setMcpTools([]))
 
@@ -347,6 +469,8 @@ export default function SettingsPage() {
       setMyImageModel(ms.image_model)
       setMyChatModels(ms.chat_models || '')
       setMyImageModels(ms.image_models || '')
+      setMyImageSupportsImageUrl(ms.image_supports_image_url !== false)
+      setMyImageSupportsQuality(ms.image_supports_quality !== false)
     }).catch(() => {})
 
     if (isAdmin) {
@@ -374,6 +498,8 @@ export default function SettingsPage() {
         image_model: imageModel || undefined,
         chat_models: chatModels,
         image_models: imageModels,
+        image_supports_image_url: imageSupportsImageUrl,
+        image_supports_quality: imageSupportsQuality,
         public_base_url: publicBaseUrl.trim(),
       })
       setS(next)
@@ -418,6 +544,8 @@ export default function SettingsPage() {
         image_model: myImageModel || undefined,
         chat_models: myChatModels,
         image_models: myImageModels,
+        image_supports_image_url: myImageSupportsImageUrl,
+        image_supports_quality: myImageSupportsQuality,
       })
       setMy(next)
       setMyChatKey(next.chat_api_key || next.openai_api_key || myChatKey)
@@ -603,6 +731,7 @@ export default function SettingsPage() {
                 value={myChatModels}
                 onChange={setMyChatModels}
                 modelPlaceholder="gpt-5.4"
+                kind="chat"
                 sx={wideSx}
               />
 
@@ -614,12 +743,17 @@ export default function SettingsPage() {
                 model={myImageModel}
                 baseUrl={myImageBaseUrl}
                 apiKey={myImageKey}
+                supportsImageUrl={myImageSupportsImageUrl}
+                supportsQuality={myImageSupportsQuality}
                 onModelChange={setMyImageModel}
                 onBaseUrlChange={setMyImageBaseUrl}
                 onApiKeyChange={setMyImageKey}
+                onSupportsImageUrlChange={setMyImageSupportsImageUrl}
+                onSupportsQualityChange={setMyImageSupportsQuality}
                 value={myImageModels}
                 onChange={setMyImageModels}
                 modelPlaceholder="gpt-image-2"
+                kind="image"
                 sx={wideSx}
               />
             </Box>
@@ -744,6 +878,7 @@ export default function SettingsPage() {
                 value={chatModels}
                 onChange={setChatModels}
                 modelPlaceholder="gpt-5.4"
+                kind="chat"
                 sx={wideSx}
               />
 
@@ -755,12 +890,17 @@ export default function SettingsPage() {
                 model={imageModel}
                 baseUrl={imageBaseUrl}
                 apiKey={imageApiKey}
+                supportsImageUrl={imageSupportsImageUrl}
+                supportsQuality={imageSupportsQuality}
                 onModelChange={setImageModel}
                 onBaseUrlChange={setImageBaseUrl}
                 onApiKeyChange={setImageApiKey}
+                onSupportsImageUrlChange={setImageSupportsImageUrl}
+                onSupportsQualityChange={setImageSupportsQuality}
                 value={imageModels}
                 onChange={setImageModels}
                 modelPlaceholder="gpt-image-2"
+                kind="image"
                 sx={wideSx}
               />
 

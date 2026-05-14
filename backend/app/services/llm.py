@@ -93,13 +93,15 @@ def get_client(settings: Optional[Settings] = None, kind: str = "chat") -> Async
     return _clients[key]
 
 
-def _model_candidates(s: Settings, kind: str, explicit_model: Optional[str] = None) -> List[Dict[str, str]]:
+def _model_candidates(s: Settings, kind: str, explicit_model: Optional[str] = None) -> List[Dict[str, Any]]:
     if explicit_model:
         if kind == "image":
             return [{
                 "model": explicit_model,
                 "base_url": s.effective_image_base_url,
                 "api_key": s.effective_image_api_key,
+                "supports_image_url": getattr(s, "image_supports_image_url", True),
+                "supports_quality": getattr(s, "image_supports_quality", True),
             }]
         return [{
             "model": explicit_model,
@@ -110,11 +112,17 @@ def _model_candidates(s: Settings, kind: str, explicit_model: Optional[str] = No
     if candidates:
         return candidates
     if kind == "image":
-        return [{"model": s.image_model, "base_url": s.effective_image_base_url, "api_key": s.effective_image_api_key}]
+        return [{
+            "model": s.image_model,
+            "base_url": s.effective_image_base_url,
+            "api_key": s.effective_image_api_key,
+            "supports_image_url": getattr(s, "image_supports_image_url", True),
+            "supports_quality": getattr(s, "image_supports_quality", True),
+        }]
     return [{"model": s.chat_model, "base_url": s.effective_chat_base_url, "api_key": s.effective_chat_api_key}]
 
 
-def _settings_for_model(s: Settings, kind: str, candidate: Dict[str, str]) -> Settings:
+def _settings_for_model(s: Settings, kind: str, candidate: Dict[str, Any]) -> Settings:
     try:
         copied = s.model_copy(deep=True)
     except AttributeError:
@@ -128,6 +136,8 @@ def _settings_for_model(s: Settings, kind: str, candidate: Dict[str, str]) -> Se
             copied.image_base_url = base_url
         if api_key:
             copied.image_api_key = api_key
+        copied.image_supports_image_url = bool(candidate.get("supports_image_url", getattr(s, "image_supports_image_url", True)))
+        copied.image_supports_quality = bool(candidate.get("supports_quality", getattr(s, "image_supports_quality", True)))
         copied.image_models = ""
     else:
         copied.chat_model = model
@@ -172,13 +182,13 @@ def _record_model_failure(kind: str, s: Settings, exc: BaseException) -> None:
     })
 
 
-def _ordered_model_candidates(s: Settings, kind: str, explicit_model: Optional[str] = None) -> List[Dict[str, str]]:
+def _ordered_model_candidates(s: Settings, kind: str, explicit_model: Optional[str] = None) -> List[Dict[str, Any]]:
     candidates = _model_candidates(s, kind, explicit_model)
     if explicit_model:
         return candidates
     now = time.monotonic()
-    healthy: List[Dict[str, str]] = []
-    cooled_down: List[Dict[str, str]] = []
+    healthy: List[Dict[str, Any]] = []
+    cooled_down: List[Dict[str, Any]] = []
     for candidate in candidates:
         candidate_settings = _settings_for_model(s, kind, candidate)
         state = _model_health.get(_model_health_key(kind, candidate_settings), {})
@@ -284,6 +294,14 @@ def _normalize_image_quality(quality: Optional[str], model: str = "") -> str:
     # GPT image models: highest is high. If a caller passes DALL-E style hd,
     # treat it as the equivalent high setting.
     return "high" if q == "hd" else q
+
+
+def _image_supports_url(settings: Settings) -> bool:
+    return bool(getattr(settings, "image_supports_image_url", True))
+
+
+def _image_supports_quality(settings: Settings) -> bool:
+    return bool(getattr(settings, "image_supports_quality", True))
 
 
 def _normalize_image_size(size: Optional[str]) -> str:
@@ -866,27 +884,29 @@ async def _generate_image_once(
 ) -> List[str]:
     s = settings
     quality = _normalize_image_quality(quality, s.image_model)
+    supports_url = _image_supports_url(s)
+    supports_quality = _image_supports_quality(s)
     if reference_images:
         refs = [str(x).strip() for x in reference_images if str(x or "").strip()]
         if not refs:
             refs = []
         provider_refs = [_provider_image_url(ref, s) for ref in refs]
-        if refs and all(provider_refs):
+        if refs and all(provider_refs) and supports_url:
             # Public external URLs and deployed /static/images URLs are
             # provider-readable in many compatible gateways. Keep them as URLs
             # first; do not download/copy them into image_dir.
             url_refs = [str(x) for x in provider_refs if x]
-            _set_image_attempt_method(attempt, "raw_generations_reference_url", reference_images=len(url_refs))
+            _set_image_attempt_method(attempt, "raw_generations_reference_url", reference_images=len(url_refs), supports_image_url=supports_url, supports_quality=supports_quality)
             return await _generate_image_raw_http(
                 settings=s,
                 prompt=prompt,
                 size=size,
                 n=n,
-                quality=quality,
+                quality=quality if supports_quality else "",
                 reference_images=url_refs,
             )
         if refs:
-            _set_image_attempt_method(attempt, "local_reference_edit", reference_images=len(refs))
+            _set_image_attempt_method(attempt, "local_reference_edit", reference_images=len(refs), supports_image_url=supports_url, supports_quality=supports_quality)
             return await _edit_image_once(
                 image_url=refs[0],
                 mask_url=None,
@@ -901,13 +921,15 @@ async def _generate_image_once(
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
 
     if _is_official_openai_image_base(s):
-        _set_image_attempt_method(attempt, "sdk_images_generate")
+        _set_image_attempt_method(attempt, "sdk_images_generate", supports_image_url=supports_url, supports_quality=supports_quality)
         resp = await client.images.generate(
-            model=s.image_model,
-            prompt=prompt,
-            size=size,
-            n=n,
-            quality=quality,
+            **{
+                "model": s.image_model,
+                "prompt": prompt,
+                "size": size,
+                "n": n,
+                **({"quality": quality} if supports_quality else {}),
+            }
         )
         saved = await _save_image_items(_extract_image_items(resp), s, n)
         if not saved:
@@ -919,13 +941,13 @@ async def _generate_image_once(
             )
         return saved
 
-    _set_image_attempt_method(attempt, "raw_generations")
+    _set_image_attempt_method(attempt, "raw_generations", supports_image_url=supports_url, supports_quality=supports_quality)
     return await _generate_image_raw_http(
         settings=s,
         prompt=prompt,
         size=size,
         n=n,
-        quality=quality,
+        quality=quality if supports_quality else "",
     )
 
 
@@ -951,8 +973,9 @@ async def _generate_image_raw_http(
         "prompt": prompt,
         "size": size,
         "n": n,
-        "quality": quality,
     }
+    if quality:
+        payload["quality"] = quality
     if reference_images:
         payload["reference_images"] = reference_images
     headers = {
@@ -1076,10 +1099,12 @@ async def _edit_image_url_raw_http(
         "size": size,
         "n": n,
     }
-    base_payload_with_quality = {**base_payload, "quality": quality}
+    payload_bases: List[Dict[str, Any]] = [{**base_payload, "quality": quality}] if quality else [base_payload]
+    if quality:
+        payload_bases.append(base_payload)
     # Provider variants seen in OpenAI-compatible image gateways.
     attempts: List[Tuple[str, Dict[str, Any]]] = []
-    for payload_base in (base_payload_with_quality, base_payload):
+    for payload_base in payload_bases:
         by_url = {**payload_base, "image_url": image_url}
         by_image = {**payload_base, "image": image_url}
         if mask_url:
@@ -1141,10 +1166,10 @@ async def _edit_image_multipart_raw_http(
         "size": size,
         "n": str(n),
     }
-    attempts: List[Tuple[str, Dict[str, str]]] = [
-        ("multipart:with_quality", {**base_data, "quality": quality}),
-        ("multipart:no_quality", base_data),
-    ]
+    attempts: List[Tuple[str, Dict[str, str]]] = (
+        [("multipart:with_quality", {**base_data, "quality": quality}), ("multipart:no_quality", base_data)]
+        if quality else [("multipart:no_quality", base_data)]
+    )
     if fast_failover:
         attempts = attempts[:1]
     img_bytes = img_path.read_bytes()
@@ -1428,6 +1453,9 @@ async def _edit_image_once(
 ) -> List[str]:
     s = settings
     quality = _normalize_image_quality(quality, s.image_model)
+    supports_url = _image_supports_url(s)
+    supports_quality = _image_supports_quality(s)
+    effective_quality = quality if supports_quality else ""
     Path(s.image_dir).mkdir(parents=True, exist_ok=True)
     attempt_errors: List[str] = []
 
@@ -1435,7 +1463,7 @@ async def _edit_image_once(
     provider_mask_url = _provider_image_url(mask_url, s) if mask_url else None
     external_image_url = _is_public_remote_url(image_url) and not _is_app_static_image_reference(image_url, s)
     external_mask_url = bool(mask_url) and _is_public_remote_url(mask_url) and not _is_app_static_image_reference(mask_url, s)
-    url_native_preferred = bool(provider_image_url and (not mask_url or provider_mask_url)) and (
+    url_native_preferred = supports_url and bool(provider_image_url and (not mask_url or provider_mask_url)) and (
         external_image_url
         or external_mask_url
         or (not _is_official_openai_image_base(s) and bool(_configured_public_base_url(s)))
@@ -1446,6 +1474,8 @@ async def _edit_image_once(
             "url_native_edit",
             provider_readable=True,
             has_mask=bool(mask_url),
+            supports_image_url=supports_url,
+            supports_quality=supports_quality,
         )
         try:
             return await _edit_image_url_raw_http(
@@ -1455,7 +1485,7 @@ async def _edit_image_once(
                 prompt=prompt,
                 size=size,
                 n=n,
-                quality=quality,
+                quality=effective_quality,
                 fast_failover=True,
             )
         except Exception as e:
@@ -1463,14 +1493,14 @@ async def _edit_image_once(
             # the same model. The outer loop will immediately try the next
             # configured image candidate and expose this hop in image_attempts.
             raise RuntimeError(f"图片编辑失败：上游未接受外部图片 URL: {e}") from e
-    if external_image_url or external_mask_url:
+    if supports_url and (external_image_url or external_mask_url):
         raise RuntimeError(
             "图片编辑失败：公开外部 URL 默认不下载到本地；当前图片/mask 混合了外部 URL 与本地文件，"
             "上游接口无法一次性读取。请使用全部外部可访问 URL，或先上传/保存为本地图后再编辑。"
         )
 
     client = get_client(s, kind="image")
-    img_path = await _ensure_local_image_path(image_url, s, suffix="ref")
+    img_path = await _ensure_local_image_path(image_url, s, suffix="ref", allow_remote_download=not supports_url)
     if not img_path.exists():
         raise FileNotFoundError(f"image not found: {image_url}")
 
@@ -1479,8 +1509,9 @@ async def _edit_image_once(
         "prompt": prompt,
         "size": size,
         "n": n,
-        "quality": quality,
     }
+    if effective_quality:
+        kwargs["quality"] = effective_quality
 
     img_bytes = img_path.read_bytes()
     files_image = (img_path.name, img_bytes, _mime_for_path(img_path))
@@ -1488,7 +1519,7 @@ async def _edit_image_once(
     mask_path: Optional[Path] = None
     mask_bytes: Optional[bytes] = None
     if mask_url:
-        mask_path = await _ensure_local_image_path(mask_url, s, suffix="mask")
+        mask_path = await _ensure_local_image_path(mask_url, s, suffix="mask", allow_remote_download=not supports_url)
         if not mask_path.exists():
             raise FileNotFoundError(f"mask not found: {mask_url}")
         mask_bytes = mask_path.read_bytes()
@@ -1533,7 +1564,7 @@ async def _edit_image_once(
                 prompt=prompt,
                 size=size,
                 n=n,
-                quality=quality,
+                quality=effective_quality,
                 timeout=IMAGE_GENERATION_TIMEOUT_SECONDS,
                 fast_failover=True,
             )
@@ -1556,7 +1587,7 @@ async def _edit_image_once(
                 prompt=prompt,
                 size=size,
                 n=n,
-                quality=quality,
+                quality=effective_quality,
                 timeout=IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS,
             )
         except Exception as e:
@@ -1565,12 +1596,12 @@ async def _edit_image_once(
 
     sdk_first = _is_official_openai_image_base(s)
     if sdk_first:
-        _set_image_attempt_method(attempt, "sdk_upload_edit", provider_readable=False, has_mask=bool(mask_url))
+        _set_image_attempt_method(attempt, "sdk_upload_edit", provider_readable=False, has_mask=bool(mask_url), supports_image_url=supports_url, supports_quality=supports_quality)
         saved = await _attempt_sdk_upload()
         if saved:
             return saved
     else:
-        _set_image_attempt_method(attempt, "raw_multipart_edit", provider_readable=False, has_mask=bool(mask_url))
+        _set_image_attempt_method(attempt, "raw_multipart_edit", provider_readable=False, has_mask=bool(mask_url), supports_image_url=supports_url, supports_quality=supports_quality)
         saved = await _attempt_raw_multipart()
         if saved:
             return saved

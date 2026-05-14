@@ -242,6 +242,8 @@ class UserSettings(Base):
     image_model: Mapped[str] = mapped_column(String(64), default="")
     chat_models: Mapped[str] = mapped_column(Text, default="")
     image_models: Mapped[str] = mapped_column(Text, default="")
+    image_supports_image_url: Mapped[bool] = mapped_column(Boolean, default=True)
+    image_supports_quality: Mapped[bool] = mapped_column(Boolean, default=True)
 
     def to_dict(self) -> dict:
         chat_key = self.chat_api_key or self.openai_api_key or ""
@@ -266,6 +268,8 @@ class UserSettings(Base):
             "image_model": self.image_model,
             "chat_models": self.chat_models,
             "image_models": self.image_models,
+            "image_supports_image_url": self.image_supports_image_url,
+            "image_supports_quality": self.image_supports_quality,
         }
 
 
@@ -383,6 +387,8 @@ async def _migrate_columns(conn) -> None:
         ("user_settings", "image_base_url", "VARCHAR(512) DEFAULT ''"),
         ("user_settings", "chat_models", "TEXT DEFAULT ''"),
         ("user_settings", "image_models", "TEXT DEFAULT ''"),
+        ("user_settings", "image_supports_image_url", "BOOLEAN DEFAULT 1"),
+        ("user_settings", "image_supports_quality", "BOOLEAN DEFAULT 1"),
         ("article_versions", "user_id", "INTEGER"),
         ("templates", "creator_id", "INTEGER"),
         ("users", "role", "VARCHAR(16) DEFAULT 'user'"),

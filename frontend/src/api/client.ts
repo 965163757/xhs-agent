@@ -139,6 +139,8 @@ export interface PublicSettings {
   image_model: string
   chat_models?: string
   image_models?: string
+  image_supports_image_url?: boolean
+  image_supports_quality?: boolean
   chat_model_candidates?: string[]
   image_model_candidates?: string[]
   chat_model_configs?: ModelCandidateConfig[]
@@ -152,6 +154,8 @@ export interface ModelCandidateConfig {
   api_key?: string
   api_key_set?: boolean
   api_key_mask?: string
+  supports_image_url?: boolean
+  supports_quality?: boolean
 }
 
 export async function listArticles(): Promise<Article[]> {
@@ -641,6 +645,15 @@ export async function testSettings() {
   }
 }
 
+export async function fetchModelList(payload: {
+  base_url?: string
+  api_key?: string
+  kind?: 'chat' | 'image'
+}) {
+  const r = await api.post('/settings/model-list', payload)
+  return r.data as { ok: boolean; models: string[]; count?: number; base_url?: string; error?: string }
+}
+
 export async function testImageSettings(payload?: {
   prompt?: string
   size?: string
@@ -741,6 +754,8 @@ export interface MySettings {
   image_model: string
   chat_models?: string
   image_models?: string
+  image_supports_image_url?: boolean
+  image_supports_quality?: boolean
   chat_model_candidates?: string[]
   image_model_candidates?: string[]
   chat_model_configs?: ModelCandidateConfig[]
@@ -764,6 +779,8 @@ export async function updateMySettings(payload: {
   image_model?: string
   chat_models?: string
   image_models?: string
+  image_supports_image_url?: boolean
+  image_supports_quality?: boolean
 }): Promise<MySettings> {
   const r = await api.put('/my-settings', payload)
   return r.data

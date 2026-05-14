@@ -324,6 +324,8 @@ class SettingsUpdate(BaseModel):
     image_model: Optional[str] = None
     chat_models: Optional[str] = None
     image_models: Optional[str] = None
+    image_supports_image_url: Optional[bool] = None
+    image_supports_quality: Optional[bool] = None
     public_base_url: Optional[str] = None
 
     @field_validator("public_base_url")
@@ -337,6 +339,12 @@ class SettingsUpdate(BaseModel):
         if not (value.startswith("http://") or value.startswith("https://")):
             raise ValueError("服务公网地址必须以 http:// 或 https:// 开头")
         return value
+
+
+class ModelListRequest(BaseModel):
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    kind: str = "image"
 
 
 class StaticImagePublicTestRequest(BaseModel):

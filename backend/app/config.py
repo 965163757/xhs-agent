@@ -91,6 +91,8 @@ _MUTABLE_KEYS = (
     "image_model",
     "chat_models",
     "image_models",
+    "image_supports_image_url",
+    "image_supports_quality",
     # Public origin of this app when deployed, e.g. https://xhs.example.com.
     # If set, /static/images/... can be sent to model providers as absolute
     # URLs instead of being uploaded/inlined.
@@ -103,8 +105,23 @@ def _mask_key(key: str) -> str:
     return (k[:6] + "…" + k[-4:]) if len(k) > 12 else ("已设置" if k else "")
 
 
-def _dedupe_model_configs(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    out: List[Dict[str, str]] = []
+def _as_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on", "支持", "是"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", "不支持", "否"}:
+        return False
+    return default
+
+
+def _dedupe_model_configs(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
     seen = set()
     for item in items:
         model = str(item.get("model") or "").strip()
@@ -116,7 +133,13 @@ def _dedupe_model_configs(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
         if key in seen:
             continue
         seen.add(key)
-        out.append({"model": model, "base_url": base_url, "api_key": api_key})
+        out.append({
+            "model": model,
+            "base_url": base_url,
+            "api_key": api_key,
+            "supports_image_url": _as_bool(item.get("supports_image_url"), True),
+            "supports_quality": _as_bool(item.get("supports_quality"), True),
+        })
     return out
 
 
@@ -125,7 +148,10 @@ def parse_model_config_candidates(
     primary_base_url: str,
     primary_api_key: str,
     extra: str = "",
-) -> List[Dict[str, str]]:
+    *,
+    primary_supports_image_url: bool = True,
+    primary_supports_quality: bool = True,
+) -> List[Dict[str, Any]]:
     """Parse model fallback pool.
 
     Backward compatible inputs:
@@ -137,8 +163,10 @@ def parse_model_config_candidates(
         "model": str(primary_model or "").strip(),
         "base_url": str(primary_base_url or "").strip(),
         "api_key": str(primary_api_key or "").strip(),
+        "supports_image_url": bool(primary_supports_image_url),
+        "supports_quality": bool(primary_supports_quality),
     }
-    items: List[Dict[str, str]] = [primary] if primary["model"] else []
+    items: List[Dict[str, Any]] = [primary] if primary["model"] else []
     raw = str(extra or "").strip()
     if raw:
         parsed_json = None
@@ -158,6 +186,8 @@ def parse_model_config_candidates(
                     "model": model,
                     "base_url": str(row.get("base_url") or row.get("url") or primary["base_url"]).strip(),
                     "api_key": str(row.get("api_key") or row.get("key") or primary["api_key"]).strip(),
+                    "supports_image_url": _as_bool(row.get("supports_image_url"), primary["supports_image_url"]),
+                    "supports_quality": _as_bool(row.get("supports_quality"), primary["supports_quality"]),
                 })
         else:
             for line in raw.splitlines():
@@ -168,17 +198,25 @@ def parse_model_config_candidates(
                 # Also preserve the previous simple comma/semicolon model list.
                 if len(parts) == 1 and (";" in value or "；" in value or "，" in value or "," in value):
                     for model in [x.strip() for x in re.split(r"[,，;；]+", value) if x.strip()]:
-                        items.append({"model": model, "base_url": primary["base_url"], "api_key": primary["api_key"]})
+                        items.append({
+                            "model": model,
+                            "base_url": primary["base_url"],
+                            "api_key": primary["api_key"],
+                            "supports_image_url": primary["supports_image_url"],
+                            "supports_quality": primary["supports_quality"],
+                        })
                     continue
                 items.append({
                     "model": parts[0],
                     "base_url": parts[1] if len(parts) >= 2 and parts[1] else primary["base_url"],
                     "api_key": parts[2] if len(parts) >= 3 and parts[2] else primary["api_key"],
+                    "supports_image_url": primary["supports_image_url"],
+                    "supports_quality": primary["supports_quality"],
                 })
     return _dedupe_model_configs(items)
 
 
-def _model_names(configs: List[Dict[str, str]]) -> List[str]:
+def _model_names(configs: List[Dict[str, Any]]) -> List[str]:
     out: List[str] = []
     seen = set()
     for cfg in configs:
@@ -190,7 +228,7 @@ def _model_names(configs: List[Dict[str, str]]) -> List[str]:
     return out
 
 
-def _public_model_configs(configs: List[Dict[str, str]], *, include_secrets: bool = False) -> List[Dict[str, Any]]:
+def _public_model_configs(configs: List[Dict[str, Any]], *, include_secrets: bool = False) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for cfg in configs:
         api_key = str(cfg.get("api_key") or "")
@@ -199,6 +237,8 @@ def _public_model_configs(configs: List[Dict[str, str]], *, include_secrets: boo
             "base_url": cfg.get("base_url") or "",
             "api_key_set": bool(api_key),
             "api_key_mask": _mask_key(api_key),
+            "supports_image_url": _as_bool(cfg.get("supports_image_url"), True),
+            "supports_quality": _as_bool(cfg.get("supports_quality"), True),
         }
         if include_secrets:
             row["api_key"] = api_key
@@ -223,6 +263,8 @@ class Settings(BaseSettings):
     image_model: str = "gpt-image-1"
     chat_models: str = ""
     image_models: str = ""
+    image_supports_image_url: bool = True
+    image_supports_quality: bool = True
     public_base_url: str = ""
 
     database_url: str = f"sqlite+aiosqlite:///{DATA_DIR / 'xhs_agent.db'}"
@@ -252,7 +294,7 @@ class Settings(BaseSettings):
         return self.image_base_url or self.chat_base_url or self.openai_base_url
 
     @property
-    def chat_model_configs(self) -> List[Dict[str, str]]:
+    def chat_model_configs(self) -> List[Dict[str, Any]]:
         return parse_model_config_candidates(
             self.chat_model,
             self.effective_chat_base_url,
@@ -261,12 +303,14 @@ class Settings(BaseSettings):
         )
 
     @property
-    def image_model_configs(self) -> List[Dict[str, str]]:
+    def image_model_configs(self) -> List[Dict[str, Any]]:
         return parse_model_config_candidates(
             self.image_model,
             self.effective_image_base_url,
             self.effective_image_api_key,
             self.image_models,
+            primary_supports_image_url=self.image_supports_image_url,
+            primary_supports_quality=self.image_supports_quality,
         )
 
     @property
@@ -297,6 +341,8 @@ class Settings(BaseSettings):
             "image_model": self.image_model,
             "chat_models": self.chat_models,
             "image_models": self.image_models,
+            "image_supports_image_url": self.image_supports_image_url,
+            "image_supports_quality": self.image_supports_quality,
             "chat_model_candidates": self.chat_model_candidates,
             "image_model_candidates": self.image_model_candidates,
             "chat_model_configs": _public_model_configs(self.chat_model_configs, include_secrets=include_secrets),
@@ -486,6 +532,8 @@ async def get_effective_settings(user_id: int) -> Settings:
         effective.chat_model = us.chat_model
     if us.image_model:
         effective.image_model = us.image_model
+    effective.image_supports_image_url = getattr(us, "image_supports_image_url", True)
+    effective.image_supports_quality = getattr(us, "image_supports_quality", True)
     # When a user opts into personal model settings, their candidate pools
     # should not accidentally inherit the admin fallback chain for another
     # gateway. Empty strings intentionally clear the inherited global pools.
