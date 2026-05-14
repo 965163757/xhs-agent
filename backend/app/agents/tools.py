@@ -3387,7 +3387,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_inpaint_image,
         "schema": _fn_schema(
             "inpaint_image",
-            "局部重绘：在 mask 透明区域按 prompt 生成新内容。必须提供 mask_url；没有蒙版时先让用户上传/涂抹，不要强行调用。article_id/source ID 只能传真实笔记 ID，独立编辑不要传 0。",
+            "精确蒙版局部重绘：仅当用户已提供/涂抹 mask_url，或明确要求按蒙版/选区处理时使用，在 mask 透明区域按 prompt 生成新内容。自然语言改图（如去掉某物、增加人物、局部替换但未给蒙版）不要索要蒙版，改用 edit_image 并把目标对象/位置写进 prompt。article_id/source ID 只能传真实笔记 ID，独立编辑不要传 0。",
             {
                 "image_url": {"type": "string"},
                 "mask_url": {"type": "string"},
@@ -3409,7 +3409,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_remove_object,
         "schema": _fn_schema(
             "remove_object",
-            "消除：在 mask 透明区域自动填充和周围环境一致的内容，用来擦除物体/水印/路人。必须提供 mask_url；没有蒙版时先让用户上传/涂抹，不要强行调用。",
+            "精确蒙版消除：仅当用户已提供/涂抹 mask_url，或明确要求按蒙版/选区消除时使用，在 mask 透明区域自动填充周围环境。自然语言要求擦掉/去掉/移除某物但未给蒙版时，不要把蒙版当必填条件，改用 edit_image 描述要移除的对象和保持不变的内容。",
             {
                 "image_url": {"type": "string"},
                 "mask_url": {"type": "string"},
@@ -3431,7 +3431,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_edit_image,
         "schema": _fn_schema(
             "edit_image",
-            "整图风格化编辑（不带 mask），用于同风格变体、清晰度增强、改色调、整体风格调整。可用 source_article_id 指明原图归属，再把结果绑定到另一个真实 article_id；独立编辑不要传 article_id=0。",
+            "自然语言图片编辑（不带 mask）：用于整体风格化、同风格变体、清晰度增强、改色调，也用于用户用文字指定对象/位置的语义改图，例如去掉行李箱、删除路人、增加一个年轻女性、替换局部元素、保持主题结构不变进行重绘。蒙版不是必填；只有用户明确给了 mask_url/选区才改用 inpaint_image/remove_object。可用 source_article_id 指明原图归属，再把结果绑定到另一个真实 article_id；独立编辑不要传 article_id=0。",
             {
                 "image_url": {"type": "string"},
                 "prompt": {"type": "string"},
