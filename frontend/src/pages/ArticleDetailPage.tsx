@@ -142,7 +142,7 @@ function ResizeGrip({
         sx={{
           width: 3,
           height: 36,
-          borderRadius: 999,
+          borderRadius: 0,
           bgcolor: 'rgba(148,163,184,0.65)',
           transition: 'all .15s',
         }}
@@ -191,7 +191,7 @@ function ImageFrame({
         position: 'relative',
         width: '100%',
         aspectRatio: aspect,
-        borderRadius: 2,
+        borderRadius: 0,
         overflow: 'hidden',
         border: '1px solid',
         borderColor: dragging ? '#FF2741' : 'divider',
@@ -736,7 +736,7 @@ export default function ArticleDetailPage() {
   }
   const toolbarButtonSx = {
     height: 30,
-    borderRadius: 999,
+    borderRadius: 0,
     px: 1.35,
     fontSize: 12,
     fontWeight: 700,
@@ -745,7 +745,7 @@ export default function ArticleDetailPage() {
     boxShadow: 'none',
   }
   const sectionCardSx = {
-    borderRadius: 2.5,
+    borderRadius: 0,
     bgcolor: '#fff',
     border: '1px solid rgba(15,23,42,0.10)',
     boxShadow: '0 8px 24px rgba(15,23,42,0.04)',
@@ -757,6 +757,7 @@ export default function ArticleDetailPage() {
     minHeight: 42,
     borderBottom: '1px solid rgba(15,23,42,0.08)',
     bgcolor: 'rgba(248,250,252,0.72)',
+    '& .MuiChip-root': { borderRadius: 0 },
   }
   const sectionBodySx = {
     px: 1.25,
@@ -842,7 +843,7 @@ export default function ArticleDetailPage() {
   }
 
   const scorePanel = getScoreValue(art.score, 'overall') > 0 ? (
-    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2.5, p: 2, bgcolor: 'background.paper', width: 'min(340px, 100%)' }}>
+    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 0, p: 2, bgcolor: 'background.paper', width: 'min(340px, 100%)' }}>
       <Stack direction="row" alignItems="center" spacing={1}>
         <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
           五维评分
@@ -960,10 +961,11 @@ export default function ArticleDetailPage() {
               backdropFilter: 'blur(12px)',
               border: '1px solid',
               borderColor: 'rgba(15,23,42,0.08)',
-              borderRadius: 2.5,
+              borderRadius: 0,
               boxShadow: '0 10px 30px rgba(15,23,42,0.06)',
               flexWrap: 'wrap',
               gap: 0.8,
+              '& .MuiChip-root': { borderRadius: 0 },
             }}
           >
             <IconButton onClick={() => nav(-1)} size="small">
@@ -1233,7 +1235,7 @@ export default function ArticleDetailPage() {
 
             {/* banned words warning */}
             {bannedHits.length > 0 && (
-              <Box sx={{ order: 5, p: 1.5, borderRadius: 2, bgcolor: '#FEF2F2', border: '1px solid #FECACA' }}>
+              <Box sx={{ order: 5, p: 1.5, borderRadius: 0, bgcolor: '#FEF2F2', border: '1px solid #FECACA' }}>
                 <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#DC2626', mb: 0.5 }}>
                   ⚠️ 检测到 {bannedHits.length} 个违禁/敏感词
                 </Typography>
@@ -1269,7 +1271,7 @@ export default function ArticleDetailPage() {
                       sx={{
                         minHeight: 24,
                         px: 0.9,
-                        borderRadius: 999,
+                        borderRadius: 0,
                         fontSize: 11.5,
                         color: '#64748B',
                         textTransform: 'none',
@@ -1339,7 +1341,7 @@ export default function ArticleDetailPage() {
                       minHeight: 126,
                       border: '1px dashed',
                       borderColor: 'divider',
-                      borderRadius: 2,
+                      borderRadius: 0,
                       display: 'grid',
                       placeItems: 'center',
                       color: 'text.secondary',
@@ -1358,7 +1360,7 @@ export default function ArticleDetailPage() {
                     mx: 1.25,
                     mb: 1.05,
                     p: 1.1,
-                    borderRadius: 2,
+                    borderRadius: 0,
                     bgcolor: 'rgba(15,23,42,0.025)',
                     border: '1px solid rgba(15,23,42,0.08)',
                   }}
@@ -1402,7 +1404,7 @@ export default function ArticleDetailPage() {
             </Box>
 
             {/* version history */}
-            <Box sx={{ order: 6, border: '1px solid rgba(15,23,42,0.08)', bgcolor: 'rgba(255,255,255,0.86)', borderRadius: 2.5, p: 1.35 }}>
+            <Box sx={{ order: 6, border: '1px solid rgba(15,23,42,0.08)', bgcolor: 'rgba(255,255,255,0.86)', borderRadius: 0, p: 1.35 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ cursor: 'pointer' }} onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}>
                 <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
                   版本历史
@@ -1419,7 +1421,7 @@ export default function ArticleDetailPage() {
                     <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>暂无版本记录（改写/优化时自动保存）</Typography>
                   )}
                   {versions.map(v => (
-                    <Stack key={v.id} direction="row" alignItems="center" spacing={1} sx={{ p: 1, borderRadius: 1, bgcolor: 'background.default' }}>
+                    <Stack key={v.id} direction="row" alignItems="center" spacing={1} sx={{ p: 1, borderRadius: 0, bgcolor: 'background.default' }}>
                       <Typography sx={{ fontSize: 12, fontWeight: 600 }}>v{v.version}</Typography>
                       <Typography sx={{ fontSize: 11, color: 'text.secondary', flex: 1 }} noWrap>
                         {v.title || '(无标题)'} · {v.trigger}
