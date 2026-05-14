@@ -29,9 +29,13 @@ import { toast } from 'sonner'
 import {
   applyDiagnosisReport,
   diagnoseStream,
+  getActiveDiagnosisTask,
+  getTask,
   listDiagnosisReports,
+  streamTask,
   type DiagnosisReport,
   type DiagnoseEvent,
+  type TaskInfo,
 } from '../api/client'
 import { formatBeijingDateTime } from '../utils/time'
 
@@ -154,6 +158,7 @@ export default function DiagnosePage() {
   const [applying, setApplying] = useState(false)
   const [expandDebate, setExpandDebate] = useState(false)
   const [expandAgents, setExpandAgents] = useState(false)
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const runSeqRef = useRef(0)
 
@@ -165,14 +170,105 @@ export default function DiagnosePage() {
     return items
   }, [id])
 
+  const applyDiagnosisEvent = useCallback((ev: DiagnoseEvent | any): boolean => {
+    if (ev.type === 'task_id') {
+      setActiveTaskId(ev.task_id)
+      setProgressMsg('诊断已在后台启动，刷新或关闭页面不会中断')
+      return false
+    }
+    if (ev.type === 'progress') {
+      setProgressMsg(ev.message)
+      const idx = STEPS.findIndex(s => s.key === ev.step)
+      if (idx >= 0) setActiveStep(idx)
+      return false
+    }
+    if (ev.type === 'result') {
+      setReport(ev.data)
+      setHistory(prev => [ev.data, ...prev.filter(x => (x.id || x.diagnosis_id) !== (ev.data.id || ev.data.diagnosis_id))])
+      setActiveStep(STEPS.length - 1)
+      setProgressMsg('诊断完成，结果已保存')
+      setLoading(false)
+      setActiveTaskId(null)
+      loadHistory().catch(() => {})
+      return true
+    }
+    if (ev.type === 'error') {
+      setError(ev.message)
+      setLoading(false)
+      setActiveTaskId(null)
+      return true
+    }
+    if (ev.type === 'cancelled') {
+      setError('诊断任务已停止')
+      setLoading(false)
+      setActiveTaskId(null)
+      return true
+    }
+    if (ev.type === 'done') {
+      setLoading(false)
+      setActiveTaskId(null)
+      return true
+    }
+    return false
+  }, [loadHistory])
+
+  const reconnectDiagnosisTask = useCallback(async (taskId: string, knownTask?: TaskInfo | null) => {
+    abortRef.current?.abort()
+    const runSeq = ++runSeqRef.current
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    setLoading(true)
+    setError('')
+    setActiveTaskId(taskId)
+    setProgressMsg('正在恢复后台诊断任务...')
+
+    try {
+      const task = knownTask || await getTask(taskId)
+      const events = task.events || []
+      let terminal = false
+      for (const ev of events) {
+        if (runSeq !== runSeqRef.current || ctrl.signal.aborted) return
+        terminal = applyDiagnosisEvent(ev) || terminal
+      }
+
+      if (task.status !== 'running') {
+        if (!terminal) {
+          if (task.status === 'failed') setError(task.result_text || '诊断失败')
+          else if (task.status === 'cancelled') setError('诊断任务已停止')
+          else setLoading(false)
+        }
+        setActiveTaskId(null)
+        return
+      }
+
+      setProgressMsg('后台诊断仍在进行，已恢复实时进度')
+      await streamTask(
+        taskId,
+        (ev) => {
+          if (runSeq !== runSeqRef.current || ctrl.signal.aborted) return
+          applyDiagnosisEvent(ev)
+        },
+        ctrl.signal,
+        events.length,
+      )
+    } catch (e: any) {
+      if (ctrl.signal.aborted || e.name === 'AbortError') return
+      if (runSeq === runSeqRef.current) {
+        setError(e.message || '恢复后台诊断失败')
+        setLoading(false)
+      }
+    }
+  }, [applyDiagnosisEvent])
+
   const startDiagnosis = useCallback(async () => {
     abortRef.current?.abort()
     const runSeq = ++runSeqRef.current
     setLoading(true)
     setError('')
     setReport(null)
+    setActiveTaskId(null)
     setActiveStep(0)
-    setProgressMsg('准备中...')
+    setProgressMsg('正在创建后台诊断任务...')
 
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -183,28 +279,12 @@ export default function DiagnosePage() {
         { article_id: Number(id) },
         (ev: DiagnoseEvent) => {
           if (runSeq !== runSeqRef.current || ctrl.signal.aborted) return
-          if (ev.type === 'progress') {
-            setProgressMsg(ev.message)
-            const idx = STEPS.findIndex(s => s.key === ev.step)
-            if (idx >= 0) setActiveStep(idx)
-          } else if (ev.type === 'result') {
-            terminalEventReceived = true
-            setReport(ev.data)
-            setHistory(prev => [ev.data, ...prev.filter(x => (x.id || x.diagnosis_id) !== (ev.data.id || ev.data.diagnosis_id))])
-            setActiveStep(STEPS.length - 1)
-            setLoading(false)
-            loadHistory().catch(() => {})
-          } else if (ev.type === 'error') {
-            terminalEventReceived = true
-            setError(ev.message)
-            setLoading(false)
-          }
+          terminalEventReceived = applyDiagnosisEvent(ev) || terminalEventReceived
         },
         ctrl.signal,
       )
       if (runSeq === runSeqRef.current && !ctrl.signal.aborted && !terminalEventReceived) {
-        setError('诊断结束但未返回结果，请重试')
-        setLoading(false)
+        setProgressMsg('连接已结束，诊断任务仍可在任务中心查看')
       }
     } catch (e: any) {
       if (ctrl.signal.aborted || e.name === 'AbortError') {
@@ -215,7 +295,7 @@ export default function DiagnosePage() {
         setLoading(false)
       }
     }
-  }, [id, loadHistory])
+  }, [id, applyDiagnosisEvent])
 
   useEffect(() => {
     let alive = true
@@ -225,6 +305,12 @@ export default function DiagnosePage() {
       try {
         const items = await loadHistory()
         if (!alive) return
+        const active = await getActiveDiagnosisTask(Number(id))
+        if (!alive) return
+        if (active) {
+          await reconnectDiagnosisTask(active.id, active)
+          return
+        }
         if (items.length > 0) {
           setReport(items[0])
           setActiveStep(STEPS.length - 1)
@@ -240,7 +326,7 @@ export default function DiagnosePage() {
       }
     })()
     return () => { abortRef.current?.abort() }
-  }, [loadHistory, startDiagnosis])
+  }, [id, loadHistory, reconnectDiagnosisTask, startDiagnosis])
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -287,6 +373,14 @@ export default function DiagnosePage() {
           <Chip
             label={`${report.grade}级 · ${report.overall_score}分`}
             sx={{ ml: 2, fontWeight: 700, bgcolor: GRADE_COLORS[report.grade] + '20', color: GRADE_COLORS[report.grade] }}
+          />
+        )}
+        {activeTaskId && (
+          <Chip
+            size="small"
+            color="info"
+            label={`后台任务 ${activeTaskId}`}
+            sx={{ fontFamily: 'monospace' }}
           />
         )}
       </Stack>
@@ -358,7 +452,12 @@ export default function DiagnosePage() {
           <CardContent>
             <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
               <CircularProgress size={20} />
-              <Typography fontWeight={600}>{progressMsg}</Typography>
+              <Box>
+                <Typography fontWeight={600}>{progressMsg}</Typography>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.4 }}>
+                  诊断已由后端后台任务接管；刷新、关闭页面或切换到其他页面都不会中断，回来后会自动恢复进度/结果。
+                </Typography>
+              </Box>
             </Stack>
             <Stepper activeStep={activeStep} alternativeLabel>
               {STEPS.map(s => (

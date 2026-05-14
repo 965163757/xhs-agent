@@ -10,10 +10,10 @@
 - **发布前诊断**：违禁词 / 钩子 / CTA / 标签缺失检查，给出「是否可发布」结论
 - **五维度评分**：内容 / 视觉 / 增长 / 互动 / 综合，附改进建议，带雷达图
 - **图片能力**：
-  - `gpt-image-1` 生成封面（2:3 竖图）+ 正文配图（1:1 方图）
+  - OpenAI 兼容图片模型生成首图/封面与内容配图，默认小红书 3:4 竖图 `1152x1536`，用户指定 2K/4K/16:9/1:1 时自动换算尺寸
   - 画布级图片编辑器：**裁剪 / 局部重绘 / 消除 / 整体变体**（调用 `images.edit`）
   - 按笔记正文分段生成配图 prompt
-- **笔记详情 AI 侧栏**：右侧对话框锁定当前笔记上下文，继续打磨
+- **笔记详情 AI 侧栏**：右侧对话框带当前笔记上下文，也支持跨笔记读取、仿写和图片编排
 - **模板库**：内置 5 类结构模板（踩坑/清单/种草/共鸣/教程），选模板 + 主题一键成文
 - **MCP 接入**：
   - HTTP 桥 `GET /api/mcp/tools` · `POST /api/mcp/call`
@@ -168,6 +168,8 @@ curl -X POST http://127.0.0.1:8787/api/mcp/call \
 ## 技术要点
 
 - Agent 采用 OpenAI 标准 function calling，保证每次 `tool_call.id` 非空，`assistant` 消息 `content=null`，`tool` 消息携带 `tool_call_id` + `name`，兼容非官方 OpenAI 网关
+- Agent 对话和诊断都采用后端 `Task` 后台任务模型：前端只负责订阅 SSE，刷新、关闭页面或切换页面不会中断任务；恢复时可通过 `/api/tasks/{task_id}` 与 `/api/tasks/{task_id}/stream` 回放进度和结果
+- 诊断入口 `/api/diagnose/stream` 会先创建持久后台任务并返回 `task_id`；也可用 `/api/diagnose/start` 只启动任务、稍后通过 `/api/diagnose/active?article_id=...` 找回正在运行的诊断
 - 图片生成/编辑都落盘到数据目录的 `images/`，通过 `/static/images/*` 对外暴露
 - 图片编辑器纯前端 Canvas 实现：用户涂抹作为可视预览，提交时合成"白底 + 透明圆"的 RGBA PNG mask 上传
 - SQLite + SQLAlchemy 2.0 async；笔记与对话自动持久化

@@ -125,6 +125,11 @@ function ToolCard({
   const diagnostic = result?.result?.diagnostic
   const score = result?.result?.score
   const coverData = result?.result?.cover || result?.result?.workflow?.cover_prompt
+  const storyboard =
+    result?.result?.image_storyboard?.shots ||
+    result?.result?.workflow?.image_storyboard?.shots ||
+    result?.result?.workflow?.content_image_prompts ||
+    result?.result?.shots
 
   const argJson = JSON.stringify(call?.arguments ?? {}, null, 2)
 
@@ -478,10 +483,43 @@ function ToolCard({
             }}
           >
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-              size: {coverData.size || '1024x1536'}
+              size: {coverData.size || '1152x1536'}
             </Typography>
             <Typography sx={{ whiteSpace: 'pre-wrap', mt: 0.5 }}>{coverData.prompt}</Typography>
           </Box>
+        </Box>
+      )}
+
+      {Array.isArray(storyboard) && storyboard.length > 0 && (
+        <Box sx={{ px: 1.4, pb: 1.4 }}>
+          <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.7 }}>
+            图文分镜 / 图片大纲
+          </Typography>
+          <Stack spacing={0.7}>
+            {storyboard.slice(0, 6).map((shot: any, i: number) => (
+              <Box
+                key={`${shot.scene || 'shot'}-${i}`}
+                sx={{
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 1.5,
+                  bgcolor: 'background.paper',
+                  p: 1,
+                }}
+              >
+                <Stack direction="row" spacing={0.6} alignItems="center" sx={{ mb: 0.4 }}>
+                  <Chip size="small" label={shot.role || `第 ${i + 1} 张`} sx={{ height: 18, fontSize: 10 }} />
+                  <Typography noWrap sx={{ fontSize: 12.5, fontWeight: 700, minWidth: 0 }}>
+                    {shot.scene || `配图 ${i + 1}`}
+                  </Typography>
+                  {shot.size && <Typography sx={{ fontSize: 11, color: 'text.secondary', ml: 'auto' }}>{shot.size}</Typography>}
+                </Stack>
+                <Typography sx={{ fontSize: 12, color: 'text.secondary', lineHeight: 1.55 }} noWrap>
+                  {shot.prompt}
+                </Typography>
+              </Box>
+            ))}
+          </Stack>
         </Box>
       )}
     </Box>

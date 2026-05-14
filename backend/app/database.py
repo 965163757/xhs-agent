@@ -20,6 +20,22 @@ def _mask_key(key: str) -> str:
     return (k[:6] + "…" + k[-4:]) if len(k) > 12 else ("已设置" if k else "")
 
 
+def _tag_list(value: str) -> list[str]:
+    """Return article tags in the canonical API shape: no leading #, deduped."""
+    out: list[str] = []
+    seen = set()
+    for raw in (value or "").split(","):
+        tag = str(raw or "").strip().lstrip("#＃").strip()
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tag)
+    return out
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -47,7 +63,7 @@ class Article(Base):
             "id": self.id,
             "title": self.title,
             "body": self.body,
-            "tags": [t for t in self.tags.split(",") if t] if self.tags else [],
+            "tags": _tag_list(self.tags),
             "cover_image": self.cover_image,
             "images": self.images or [],
             "status": self.status,
@@ -136,7 +152,7 @@ class ArticleVersion(Base):
             "version": self.version,
             "title": self.title,
             "body": self.body,
-            "tags": [t for t in self.tags.split(",") if t] if self.tags else [],
+            "tags": _tag_list(self.tags),
             "cover_image": self.cover_image,
             "images": self.images or [],
             "trigger": self.trigger,

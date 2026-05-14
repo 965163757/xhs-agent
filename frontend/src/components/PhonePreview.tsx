@@ -23,6 +23,7 @@ export default function PhonePreview({
   const allImages = [coverImage, ...(images || [])].filter(Boolean) as string[]
   const [slideIdx, setSlideIdx] = useState(0)
   const safeIdx = allImages.length > 0 ? slideIdx % allImages.length : 0
+  const normalizedTags = tags.map(t => String(t || '').replace(/^[#＃]+/, '').trim()).filter(Boolean)
 
   return (
     <Box
@@ -197,9 +198,9 @@ export default function PhonePreview({
           </Typography>
 
           {/* Tags */}
-          {tags.length > 0 && (
+          {normalizedTags.length > 0 && (
             <Typography sx={{ fontSize: 13, color: '#FF2741', lineHeight: 1.8, mb: 1 }}>
-              {tags.map(t => (t.startsWith('#') ? t : `#${t}`)).join(' ')}
+              {normalizedTags.map(t => `#${t}`).join(' ')}
             </Typography>
           )}
         </Box>

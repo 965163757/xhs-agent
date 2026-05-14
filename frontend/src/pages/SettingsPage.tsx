@@ -35,6 +35,7 @@ import {
   setUserRole,
   getSystemConfig,
   updateSystemConfig,
+  testImageSettings,
   testStaticImagePublicAccess,
   type PublicSettings,
   type MySettings,
@@ -93,6 +94,7 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null)
   const [mcpTools, setMcpTools] = useState<Array<{ name: string; description: string }>>([])
   const [staticTest, setStaticTest] = useState<Awaited<ReturnType<typeof testStaticImagePublicAccess>> | null>(null)
+  const [imageTest, setImageTest] = useState<Awaited<ReturnType<typeof testImageSettings>> | null>(null)
 
   const load = async () => {
     const cur = await getSettings()
@@ -149,6 +151,21 @@ export default function SettingsPage() {
     }
   }
 
+  const clearGlobalKey = async (kind: 'chat' | 'image') => {
+    if (!isAdmin) return
+    setBusy(true)
+    setMsg(null)
+    try {
+      const next = await updateSettings(kind === 'chat' ? { chat_api_key: '', openai_api_key: '' } : { image_api_key: '' })
+      setS(next)
+      setMsg({ kind: 'success', text: kind === 'chat' ? '全局文本 Key 已清空。' : '全局生图 Key 已清空。' })
+    } catch (e: any) {
+      setMsg({ kind: 'error', text: e?.response?.data?.detail || e?.message || '清空失败' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const saveMy = async () => {
     setBusy(true)
     setMsg(null)
@@ -168,6 +185,20 @@ export default function SettingsPage() {
       setMsg({ kind: 'success', text: '个人设置已保存。' })
     } catch (e: any) {
       setMsg({ kind: 'error', text: e?.message || '保存失败' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clearMyKey = async (kind: 'chat' | 'image') => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const next = await updateMySettings(kind === 'chat' ? { chat_api_key: '', openai_api_key: '' } : { image_api_key: '' })
+      setMy(next)
+      setMsg({ kind: 'success', text: kind === 'chat' ? '个人文本 Key 已清空。' : '个人生图 Key 已清空。' })
+    } catch (e: any) {
+      setMsg({ kind: 'error', text: e?.message || '清空失败' })
     } finally {
       setBusy(false)
     }
@@ -228,6 +259,30 @@ export default function SettingsPage() {
       })
     } catch (e: any) {
       setMsg({ kind: 'error', text: e?.response?.data?.detail || e?.message || '静态图片测试失败' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const testImageModel = async () => {
+    setBusy(true)
+    setImageTest(null)
+    setMsg({ kind: 'info', text: '正在真实调用生图模型测试，可能需要数十秒到数分钟...' })
+    try {
+      const r = await testImageSettings({
+        prompt: '小红书风格测试图，奶油红背景，一只可爱的便签贴纸，清晰干净，无文字',
+        size: '1152x1536',
+        quality: 'high',
+      })
+      setImageTest(r)
+      setMsg({
+        kind: r.ok ? 'success' : 'error',
+        text: r.ok
+          ? `生图模型可用：${r.image_model || '-'}，用时 ${r.elapsed_sec}s`
+          : `生图测试失败：${r.error || '未知错误'}${r.timeout ? '（疑似超时）' : ''}`,
+      })
+    } catch (e: any) {
+      setMsg({ kind: 'error', text: e?.response?.data?.detail || e?.message || '生图测试失败' })
     } finally {
       setBusy(false)
     }
@@ -353,7 +408,7 @@ export default function SettingsPage() {
             </Stack>
           )}
 
-          <Stack direction="row" spacing={1} sx={{ mt: 2.5 }}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ gap: 1, mt: 2.5 }}>
             <Button
               variant="contained"
               onClick={saveMy}
@@ -364,6 +419,12 @@ export default function SettingsPage() {
             </Button>
             <Button variant="outlined" onClick={test} disabled={busy}>
               测试连接
+            </Button>
+            <Button variant="outlined" color="warning" onClick={() => clearMyKey('chat')} disabled={busy || !useOwnKey}>
+              清空个人文本 Key
+            </Button>
+            <Button variant="outlined" color="warning" onClick={() => clearMyKey('image')} disabled={busy || !useOwnKey}>
+              清空个人生图 Key
             </Button>
           </Stack>
         </Section>
@@ -588,7 +649,62 @@ export default function SettingsPage() {
                   </Box>
                 )}
               </Paper>
-              <Stack direction="row" spacing={1}>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  bgcolor: imageTest ? (imageTest.ok ? 'rgba(22,163,74,0.04)' : 'rgba(220,38,38,0.04)') : 'rgba(0,0,0,0.015)',
+                }}
+              >
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                  <Box flex={1}>
+                    <Typography sx={{ fontSize: 13, fontWeight: 700 }}>生图模型真实调用测试</Typography>
+                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mt: 0.3 }}>
+                      使用当前有效配置请求 1 张 1152×1536 high 质量测试图，显示模型、耗时、错误和返回图片。
+                    </Typography>
+                  </Box>
+                  <Button variant="outlined" onClick={testImageModel} disabled={busy} sx={{ minWidth: 152 }}>
+                    测试生图模型
+                  </Button>
+                </Stack>
+                {imageTest && (
+                  <Box sx={{ mt: 1.2 }}>
+                    <Stack direction="row" spacing={0.6} flexWrap="wrap" sx={{ gap: 0.6, mb: 0.8 }}>
+                      <Chip
+                        size="small"
+                        label={imageTest.ok ? '可用' : '失败'}
+                        color={imageTest.ok ? 'success' : 'error'}
+                        sx={{ height: 22, fontSize: 11 }}
+                      />
+                      <Chip size="small" label={`${imageTest.elapsed_sec || 0}s`} sx={{ height: 22, fontSize: 11 }} />
+                      {imageTest.timeout && <Chip size="small" color="warning" label="超时" sx={{ height: 22, fontSize: 11 }} />}
+                      {imageTest.image_model && <Chip size="small" label={imageTest.image_model} sx={{ height: 22, fontSize: 11 }} />}
+                      {imageTest.size && <Chip size="small" label={imageTest.size} sx={{ height: 22, fontSize: 11 }} />}
+                      {imageTest.quality && <Chip size="small" label={`quality=${imageTest.quality}`} sx={{ height: 22, fontSize: 11 }} />}
+                    </Stack>
+                    {imageTest.image && (
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mt: 1 }}>
+                        <Box
+                          component="img"
+                          src={imageTest.image}
+                          alt="生图测试结果"
+                          sx={{ width: 92, height: 122, objectFit: 'cover', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}
+                        />
+                        <Typography sx={{ fontSize: 11.5, color: 'text.secondary', wordBreak: 'break-all' }}>
+                          URL：<a href={imageTest.image} target="_blank" rel="noreferrer">{imageTest.image}</a>
+                        </Typography>
+                      </Box>
+                    )}
+                    {!imageTest.ok && (
+                      <Typography sx={{ fontSize: 11.5, color: 'error.main', mt: 0.5, wordBreak: 'break-word' }}>
+                        {imageTest.error || '未知错误'}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Paper>
+              <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ gap: 1 }}>
                 <Button
                   variant="contained"
                   onClick={saveGlobal}
@@ -596,6 +712,15 @@ export default function SettingsPage() {
                   sx={{ alignSelf: 'flex-start', background: 'linear-gradient(135deg,#FF2442,#FF7A00)', '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' } }}
                 >
                   保存全局配置
+                </Button>
+                <Button variant="outlined" onClick={test} disabled={busy}>
+                  测试文本连接
+                </Button>
+                <Button variant="outlined" color="warning" onClick={() => clearGlobalKey('chat')} disabled={busy}>
+                  清空全局文本 Key
+                </Button>
+                <Button variant="outlined" color="warning" onClick={() => clearGlobalKey('image')} disabled={busy}>
+                  清空全局生图 Key
                 </Button>
               </Stack>
             </Stack>

@@ -48,6 +48,8 @@ function TaskCard({ task, onRefresh }: { task: TaskInfo; onRefresh: () => void }
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5, flexWrap: 'wrap', gap: 0.6 }}>
             <Typography sx={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700 }}>{task.id}</Typography>
             <Chip size="small" color={statusColor(task.status)} label={task.status} />
+            {trace.task_type && <Chip size="small" label={trace.task_type === 'diagnosis' ? '诊断任务' : trace.task_type} />}
+            {trace.article_id && <Chip size="small" label={`笔记 #${trace.article_id}`} />}
             {task.conversation_id && <Chip size="small" label={`对话 #${task.conversation_id}`} />}
             {task.trace_id && <Chip size="small" label={`trace ${task.trace_id}`} sx={{ fontFamily: 'monospace' }} />}
           </Stack>

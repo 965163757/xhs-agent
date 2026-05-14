@@ -340,6 +340,22 @@ class StaticImagePublicTestRequest(BaseModel):
         return value
 
 
+class ImageSettingsTestRequest(BaseModel):
+    prompt: str = "小红书风格测试图，奶油红背景，一只可爱的便签贴纸，清晰干净，无文字"
+    size: str = "1152x1536"
+    quality: str = "high"
+
+    @field_validator("size")
+    @classmethod
+    def image_size_valid(cls, v: str) -> str:
+        return _validate_image_size(v)
+
+    @field_validator("quality")
+    @classmethod
+    def image_quality_valid(cls, v: str) -> str:
+        return _validate_image_quality(v)
+
+
 class MCPCallRequest(BaseModel):
     name: str
     arguments: dict = Field(default_factory=dict)

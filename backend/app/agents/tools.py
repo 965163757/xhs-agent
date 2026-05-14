@@ -501,11 +501,10 @@ def _article_payload(art: Article) -> Dict[str, Any]:
     payload["images"] = [x["url"] for x in payload["image_context"]["content_images"]]
     payload["cover_image_full_url"] = payload["image_context"].get("cover_image_full_url") or payload["cover_image"]
     payload["images_full_urls"] = [x.get("full_url") or x.get("url") for x in payload["image_context"]["content_images"]]
-    payload["visual_queue"] = payload["image_context"].get("visual_queue") or [payload["cover_image"], *payload["images"]]
-    payload["visual_queue_full_urls"] = payload["image_context"].get("visual_queue_full_urls") or [
-        payload["cover_image_full_url"],
-        *payload["images_full_urls"],
-    ]
+    fallback_queue = [x for x in [payload["cover_image"], *payload["images"]] if x]
+    fallback_queue_full = [x for x in [payload["cover_image_full_url"], *payload["images_full_urls"]] if x]
+    payload["visual_queue"] = payload["image_context"].get("visual_queue") or fallback_queue
+    payload["visual_queue_full_urls"] = payload["image_context"].get("visual_queue_full_urls") or fallback_queue_full
     payload["content_stats"] = {
         "title_chars": len(art.title or ""),
         "body_chars": len(art.body or ""),
@@ -596,7 +595,7 @@ XHS_WRITER_SYSTEM = (
 
 XHS_WORKFLOW_SYSTEM = (
     "你是小红书端到端内容工作流总监。你不是只写一篇文案，而是要一次性交付"
-    "选题定位、标题、正文、标签、封面方向、内容配图方向和自检结论。\n\n"
+    "选题定位、标题、正文、标签、首图方向、后续内容图方向和自检结论。\n\n"
     "输出必须能直接进入草稿箱：标题≤20字，正文口语化、分段清晰、结尾有互动引导，"
     "标签 5-10 个，可带 #；系统入库时会统一规范为单个 # 展示。\n"
     "避免广告法绝对化、医疗承诺、收益承诺和站外引流表达。\n\n"
@@ -607,7 +606,7 @@ XHS_WORKFLOW_SYSTEM = (
     '"title_candidates":["备选标题1","备选标题2","备选标题3","备选标题4","备选标题5","备选标题6"],'
     '"body":"完整正文",'
     '"tags":["#标签1","#标签2"],'
-    '"cover_prompt":{"prompt":"中文封面图生成提示词","size":"1152x1536","quality":"high"},'
+    '"cover_prompt":{"prompt":"中文首图/封面生成提示词","size":"1152x1536","quality":"high"},'
     '"content_image_prompts":[{"scene":"场景名","prompt":"中文配图提示词","size":"1152x1536","quality":"high"}],'
     '"self_check":{"strengths":["亮点"],"risks":["风险"],"next_actions":["下一步建议"]}'
     "}"
@@ -685,12 +684,24 @@ def _category_playbook_text(category: str) -> str:
     )
 
 
+def _normalize_title(value: Any, fallback: str = "", *, limit: int = 20) -> str:
+    """Normalize article titles to the product contract used by the editor."""
+    title = str(value if value is not None else fallback or "").strip()
+    if not title:
+        title = str(fallback or "").strip()
+    return title[:limit]
+
+
 def _normalize_tags(tags: Any, limit: int = 10) -> List[str]:
-    if not isinstance(tags, list):
+    if isinstance(tags, str):
+        candidates: List[Any] = [x for x in re.split(r"[,，\s]+", tags) if x]
+    elif isinstance(tags, list):
+        candidates = tags
+    else:
         return []
     out: List[str] = []
     seen = set()
-    for raw in tags:
+    for raw in candidates:
         t = str(raw or "").strip().lstrip("#＃").strip()
         if not t:
             continue
@@ -824,6 +835,91 @@ def _normalize_shots(shots: Any, limit: int = 4) -> List[Dict[str, str]]:
             }
         )
     return out
+
+
+def _series_visual_style(title: str = "", category: str = "", style: str = "") -> str:
+    """Create a deterministic visual anchor so batch images do not drift apart."""
+    cat = category or "lifestyle"
+    base = style or "小红书 3:4 竖版，清爽高级，统一色调，画面清晰，细节丰富"
+    by_cat = {
+        "travel": "旅行攻略信息图/手账风，统一地图线条、小图标、地标插画、路线编号和留白节奏",
+        "food": "美食图文风，统一自然暖光、近景质感、餐具与桌面材质，突出食欲和步骤清晰度",
+        "beauty": "美妆护肤种草风，统一柔和棚拍光、干净背景、产品质感和安全留白",
+        "fashion": "穿搭杂志风，统一背景、人物比例、色系和单品编号，强调可复制搭配",
+        "home": "家居收纳风，统一空间光线、前后对比卡片、编号标签和整洁秩序感",
+        "tech": "效率工具信息图风，统一深浅对比、界面卡片、参数标签和现代科技感",
+        "fitness": "健身打卡风，统一动作分解、计划表标签、清晰姿势和健康阳光感",
+        "lifestyle": "生活方式手账风，统一奶油色背景、便签贴纸、柔和自然光和松弛感",
+    }
+    topic = f"主题《{title}》" if title else "同一主题"
+    return (
+        f"{topic}整组视觉统一：{base}；{by_cat.get(cat, by_cat['lifestyle'])}；"
+        "所有图片保持相同配色、字体/贴纸风格、构图密度、光影和质感，像同一篇小红书笔记的一组连续内容图。"
+    )
+
+
+def _build_image_storyboard(
+    shots: List[Dict[str, str]],
+    *,
+    title: str = "",
+    category: str = "",
+    style: str = "",
+    size_hint_text: str = "",
+    default_size: str = _DEFAULT_IMAGE_SIZE,
+    default_quality: str = "high",
+) -> Dict[str, Any]:
+    """Normalize shots and append a shared visual anchor for coherent batch generation."""
+    series_style = _series_visual_style(title=title, category=category, style=style)
+    storyboard: List[Dict[str, Any]] = []
+    total = len(shots)
+    for idx, shot in enumerate(shots):
+        role = "首图候选" if idx == 0 else "内容图"
+        scene = str(shot.get("scene") or f"配图{idx + 1}").strip()
+        raw_prompt = str(shot.get("prompt") or "").strip()
+        narrative = f"第 {idx + 1}/{total} 张，作用：{role}，场景：{scene}。"
+        prompt = raw_prompt
+        if series_style not in prompt:
+            prompt = f"{raw_prompt}\n\n{narrative}\n{series_style}".strip()
+        size = _infer_image_size_from_request(
+            f"{size_hint_text} {scene} {raw_prompt}",
+            shot.get("size") or default_size,
+        )
+        quality = str(shot.get("quality") or default_quality or "high")
+        storyboard.append(
+            {
+                "index": idx,
+                "role": role,
+                "scene": scene,
+                "prompt": prompt,
+                "size": size,
+                "quality": quality,
+                "series_style": series_style,
+            }
+        )
+    return {"series_style": series_style, "shots": storyboard}
+
+
+def _fallback_storyboard_shots(title: str, body: str, n: int = 4) -> List[Dict[str, str]]:
+    """Deterministic fallback when the LLM omits image prompts."""
+    text = str(body or "").strip()
+    lines = [x.strip(" -•\t") for x in re.split(r"[\n。！？!?]+", text) if x.strip()]
+    anchors = lines[: max(1, n)] or [str(title or "小红书笔记")]
+    shots: List[Dict[str, str]] = []
+    for idx in range(max(1, n)):
+        anchor = anchors[idx % len(anchors)]
+        scene = f"内容分镜 {idx + 1}"
+        shots.append(
+            {
+                "scene": scene,
+                "prompt": (
+                    f"围绕《{title or '小红书笔记'}》的第 {idx + 1} 个核心信息点设计配图：{anchor}。"
+                    "小红书信息图/手账感排版，主体清晰，信息层级明确，画面干净，适合图文笔记连续阅读。"
+                ),
+                "size": _DEFAULT_IMAGE_SIZE,
+                "quality": "high",
+            }
+        )
+    return shots[:n]
 
 
 def _article_quick_check(
@@ -992,9 +1088,9 @@ async def _refresh_article_local_score(article_id: int) -> Optional[Article]:
 # ---------- CRUD tools ----------
 
 async def tool_create_article(args: Dict[str, Any]) -> Dict[str, Any]:
-    title = args.get("title", "")
+    title = _normalize_title(args.get("title", ""))
     body = args.get("body", "")
-    tags = args.get("tags", []) or []
+    tags = _normalize_tags(args.get("tags", []) or [])
     uid = get_tool_user_id()
     async with SessionLocal() as s:
         art = Article(title=title, body=body, tags=",".join(tags), status="draft", user_id=uid)
@@ -1015,9 +1111,9 @@ async def tool_update_article(args: Dict[str, Any]) -> Dict[str, Any]:
             return {"ok": False, "error": "无权操作该笔记"}
         for key in ("title", "body", "cover_image", "status"):
             if key in args and args[key] is not None:
-                setattr(art, key, args[key])
+                setattr(art, key, _normalize_title(args[key]) if key == "title" else args[key])
         if "tags" in args and args["tags"] is not None:
-            art.tags = ",".join(args["tags"])
+            art.tags = ",".join(_normalize_tags(args["tags"]))
         if "images" in args and args["images"] is not None:
             art.images = args["images"]
         await s.commit()
@@ -1036,7 +1132,7 @@ async def tool_read_article(args: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ok": True,
         "article": _article_payload(art),
-        "read_scope": "包含标题、正文、标签、状态、封面图 cover_image、内容图 images/image_context、评分和时间信息。",
+        "read_scope": "包含标题、正文、标签、状态、首图 cover_image、后续图片 images/image_context、评分和时间信息。",
     }
 
 
@@ -1094,9 +1190,9 @@ async def tool_generate_article(args: Dict[str, Any]) -> Dict[str, Any]:
     )
     content = resp.choices[0].message.content or ""
     data = _safe_json(content)
-    title = data.get("title") or topic
+    title = _normalize_title(data.get("title"), topic)
     body = data.get("body") or content
-    tags = data.get("tags") or []
+    tags = _normalize_tags(data.get("tags") or [])
 
     uid = get_tool_user_id()
     async with SessionLocal() as s:
@@ -1173,13 +1269,13 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     data = _safe_json(resp.choices[0].message.content or "")
     emit_tool_progress("已完成初稿生成，正在整理标题、正文、标签和图片方向", step="draft_ready")
 
-    title = str(data.get("title") or topic).strip()
+    title = _normalize_title(data.get("title"), topic)
     body = str(data.get("body") or "").strip()
     tags = _normalize_tags(data.get("tags") or [])
     title_candidates = [
-        str(x).strip()
+        _normalize_title(x)
         for x in (data.get("title_candidates") or [])
-        if str(x).strip()
+        if _normalize_title(x)
     ][:8]
     if title and title not in title_candidates:
         title_candidates.insert(0, title)
@@ -1199,11 +1295,17 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         data.get("content_image_prompts") or data.get("shots") or [],
         limit=image_count,
     )
-    for shot in content_shots:
-        shot["size"] = _infer_image_size_from_request(
-            image_request_text + " " + str(shot.get("prompt") or ""),
-            shot.get("size") or preferred_image_size,
-        )
+    if include_visual_prompts and not content_shots:
+        content_shots = _fallback_storyboard_shots(title, body, image_count)
+    image_storyboard = _build_image_storyboard(
+        content_shots,
+        title=title,
+        category=category,
+        style=str(args.get("image_style") or args.get("style") or tone),
+        size_hint_text=image_request_text,
+        default_size=preferred_image_size,
+    )
+    content_shots = image_storyboard["shots"]
 
     initial = {"title": title, "body": body, "tags": tags}
     emit_tool_progress("正在做本地发布前自检：标题长度、标签、敏感词、基础评分", step="self_check")
@@ -1236,7 +1338,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         )
         opt = _safe_json(opt_resp.choices[0].message.content or "")
         if opt:
-            title = str(opt.get("title") or title).strip()
+            title = _normalize_title(opt.get("title"), title)
             body = str(opt.get("body") or body).strip()
             tags = _normalize_tags(opt.get("tags") or tags)
             changelog = [str(x) for x in (opt.get("changelog") or [])]
@@ -1270,7 +1372,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
     generated_content_images: List[str] = []
     image_errors: List[Dict[str, Any]] = []
     if generate_cover:
-        emit_tool_progress("正在生成封面图", step="generate_cover", data={"article_id": article_id})
+        emit_tool_progress("正在生成展示队列第 1 张（首图）", step="generate_cover", data={"article_id": article_id})
         img_start = time.perf_counter()
         try:
             urls = await _await_with_progress(
@@ -1280,7 +1382,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                     quality=str(cover_prompt.get("quality") or "high"),
                     n=1,
                 ),
-                label="封面图生成",
+                label="首图生成",
                 step="generate_cover",
                 data={"article_id": article_id, "role": "cover"},
             )
@@ -1288,20 +1390,20 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             if generated_cover:
                 await _bind_image_to_article(generated_cover, article_id, role="cover")
                 emit_tool_progress(
-                    f"封面图已绑定到笔记，用时 {_fmt_elapsed(_elapsed_ms(img_start))}",
+                    f"首图已绑定到笔记展示队列第 1 位，用时 {_fmt_elapsed(_elapsed_ms(img_start))}",
                     step="cover_bound",
                     data={"article_id": article_id, "image": generated_cover, "elapsed_ms": _elapsed_ms(img_start)},
                 )
         except Exception as e:
             elapsed = _elapsed_ms(img_start)
-            msg = _friendly_tool_error(e, elapsed_ms=elapsed, action="封面图生成")
+            msg = _friendly_tool_error(e, elapsed_ms=elapsed, action="首图生成")
             image_errors.append({"role": "cover", "error": msg, "elapsed_ms": elapsed})
             emit_tool_progress(msg, step="cover_failed", data={"article_id": article_id, "elapsed_ms": elapsed})
 
     if generate_content_images and content_shots:
         shots_to_generate = content_shots[:image_count]
         emit_tool_progress(
-            f"将并发生成 {len(shots_to_generate)} 张内容配图（并发数 {image_concurrency}）",
+            f"将并发生成 {len(shots_to_generate)} 张后续队列图片（并发数 {image_concurrency}）",
             step="content_images_concurrent_start",
             data={"article_id": article_id, "count": len(shots_to_generate), "concurrency": image_concurrency},
         )
@@ -1311,7 +1413,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             async with sem:
                 scene = shot.get("scene") or f"配图{idx + 1}"
                 emit_tool_progress(
-                    f"开始生成内容配图 {idx + 1}/{len(shots_to_generate)}：{scene}",
+                    f"开始生成队列图片 {idx + 1}/{len(shots_to_generate)}：{scene}",
                     step="generate_content_image",
                     data={"article_id": article_id, "index": idx, "scene": scene},
                 )
@@ -1324,21 +1426,21 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                             quality=shot.get("quality", "high"),
                             n=1,
                         ),
-                        label=f"内容配图 {idx + 1}/{len(shots_to_generate)}",
+                        label=f"队列图片 {idx + 1}/{len(shots_to_generate)}",
                         step=f"generate_content_image_{idx}",
                         data={"article_id": article_id, "index": idx, "scene": scene},
                     )
                     url = urls[0] if urls else ""
                     elapsed = _elapsed_ms(img_start)
                     emit_tool_progress(
-                        f"内容配图 {idx + 1} 生成完成，用时 {_fmt_elapsed(elapsed)}",
+                        f"队列图片 {idx + 1} 生成完成，用时 {_fmt_elapsed(elapsed)}",
                         step="content_image_done",
                         data={"article_id": article_id, "index": idx, "scene": scene, "image": url, "elapsed_ms": elapsed},
                     )
                     return {"index": idx, "url": url, "elapsed_ms": elapsed}
                 except Exception as e:
                     elapsed = _elapsed_ms(img_start)
-                    msg = _friendly_tool_error(e, elapsed_ms=elapsed, action=f"内容配图 {idx + 1} 生成")
+                    msg = _friendly_tool_error(e, elapsed_ms=elapsed, action=f"队列图片 {idx + 1} 生成")
                     emit_tool_progress(
                         msg,
                         step="content_image_failed",
@@ -1363,7 +1465,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
                     await s.commit()
         if generated_content_images:
             emit_tool_progress(
-                f"已生成并绑定 {len(generated_content_images)} 张图片，第 1 张已作为首图/封面",
+                f"已生成并绑定 {len(generated_content_images)} 张图片；展示队列第 1 张即首图",
                 step="content_images_bound",
                 data={
                     "article_id": article_id,
@@ -1386,6 +1488,7 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             "title_candidates": title_candidates[:8],
             "cover_prompt": cover_prompt,
             "content_image_prompts": content_shots,
+            "image_storyboard": image_storyboard,
             "self_check": data.get("self_check", {}),
             "checks_before": checks_before,
             "checks_after": checks_after,
@@ -1393,6 +1496,8 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
             "changelog": changelog,
             "generated_cover": generated_cover,
             "generated_content_images": generated_content_images,
+            "generated_visual_queue": [x["url"] for x in (final_ctx.get("visual_images") or [])],
+            "visual_queue": [x["url"] for x in (final_ctx.get("visual_images") or [])],
             "first_image_is_cover": bool(generated_cover),
             "image_errors": image_errors,
             "image_concurrency": image_concurrency if generate_content_images else None,
@@ -1430,7 +1535,7 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
                     f"请基于下列笔记改写为小红书风格。\n改写风格：{style}\n附加要求：{instruction}\n"
                     f"{playbook}\n"
                     f"{_article_prompt_context(art)}\n"
-                    "注意：保留与现有封面/内容图匹配的叙事，不要写出和图片明显冲突的场景。\n"
+                    "注意：保留与现有首图/后续图片匹配的叙事，不要写出和图片明显冲突的场景。\n"
                     "严格按系统要求 JSON 返回。"
                 ),
             },
@@ -1442,10 +1547,10 @@ async def tool_rewrite_article(args: Dict[str, Any]) -> Dict[str, Any]:
 
     async with SessionLocal() as s:
         art = await s.get(Article, aid)
-        art.title = data.get("title") or art.title
+        art.title = _normalize_title(data.get("title"), art.title)
         art.body = data.get("body") or art.body
         if data.get("tags"):
-            art.tags = ",".join(data["tags"])
+            art.tags = ",".join(_normalize_tags(data["tags"]))
         await s.commit()
         await s.refresh(art)
         return {"ok": True, "article": _article_payload(art)}
@@ -1531,7 +1636,7 @@ async def tool_imitate_article_style(args: Dict[str, Any]) -> Dict[str, Any]:
         temperature=0.78,
     )
     data = _safe_json(resp.choices[0].message.content or "")
-    title = str(data.get("title") or (target.title if target else topic or ref.title or "仿写笔记")).strip()[:255]
+    title = _normalize_title(data.get("title"), target.title if target else topic or ref.title or "仿写笔记")
     body = str(data.get("body") or (target.body if target else "")).strip()
     fallback_tags = (target.tags or "").split(",") if target else (ref.tags or "").split(",")
     tags = _normalize_tags(data.get("tags") or fallback_tags)
@@ -1544,7 +1649,7 @@ async def tool_imitate_article_style(args: Dict[str, Any]) -> Dict[str, Any]:
             art = await s.get(Article, target_id)
             if not art:
                 return {"ok": False, "error": f"article {target_id} not found"}
-            art.title = title or art.title
+            art.title = _normalize_title(title, art.title)
             art.body = body or art.body
             if tags:
                 art.tags = ",".join(tags)
@@ -1666,10 +1771,10 @@ async def tool_optimize_article(args: Dict[str, Any]) -> Dict[str, Any]:
 
     async with SessionLocal() as s:
         art = await s.get(Article, aid)
-        art.title = data.get("title") or art.title
+        art.title = _normalize_title(data.get("title"), art.title)
         art.body = data.get("body") or art.body
         if data.get("tags"):
-            art.tags = ",".join(data["tags"])
+            art.tags = ",".join(_normalize_tags(data["tags"]))
         await s.commit()
         await s.refresh(art)
         result = _article_payload(art)
@@ -1717,7 +1822,7 @@ async def tool_score_article(args: Dict[str, Any]) -> Dict[str, Any]:
                     "content": (
                         "你是小红书数据专家，从五个维度打分（0-100）："
                         "内容质量 content、视觉吸引 visual、增长潜力 growth、互动潜力 engagement、综合 overall。"
-                        "visual 必须结合首图/封面、后续内容图数量、图片 URL/尺寸元数据和图文匹配度评估；"
+                        "visual 必须结合首图、后续图片数量、图片 URL/尺寸元数据和图文匹配度评估；"
                         "没有图片时要明确扣分原因。即使你无法读取图片像素，也要基于 image_context、图片数量、尺寸和图文关系给出非零结构化评分。"
                         "严格按 JSON 返回，五个数字字段必须完整："
                         '{"content":90,"visual":80,"growth":75,"engagement":82,"overall":82,"advice":["..."]}'
@@ -1867,7 +1972,8 @@ async def tool_suggest_titles(args: Dict[str, Any]) -> Dict[str, Any]:
         temperature=0.95,
     )
     data = _safe_json(resp.choices[0].message.content or "")
-    return {"ok": True, "titles": data.get("titles", [])[:n]}
+    titles = [_normalize_title(x) for x in (data.get("titles") or []) if _normalize_title(x)]
+    return {"ok": True, "titles": titles[:n]}
 
 
 async def tool_outline_article(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -2172,6 +2278,7 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
     title = args.get("title", "")
     body = args.get("body", "")
     n = _safe_int(args.get("n", 4), 4, min_value=1, max_value=8)
+    style = str(args.get("style") or "小红书风、统一色调、干净高级、有生活感")
     image_context_text = "当前没有已知配图。"
     if aid and not body:
         art, err = await _get_article_for_user(int(aid))
@@ -2183,16 +2290,19 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
         topic = topic or art.title
         image_context_text = _article_image_summary_text(art)
     from .research_data import detect_category
-    playbook = _category_playbook_text(detect_category(str(title or topic), str(body), []))
+    category = detect_category(str(title or topic), str(body), [])
+    playbook = _category_playbook_text(category)
+    series_style = _series_visual_style(title=str(title or topic), category=category, style=style)
     resp = await chat_completion(
         messages=[
             {
                 "role": "system",
                 "content": (
-                    f"你是小红书内容配图导演，擅长将文字转化为有氛围感的视觉画面。\n\n"
+                    f"你是小红书图片队列导演，擅长将文字转化为一组有连续感的视觉画面。\n\n"
                     f"根据笔记内容，产出 {n} 条配图 prompt（中文），每条对应正文的一个段落或核心信息点。\n\n"
                     "【配图原则】\n"
                     "- 视觉一致性：所有配图保持统一的色调、风格和滤镜感\n"
+                    f"- 整组风格锚点：{series_style}\n"
                     "- 场景化：每张图要有生活感和氛围感，避免纯产品白底图\n"
                     "- 信息承载：图片要能独立传达该段落的核心信息\n"
                     "- 细节丰富：注重质感、光影、环境细节的描述\n\n"
@@ -2210,18 +2320,32 @@ async def tool_content_image_prompt(args: Dict[str, Any]) -> Dict[str, Any]:
             },
             {
                 "role": "user",
-                "content": f"主题：{topic}\n标题：{title}\n{playbook}\n已有图片：\n{image_context_text}\n正文：\n{body}",
+                "content": f"主题：{topic}\n标题：{title}\n视觉风格：{style}\n{playbook}\n已有图片：\n{image_context_text}\n正文：\n{body}",
             },
         ],
         temperature=0.8,
     )
     data = _safe_json(resp.choices[0].message.content or "")
-    shots = data.get("shots", [])[:n]
-    return {"ok": True, "shots": shots}
+    normalized = _normalize_shots(data.get("shots", [])[:n], limit=n)
+    if not normalized:
+        normalized = _fallback_storyboard_shots(str(title or topic), str(body), n)
+    storyboard = _build_image_storyboard(
+        normalized,
+        title=str(title or topic),
+        category=category,
+        style=style,
+        size_hint_text=" ".join(str(x or "") for x in (topic, title, body[:400], args.get("size"))),
+    )
+    return {
+        "ok": True,
+        "shots": storyboard["shots"],
+        "image_storyboard": storyboard,
+        "series_style": storyboard["series_style"],
+    }
 
 
 async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate cover/content images for an existing article with concurrent content-image workers."""
+    """Generate images for an existing article's XHS visual queue."""
     aid = int(args["article_id"])
     art, err = await _get_article_for_user(aid)
     if err:
@@ -2255,10 +2379,10 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
         cover_prompt = args.get("cover_prompt")
         if not cover_prompt:
             cover_resp = await tool_cover_prompt({"topic": art.title or "", "title": art.title or "", "style": style})
-            cover_prompt = (cover_resp.get("cover") or {}).get("prompt") or f"小红书封面图，主题：{art.title}，{style}"
+            cover_prompt = (cover_resp.get("cover") or {}).get("prompt") or f"小红书首图/封面，主题：{art.title}，{style}"
         cover_size = _infer_image_size_from_request(size_hint_text, args.get("cover_size") or default_size)
         cover_start = time.perf_counter()
-        emit_tool_progress("正在生成笔记封面图", step="article_cover_start", data={"article_id": aid})
+        emit_tool_progress("正在生成笔记展示队列第 1 张（首图）", step="article_cover_start", data={"article_id": aid})
         try:
             urls = await _await_with_progress(
                 generate_image(
@@ -2267,7 +2391,7 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
                     quality=str(default_quality),
                     n=1,
                 ),
-                label="笔记封面图",
+                label="笔记首图",
                 step="article_cover",
                 data={"article_id": aid, "role": "cover"},
             )
@@ -2275,36 +2399,43 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
             if generated_cover:
                 await _bind_image_to_article(generated_cover, aid, role="cover")
                 emit_tool_progress(
-                    f"封面图已生成并绑定，用时 {_fmt_elapsed(_elapsed_ms(cover_start))}",
+                    f"首图已生成并绑定到展示队列第 1 位，用时 {_fmt_elapsed(_elapsed_ms(cover_start))}",
                     step="article_cover_done",
                     data={"article_id": aid, "image": generated_cover, "elapsed_ms": _elapsed_ms(cover_start)},
                 )
         except Exception as e:
             elapsed = _elapsed_ms(cover_start)
-            msg = _friendly_tool_error(e, elapsed_ms=elapsed, action="封面图生成")
+            msg = _friendly_tool_error(e, elapsed_ms=elapsed, action="首图生成")
             image_errors.append({"role": "cover", "error": msg, "elapsed_ms": elapsed})
             emit_tool_progress(msg, step="article_cover_failed", data={"article_id": aid, "elapsed_ms": elapsed})
 
     shots = args.get("shots")
     if not isinstance(shots, list) or not shots:
         if content_count > 0:
-            prompt_resp = await tool_content_image_prompt({"article_id": aid, "n": content_count})
+            prompt_resp = await tool_content_image_prompt({"article_id": aid, "n": content_count, "style": style, "size": default_size})
             if not prompt_resp.get("ok"):
                 return prompt_resp
             shots = prompt_resp.get("shots") or []
     shots = _normalize_shots(shots or [], limit=content_count or 0)
-    for shot in shots:
-        shot["size"] = _infer_image_size_from_request(
-            size_hint_text + " " + str(shot.get("prompt") or ""),
-            shot.get("size") or default_size,
-        )
-        shot.setdefault("quality", default_quality)
+    if content_count > 0 and not shots:
+        shots = _fallback_storyboard_shots(art.title or "", art.body or "", content_count)
+    from .research_data import detect_category
+    image_storyboard = _build_image_storyboard(
+        shots,
+        title=art.title or "",
+        category=detect_category(art.title or "", art.body or "", (art.tags or "").split(",")),
+        style=style,
+        size_hint_text=size_hint_text,
+        default_size=default_size,
+        default_quality=str(default_quality),
+    )
+    shots = image_storyboard["shots"]
 
     if shots:
         emit_tool_progress(
-            f"开始并发生成 {len(shots)} 张内容配图（并发数 {concurrency}）",
+            f"开始并发生成 {len(shots)} 张后续队列图片（并发数 {concurrency}）",
             step="article_content_images_start",
-            data={"article_id": aid, "count": len(shots), "concurrency": concurrency},
+            data={"article_id": aid, "count": len(shots), "concurrency": concurrency, "series_style": image_storyboard["series_style"]},
         )
         sem = asyncio.Semaphore(concurrency)
 
@@ -2313,7 +2444,7 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
                 scene = shot.get("scene") or f"配图{idx + 1}"
                 start = time.perf_counter()
                 emit_tool_progress(
-                    f"内容配图 {idx + 1}/{len(shots)} 开始生成：{scene}",
+                    f"队列图片 {idx + 1}/{len(shots)} 开始生成：{scene}",
                     step="article_content_image_start",
                     data={"article_id": aid, "index": idx, "scene": scene},
                 )
@@ -2325,21 +2456,21 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
                             quality=shot.get("quality", default_quality),
                             n=1,
                         ),
-                        label=f"内容配图 {idx + 1}/{len(shots)}",
+                        label=f"队列图片 {idx + 1}/{len(shots)}",
                         step=f"article_content_image_{idx}",
                         data={"article_id": aid, "index": idx, "scene": scene},
                     )
                     elapsed = _elapsed_ms(start)
                     url = urls[0] if urls else ""
                     emit_tool_progress(
-                        f"内容配图 {idx + 1} 完成，用时 {_fmt_elapsed(elapsed)}",
+                        f"队列图片 {idx + 1} 完成，用时 {_fmt_elapsed(elapsed)}",
                         step="article_content_image_done",
                         data={"article_id": aid, "index": idx, "image": url, "elapsed_ms": elapsed},
                     )
                     return {"index": idx, "url": url, "elapsed_ms": elapsed, "scene": scene}
                 except Exception as e:
                     elapsed = _elapsed_ms(start)
-                    msg = _friendly_tool_error(e, elapsed_ms=elapsed, action=f"内容配图 {idx + 1} 生成")
+                    msg = _friendly_tool_error(e, elapsed_ms=elapsed, action=f"队列图片 {idx + 1} 生成")
                     emit_tool_progress(
                         msg,
                         step="article_content_image_failed",
@@ -2395,8 +2526,10 @@ async def tool_generate_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
         "cover_image": cover_image,
         "generated_cover": generated_cover,
         "generated_content_images": generated_content_images,
+        "generated_visual_queue": [x["url"] for x in (final_ctx.get("visual_images") or [])],
         "first_image_is_cover": bool(generated_cover),
         "visual_queue": [x["url"] for x in (final_ctx.get("visual_images") or [])],
+        "image_storyboard": image_storyboard if shots else {"series_style": _series_visual_style(title=art.title or "", style=style), "shots": []},
         "image_errors": image_errors,
         "concurrency": concurrency,
         "elapsed_ms": elapsed,
@@ -2669,9 +2802,9 @@ async def tool_apply_template(args: Dict[str, Any]) -> Dict[str, Any]:
         temperature=0.8,
     )
     data = _safe_json(resp.choices[0].message.content or "")
-    title = data.get("title") or topic
+    title = _normalize_title(data.get("title"), topic)
     body = data.get("body") or ""
-    tags = data.get("tags") or []
+    tags = _normalize_tags(data.get("tags") or [])
     uid = get_tool_user_id()
     async with SessionLocal() as s:
         art = Article(title=title, body=body, tags=",".join(tags), status="draft", user_id=uid)
@@ -2868,7 +3001,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_create_complete_note_workflow,
         "schema": _fn_schema(
             "create_complete_note_workflow",
-            "端到端创作工作流：只在用户明确要求生成完整笔记/帖子/草稿/一键成稿时使用。会解析 brief，生成笔记、标题候选、标签、封面/配图方向，本地自检并可自动二次优化后入库。不要用于单纯生成图片/封面/海报。",
+            "端到端创作工作流：只在用户明确要求生成完整笔记/帖子/草稿/一键成稿时使用。会解析 brief，生成笔记、标题候选、标签、首图/后续图方向，本地自检并可自动二次优化后入库。不要用于单纯生成图片/首图/海报。",
             {
                 "topic": {"type": "string", "description": "主题、灵感或完整 brief"},
                 "audience": {"type": "string", "description": "目标受众"},
@@ -2876,11 +3009,11 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "length": {"type": "string", "description": "短/中等/长"},
                 "extra": {"type": "string", "description": "补充要求、产品卖点、禁用表达等"},
                 "auto_optimize": {"type": "boolean", "description": "是否基于自检自动二次优化，默认 true"},
-                "include_visual_prompts": {"type": "boolean", "description": "是否产出封面和内容配图 prompt，默认 true"},
-                "generate_cover": {"type": "boolean", "description": "是否直接生成封面图，默认 false"},
-                "generate_content_images": {"type": "boolean", "description": "是否直接生成正文配图，默认 false"},
-                "image_count": {"type": "integer", "description": "配图 prompt/生成数量，1-6"},
-                "image_concurrency": {"type": "integer", "description": "正文配图并发生成数量，1-4，默认 3"},
+                "include_visual_prompts": {"type": "boolean", "description": "是否产出首图和后续队列图片 prompt，默认 true"},
+                "generate_cover": {"type": "boolean", "description": "是否直接生成展示队列第 1 张（首图），默认 false；与内容图只有队列位置区别"},
+                "generate_content_images": {"type": "boolean", "description": "是否直接生成后续队列图片，默认 false；若未单独生成首图且队列为空，第一张生成图会成为首图"},
+                "image_count": {"type": "integer", "description": "后续图片 prompt/生成数量，1-6"},
+                "image_concurrency": {"type": "integer", "description": "后续图片并发生成数量，1-4，默认 3"},
                 "image_size": {"type": "string", "description": "用户指定的图片尺寸/分辨率，如 1536x2048、2K、4K；未指定默认 1152x1536"},
                 "image_ratio": {"type": "string", "description": "用户指定比例，如 3:4、16:9、1:1；未指定默认 3:4"},
             },
@@ -2941,7 +3074,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_score_article,
         "schema": _fn_schema(
             "score_article",
-            "对笔记进行五维度打分并写回，会结合正文、标签、封面/内容图数量和 image_context 评估 visual。",
+            "对笔记进行五维度打分并写回，会结合正文、标签、首图/后续图片数量和 image_context 评估 visual。",
             {"article_id": {"type": "integer"}},
             required=["article_id"],
         ),
@@ -2950,7 +3083,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_diagnose_article,
         "schema": _fn_schema(
             "diagnose_article",
-            "发布前深度诊断：内容、视觉、增长、用户反应、违禁词、CTA 和图文匹配；会把封面/内容图传给视觉诊断 Agent（模型不支持图片时自动退化为 URL/数量判断）。",
+            "发布前深度诊断：内容、视觉、增长、用户反应、违禁词、CTA 和图文匹配；会把首图/后续图片传给视觉诊断 Agent（模型不支持图片时自动退化为 URL/数量判断）。",
             {"article_id": {"type": "integer"}},
             required=["article_id"],
         ),
@@ -3014,7 +3147,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_generate_image,
         "schema": _fn_schema(
             "generate_image",
-            "独立生成图片，不会创建笔记/帖子。只有在显式传 article_id 时才绑定到笔记（role=cover|content）；若指定 replace_index，则替换该位置的配图。",
+            "独立生成真实图片，不会创建笔记/帖子。只有用户明确要求“生成图片/生成首图/生成封面图/出图/生图/画一张/制作海报”时使用；“封面方向/封面建议/配图方向/视觉方案/prompt”只是文字方案，不要用本工具；不确定时先反问。只有在显式传 article_id 时才绑定到笔记（role=cover|content）；role=cover 表示放到展示队列第 1 位，role=content 表示后续队列图；若指定 replace_index，则替换后续队列图。",
             {
                 "prompt": {"type": "string"},
                 "size": {"type": "string", "description": "如 1152x1536 / 1536x2048 / 2048x1152；不传时会从 prompt 的 2K/4K/比例推断，默认 3:4"},
@@ -3026,8 +3159,8 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                 "n": {"type": "integer"},
                 "reference_images": {"type": "array", "items": {"type": "string"}},
                 "article_id": {"type": "integer", "description": "仅当用户明确要求绑定到某篇笔记时传；独立生成图片时不要传，也不要传 0"},
-                "role": {"type": "string", "enum": ["cover", "content"], "description": "仅绑定到笔记时传"},
-                "replace_index": {"type": "integer", "description": "仅绑定到笔记时传；替换第 N 张内容配图（0-based）"},
+                "role": {"type": "string", "enum": ["cover", "content"], "description": "仅绑定到笔记时传；cover=展示队列第 1 张，content=后续队列图"},
+                "replace_index": {"type": "integer", "description": "仅绑定到笔记时传；替换第 N 张后续队列图（0-based）"},
             },
             required=["prompt"],
         ),
@@ -3036,7 +3169,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_remove_image,
         "schema": _fn_schema(
             "remove_image",
-            "删除笔记的封面或某张内容配图。",
+            "删除笔记展示队列中的首图或某张后续图片。",
             {
                 "article_id": {"type": "integer"},
                 "role": {"type": "string", "enum": ["cover", "content"]},
@@ -3084,15 +3217,15 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_generate_article_images,
         "schema": _fn_schema(
             "generate_article_images",
-            "为已有笔记并发生成封面图/内容配图并自动绑定。适合用户要求“给这篇笔记生成多张配图/按段落生成图片/补齐帖子图片”。内容配图会并发生成并实时回报耗时与失败项。",
+            "为已有笔记并发生成小红书展示队列图片并自动绑定。include_cover 只代表是否单独生成队列第 1 张（首图）；content_count 代表后续队列图片数量。适合“给这篇笔记生成多张配图/按段落生成图片/补齐帖子图片”。会实时回报耗时与失败项。",
             {
                 "article_id": {"type": "integer"},
-                "include_cover": {"type": "boolean", "description": "是否生成/替换封面，默认 false"},
-                "content_count": {"type": "integer", "description": "内容配图数量，0-8，默认 4"},
+                "include_cover": {"type": "boolean", "description": "是否单独生成/替换展示队列第 1 张（首图），默认 false"},
+                "content_count": {"type": "integer", "description": "后续队列图片数量，0-8，默认 4；若没有首图且不生成首图，第一张生成图会作为首图"},
                 "concurrency": {"type": "integer", "description": "并发数量，1-4，默认 3"},
-                "replace_existing": {"type": "boolean", "description": "是否从第 0 张开始替换已有内容图；false 为追加"},
-                "size": {"type": "string", "description": "内容图尺寸，默认 1152x1536；可从 2K/4K/比例推断"},
-                "cover_size": {"type": "string", "description": "封面尺寸，默认 1152x1536；可从 2K/4K/比例推断"},
+                "replace_existing": {"type": "boolean", "description": "是否替换已有后续队列图片；false 为追加"},
+                "size": {"type": "string", "description": "后续队列图片尺寸，默认 1152x1536；可从 2K/4K/比例推断"},
+                "cover_size": {"type": "string", "description": "队列第 1 张尺寸，默认 1152x1536；可从 2K/4K/比例推断"},
                 "quality": {"type": "string", "enum": ["high", "medium", "low", "auto"]},
                 "style": {"type": "string"},
                 "cover_prompt": {"type": "string"},
@@ -3225,7 +3358,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_cover_prompt,
         "schema": _fn_schema(
             "cover_prompt",
-            "根据主题/标题产出封面图的 gpt-image-2 prompt。",
+            "根据主题/标题产出首图/封面方向、构图、配色和 gpt-image-2 prompt；只返回文字方案，不实际生成图片。适合“封面方向/封面建议/视觉方案”。",
             {"topic": {"type": "string"}, "title": {"type": "string"}, "style": {"type": "string"}},
         ),
     },

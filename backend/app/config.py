@@ -242,7 +242,7 @@ def update_settings(patch: Dict[str, Any]) -> Settings:
     global _cached
     clean: Dict[str, Any] = {}
     for k in _MUTABLE_KEYS:
-        if k in patch and patch[k] is not None and (patch[k] != "" or k == "public_base_url"):
+        if k in patch and patch[k] is not None:
             clean[k] = patch[k]
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     overlay = _load_overlay()

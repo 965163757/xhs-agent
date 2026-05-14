@@ -13,13 +13,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select
 
 from ..agents.background import cancel_task, get_stream, is_running, spawn_agent_task
-from ..agents.runner import run_agent_stream
 from ..agents.tools import (
     TOOLS,
     _article_payload,
-    _diagnosis_result_payload,
     _image_retry_options,
-    _save_diagnosis_report,
     _score_for_article,
     call_tool_for_user,
     openai_tool_schemas,
@@ -42,6 +39,7 @@ from ..schemas import (
     ExtractTemplateRequest,
     GenerateArticleRequest,
     ImageGenRequest,
+    ImageSettingsTestRequest,
     InpaintRequest,
     MCPCallRequest,
     OptimizeRequest,
@@ -363,18 +361,25 @@ async def apply_article_diagnosis(
         changed: List[str] = []
         await _snapshot_article_version(s, a, user_id=user.id, trigger=f"diagnosis_apply:{did}")
         if "title" in fields and str(report.get("optimized_title") or "").strip():
-            a.title = str(report.get("optimized_title")).strip()[:255]
+            a.title = str(report.get("optimized_title")).strip()[:20]
             changed.append("title")
         if "body" in fields and str(report.get("optimized_content") or "").strip():
             a.body = str(report.get("optimized_content")).strip()
             changed.append("body")
         tags = report.get("optimized_tags")
         if "tags" in fields and isinstance(tags, list) and tags:
-            a.tags = ",".join(
-                str(t).strip().lstrip("#＃").strip()
-                for t in tags
-                if str(t).strip().lstrip("#＃").strip()
-            )
+            normalized_tags: List[str] = []
+            seen_tags = set()
+            for raw in tags:
+                tag = str(raw).strip().lstrip("#＃").strip()
+                if not tag:
+                    continue
+                key = tag.lower()
+                if key in seen_tags:
+                    continue
+                seen_tags.add(key)
+                normalized_tags.append(tag)
+            a.tags = ",".join(normalized_tags[:10])
             changed.append("tags")
         if not changed:
             raise HTTPException(400, "诊断报告里没有可应用的优化标题、正文或标签")
@@ -827,14 +832,19 @@ async def stream_task(task_id: str, from_index: int = 0, user: User = Depends(ge
         if not is_running(task_id):
             async with SessionLocal() as s:
                 t = await s.get(Task, task_id)
-            if t and t.status != "running":
-                if t.status == "completed":
-                    yield f"data: {json.dumps({'type': 'done', 'text': t.result_text or ''}, ensure_ascii=False)}\n\n"
-                elif t.status == "cancelled":
-                    yield f"data: {json.dumps({'type': 'cancelled', 'text': t.result_text or ''}, ensure_ascii=False)}\n\n"
-                else:
-                    msg = "任务已中断，请重新发起" if t.status == "stale" else (t.result_text or f"task {t.status}")
-                    yield f"data: {json.dumps({'type':'error','message': msg}, ensure_ascii=False)}\n\n"
+            if t:
+                stored_events = list(t.events or [])
+                for ev in stored_events[max(0, from_index):]:
+                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                last_type = stored_events[-1].get("type") if stored_events else ""
+                if last_type not in ("done", "error", "cancelled"):
+                    if t.status == "completed":
+                        yield f"data: {json.dumps({'type': 'done', 'text': t.result_text or ''}, ensure_ascii=False)}\n\n"
+                    elif t.status == "cancelled":
+                        yield f"data: {json.dumps({'type': 'cancelled', 'text': t.result_text or ''}, ensure_ascii=False)}\n\n"
+                    else:
+                        msg = "任务已中断，请重新发起" if t.status == "stale" else (t.result_text or f"task {t.status}")
+                        yield f"data: {json.dumps({'type':'error','message': msg}, ensure_ascii=False)}\n\n"
             else:
                 yield f"data: {json.dumps({'type':'error','message':'task not found or already finished'}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
@@ -930,6 +940,54 @@ async def test_settings(user: User = Depends(get_current_user)):
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@router.post("/settings/image-test")
+async def test_image_settings(
+    payload: ImageSettingsTestRequest,
+    user: User = Depends(get_current_user),
+):
+    """Real image-model smoke test using the currently effective image config."""
+    from ..config import get_effective_settings
+    effective = await get_effective_settings(user.id)
+    start = time.perf_counter()
+    try:
+        urls = await generate_image(
+            prompt=payload.prompt,
+            size=payload.size,
+            quality=payload.quality,
+            n=1,
+            settings=effective,
+        )
+        elapsed = int((time.perf_counter() - start) * 1000)
+        return {
+            "ok": True,
+            "images": urls,
+            "image": urls[0] if urls else "",
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+            "image_base_url": effective.effective_image_base_url,
+            "image_model": effective.image_model,
+            "size": payload.size,
+            "quality": payload.quality,
+        }
+    except Exception as e:
+        elapsed = int((time.perf_counter() - start) * 1000)
+        raw = str(e) or type(e).__name__
+        timeout = any(x in raw.lower() for x in ("timeout", "timed out", "readtimeout", "524"))
+        return {
+            "ok": False,
+            "images": [],
+            "error": raw[:1000],
+            "timeout": timeout,
+            "elapsed_ms": elapsed,
+            "elapsed_sec": round(elapsed / 1000, 2),
+            "image_base_url": effective.effective_image_base_url,
+            "image_model": effective.image_model,
+            "size": payload.size,
+            "quality": payload.quality,
+            "retry_options": _image_retry_options(payload.prompt, payload.size, payload.quality, 1),
+        }
 
 
 @router.post("/settings/static-image-test")

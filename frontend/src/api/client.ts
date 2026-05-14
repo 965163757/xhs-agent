@@ -164,8 +164,11 @@ export async function diagnoseArticle(id: number) {
 }
 
 export type DiagnoseEvent =
+  | { type: 'task_id'; task_id: string; seq?: number }
   | { type: 'progress'; step: string; message: string; data?: any }
   | { type: 'result'; data: DiagnosisReport }
+  | { type: 'done'; text?: string; seq?: number }
+  | { type: 'cancelled'; text?: string; seq?: number }
   | { type: 'error'; message: string }
 
 export interface DiagnosisReport {
@@ -240,6 +243,18 @@ export async function diagnoseStream(
   }
 }
 
+export async function startDiagnosisTask(
+  payload: { article_id?: number; title?: string; content?: string; tags?: string[]; image_count?: number }
+): Promise<{ ok: boolean; task_id: string; article_id?: number }> {
+  const r = await api.post('/diagnose/start', payload)
+  return r.data
+}
+
+export async function getActiveDiagnosisTask(articleId: number): Promise<TaskInfo | null> {
+  const r = await api.get('/diagnose/active', { params: { article_id: articleId } })
+  return r.data.task || null
+}
+
 export async function listDiagnosisReports(articleId: number): Promise<DiagnosisReport[]> {
   const r = await api.get(`/articles/${articleId}/diagnoses`)
   return r.data.items || []
@@ -279,7 +294,15 @@ export async function contentImagePrompt(
   payload: { article_id?: number; topic?: string; title?: string; body?: string; n?: number }
 ) {
   const r = await api.post('/articles/content_image_prompt', payload)
-  return r.data as { ok: boolean; shots: Array<{ scene: string; prompt: string; size?: string }> }
+  return r.data as {
+    ok: boolean
+    shots: Array<{ index?: number; role?: string; scene: string; prompt: string; size?: string; quality?: string; series_style?: string }>
+    image_storyboard?: {
+      series_style?: string
+      shots: Array<{ index?: number; role?: string; scene: string; prompt: string; size?: string; quality?: string; series_style?: string }>
+    }
+    series_style?: string
+  }
 }
 export async function removeArticleImage(
   article_id: number,
@@ -377,7 +400,7 @@ export async function generateImageForArticle(payload: {
 }
 export async function generateImage(
   prompt: string,
-  size = '1024x1536',
+  size = '1152x1536',
   n = 1,
   quality: 'high' | 'medium' | 'low' | 'auto' = 'high',
   referenceImages: string[] = []
@@ -525,6 +548,28 @@ export async function testSettings() {
   }
 }
 
+export async function testImageSettings(payload?: {
+  prompt?: string
+  size?: string
+  quality?: 'high' | 'medium' | 'low' | 'auto'
+}) {
+  const r = await api.post('/settings/image-test', payload || {})
+  return r.data as {
+    ok: boolean
+    images: string[]
+    image?: string
+    error?: string
+    timeout?: boolean
+    elapsed_ms: number
+    elapsed_sec: number
+    image_base_url?: string
+    image_model?: string
+    size?: string
+    quality?: string
+    retry_options?: Array<{ label: string; reason?: string; arguments?: any }>
+  }
+}
+
 export async function testStaticImagePublicAccess(publicBaseUrl?: string) {
   const r = await api.post('/settings/static-image-test', { public_base_url: publicBaseUrl ?? undefined })
   return r.data as {
@@ -640,6 +685,8 @@ export async function updateSystemConfig(payload: { registration_open?: string }
 export type StreamEvent =
   | { type: 'token'; text: string; seq?: number }
   | { type: 'task_id'; task_id: string; seq?: number }
+  | { type: 'progress'; step: string; message: string; data?: any; seq?: number }
+  | { type: 'result'; data: any; seq?: number }
   | { type: 'tool_call'; name: string; arguments: any; id: string; seq?: number }
   | { type: 'tool_progress'; name: string; id: string; step?: string; message: string; data?: any; seq?: number }
   | { type: 'tool_result'; name: string; result: any; id: string; elapsed_ms?: number; ok?: boolean; seq?: number }

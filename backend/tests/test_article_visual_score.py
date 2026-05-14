@@ -6,9 +6,12 @@ from app.agents.banned_words import check_banned_words
 from app.agents.tools import (
     _article_image_context,
     _article_payload,
+    _build_image_storyboard,
+    _fallback_storyboard_shots,
     _infer_image_size_from_request,
     _normalize_score_payload,
     _normalize_tags,
+    _normalize_title,
     _score_for_article,
 )
 from app.config import Settings
@@ -36,6 +39,14 @@ class ArticleVisualAndScoreTests(unittest.TestCase):
         self.assertEqual(ctx["visual_images"][0]["position"], 0)
         self.assertEqual(payload["cover_image"], "/static/images/a.png")
         self.assertEqual(payload["images"], ["/static/images/b.png"])
+
+    def test_article_payload_has_empty_visual_queue_without_images(self):
+        art = Article(title="无图笔记", body="正文", tags="#测试", cover_image="", images=[])
+
+        payload = _article_payload(art)
+
+        self.assertEqual(payload["visual_queue"], [])
+        self.assertEqual(payload["visual_queue_full_urls"], [])
 
     def test_article_payload_exposes_full_public_image_urls(self):
         art = Article(
@@ -117,6 +128,13 @@ class ArticleVisualAndScoreTests(unittest.TestCase):
 
     def test_tags_are_normalized_without_duplicate_hashes(self):
         self.assertEqual(_normalize_tags(["#旅行", "##攻略", "旅行", " 美食 "]), ["旅行", "攻略", "美食"])
+        self.assertEqual(_normalize_tags("#旅行,##攻略 旅行， 美食"), ["旅行", "攻略", "美食"])
+
+    def test_titles_are_capped_to_editor_limit(self):
+        self.assertEqual(
+            _normalize_title("北京三天两晚第一次去不踩坑完整攻略超详细收藏版"),
+            "北京三天两晚第一次去不踩坑完整攻略超详细",
+        )
 
     def test_banned_words_deduplicate_repeated_terms(self):
         result = check_banned_words("最好最好最好，唯一唯一")
@@ -129,6 +147,33 @@ class ArticleVisualAndScoreTests(unittest.TestCase):
         self.assertEqual(_infer_image_size_from_request("横版 4K 16:9", None), "4096x2304")
         self.assertEqual(_infer_image_size_from_request("精确 2048x1152", None), "2048x1152")
         self.assertEqual(_infer_image_size_from_request("普通封面", "1024x1536"), "1152x1536")
+
+    def test_storyboard_adds_series_style_and_respects_size_hint(self):
+        shots = [
+            {"scene": "路线总览", "prompt": "北京三日路线地图信息图", "size": "1024x1536"},
+            {"scene": "美食推荐", "prompt": "烤鸭和豆汁的美食卡片", "size": "1024x1536"},
+        ]
+
+        storyboard = _build_image_storyboard(
+            shots,
+            title="北京三天两晚攻略",
+            category="travel",
+            style="奶油红+米白+浅金",
+            size_hint_text="用户要求 2K 3:4 竖版",
+        )
+
+        self.assertIn("北京三天两晚攻略", storyboard["series_style"])
+        self.assertEqual(len(storyboard["shots"]), 2)
+        self.assertEqual(storyboard["shots"][0]["role"], "首图候选")
+        self.assertEqual(storyboard["shots"][0]["size"], "1536x2048")
+        self.assertIn(storyboard["series_style"], storyboard["shots"][1]["prompt"])
+
+    def test_fallback_storyboard_never_returns_empty_for_positive_count(self):
+        shots = _fallback_storyboard_shots("测试笔记", "第一段。第二段。", 3)
+
+        self.assertEqual(len(shots), 3)
+        self.assertTrue(all(s["prompt"] for s in shots))
+        self.assertTrue(all(s["size"] == "1152x1536" for s in shots))
 
 
 if __name__ == "__main__":
