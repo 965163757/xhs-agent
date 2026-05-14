@@ -1113,16 +1113,16 @@ export default function ArticleDetailPage() {
             ))}
           </Menu>
 
-          <Stack spacing={1.25}>
+          <Stack spacing={1}>
             <Box
               sx={{
                 order: 1,
                 ...sectionCardSx,
               }}
             >
-              <Stack direction="row" alignItems="center" spacing={1} sx={sectionHeaderSx}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ ...sectionHeaderSx, flexWrap: 'wrap', gap: 0.6 }}>
                 <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
-                  标题
+                  内容
                 </Typography>
                 <Box sx={{ flex: 1 }} />
                 <Chip
@@ -1136,31 +1136,6 @@ export default function ArticleDetailPage() {
                     color: art.title.length > 20 ? '#DC2626' : '#64748B',
                   }}
                 />
-              </Stack>
-              <Box sx={sectionBodySx}>
-                <TextField
-                  placeholder="输入一个抓人的小红书标题"
-                  fullWidth
-                  size="small"
-                  value={art.title}
-                  onChange={e => setArt({ ...art, title: e.target.value })}
-                  InputProps={{ sx: { fontSize: 17, fontWeight: 700, bgcolor: '#fff', px: 0 } }}
-                  sx={textFieldSx}
-                  error={art.title.length > 20}
-                />
-              </Box>
-            </Box>
-            <Box
-              sx={{
-                order: 3,
-                ...sectionCardSx,
-              }}
-            >
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ ...sectionHeaderSx, flexWrap: 'wrap', gap: 0.6 }}>
-                <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
-                  正文
-                </Typography>
-                <Box sx={{ flex: 1 }} />
                 <Chip
                   size="small"
                   label={`${art.body.length} 字`}
@@ -1184,7 +1159,18 @@ export default function ArticleDetailPage() {
                   }}
                 />
               </Stack>
-              <Box sx={sectionBodySx}>
+              <Box sx={{ ...sectionBodySx, py: 0.85 }}>
+                <TextField
+                  placeholder="输入一个抓人的小红书标题"
+                  fullWidth
+                  size="small"
+                  value={art.title}
+                  onChange={e => setArt({ ...art, title: e.target.value })}
+                  InputProps={{ sx: { fontSize: 17, fontWeight: 700, bgcolor: '#fff', px: 0, py: 0 } }}
+                  sx={textFieldSx}
+                  error={art.title.length > 20}
+                />
+                <Divider sx={{ my: 0.8, borderColor: 'rgba(15,23,42,0.08)' }} />
                 <TextField
                   placeholder="输入正文，建议用短句、分段和情绪钩子增强小红书感"
                   fullWidth
