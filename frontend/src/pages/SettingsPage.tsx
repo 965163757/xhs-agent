@@ -111,54 +111,129 @@ function serializeModelPool(rows: ModelPoolRow[]) {
   return JSON.stringify(normalized, null, 2)
 }
 
-function ModelPoolEditor({
+function ModelQueueEditor({
   title,
+  model,
+  baseUrl,
+  apiKey,
+  onModelChange,
+  onBaseUrlChange,
+  onApiKeyChange,
   value,
   onChange,
   modelPlaceholder,
   sx,
 }: {
   title: string
+  model: string
+  baseUrl: string
+  apiKey: string
+  onModelChange: (value: string) => void
+  onBaseUrlChange: (value: string) => void
+  onApiKeyChange: (value: string) => void
   value: string
   onChange: (value: string) => void
   modelPlaceholder: string
   sx?: any
 }) {
-  const rows = parseModelPool(value)
-  const displayRows = rows.length ? rows : [{ model: '', base_url: '', api_key: '' }]
-  const updateRow = (idx: number, patch: Partial<ModelPoolRow>) => {
-    const next = [...displayRows]
-    next[idx] = { ...next[idx], ...patch }
-    onChange(serializeModelPool(next))
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null)
+  const fallbackRows = parseModelPool(value)
+  const displayRows = [
+    { model, base_url: baseUrl, api_key: apiKey },
+    ...fallbackRows,
+  ]
+  const rows = displayRows.length ? displayRows : [{ model: '', base_url: '', api_key: '' }]
+  const filledCount = rows.filter(r => r.model.trim()).length
+
+  const commitRows = (nextRows: ModelPoolRow[]) => {
+    const normalized = nextRows.map(r => ({
+      model: r.model.trim(),
+      base_url: r.base_url.trim(),
+      api_key: r.api_key.trim(),
+    }))
+    const first = normalized[0] || { model: '', base_url: '', api_key: '' }
+    onModelChange(first.model)
+    onBaseUrlChange(first.base_url)
+    onApiKeyChange(first.api_key)
+    onChange(serializeModelPool(normalized.slice(1)))
   }
-  const addRow = () => onChange(serializeModelPool([...displayRows, { model: '', base_url: '', api_key: '' }]))
+  const updateRow = (idx: number, patch: Partial<ModelPoolRow>) => {
+    const next = [...rows]
+    next[idx] = { ...next[idx], ...patch }
+    commitRows(next)
+  }
+  const addRow = () => commitRows([...rows, { model: '', base_url: '', api_key: '' }])
   const removeRow = (idx: number) => {
-    const next = displayRows.filter((_, i) => i !== idx)
-    onChange(serializeModelPool(next))
+    const next = rows.filter((_, i) => i !== idx)
+    commitRows(next.length ? next : [{ model: '', base_url: '', api_key: '' }])
+  }
+  const moveRow = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= rows.length || to >= rows.length) return
+    const next = [...rows]
+    const [item] = next.splice(from, 1)
+    next.splice(to, 0, item)
+    commitRows(next)
   }
 
   return (
-    <Paper variant="outlined" sx={{ p: 1.2, borderRadius: 2, bgcolor: 'rgba(15,23,42,0.015)', ...sx }}>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+    <Paper variant="outlined" sx={{ p: 1.1, borderRadius: 2, bgcolor: 'rgba(15,23,42,0.015)', ...sx }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.8 }}>
         <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#334155' }}>{title}</Typography>
-        <Chip size="small" label={`${rows.filter(r => r.model.trim()).length} 个候选`} sx={{ height: 20, fontSize: 10.5 }} />
+        <Chip size="small" label={`${filledCount} 个模型`} sx={{ height: 20, fontSize: 10.5 }} />
+        <Chip size="small" label="第 1 个为主模型" color="primary" variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />
         <Box sx={{ flex: 1 }} />
         <Button size="small" variant="outlined" onClick={addRow} sx={{ minHeight: 26, fontSize: 11.5 }}>
-          添加一行
+          添加模型
         </Button>
       </Stack>
-      <Table size="small" sx={{ '& td, & th': { px: 0.55, py: 0.45, borderBottomColor: 'rgba(15,23,42,0.06)' } }}>
+      <Table size="small" sx={{ '& td, & th': { px: 0.5, py: 0.4, borderBottomColor: 'rgba(15,23,42,0.06)' } }}>
         <TableHead>
           <TableRow>
-            <TableCell sx={{ width: '26%', fontSize: 11.5, color: 'text.secondary' }}>模型</TableCell>
-            <TableCell sx={{ width: '36%', fontSize: 11.5, color: 'text.secondary' }}>Base URL</TableCell>
-            <TableCell sx={{ width: '30%', fontSize: 11.5, color: 'text.secondary' }}>API Key</TableCell>
+            <TableCell sx={{ width: 64, fontSize: 11.5, color: 'text.secondary' }}>顺序</TableCell>
+            <TableCell sx={{ width: '23%', fontSize: 11.5, color: 'text.secondary' }}>模型</TableCell>
+            <TableCell sx={{ width: '34%', fontSize: 11.5, color: 'text.secondary' }}>Base URL</TableCell>
+            <TableCell sx={{ width: '31%', fontSize: 11.5, color: 'text.secondary' }}>API Key</TableCell>
             <TableCell sx={{ width: 56 }} />
           </TableRow>
         </TableHead>
         <TableBody>
-          {displayRows.map((row, idx) => (
-            <TableRow key={idx}>
+          {rows.map((row, idx) => (
+            <TableRow
+              key={idx}
+              draggable
+              onDragStart={e => {
+                setDraggingIdx(idx)
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/plain', String(idx))
+              }}
+              onDragOver={e => {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={e => {
+                e.preventDefault()
+                const from = draggingIdx ?? Number(e.dataTransfer.getData('text/plain'))
+                setDraggingIdx(null)
+                moveRow(from, idx)
+              }}
+              onDragEnd={() => setDraggingIdx(null)}
+              sx={{
+                opacity: draggingIdx === idx ? 0.55 : 1,
+                bgcolor: idx === 0 ? 'rgba(255,36,66,0.035)' : 'transparent',
+              }}
+            >
+              <TableCell>
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <Box sx={{ cursor: 'grab', color: 'text.secondary', fontSize: 14, lineHeight: 1 }}>☰</Box>
+                  <Chip
+                    size="small"
+                    label={idx === 0 ? '主' : `备${idx}`}
+                    color={idx === 0 ? 'primary' : 'default'}
+                    variant={idx === 0 ? 'filled' : 'outlined'}
+                    sx={{ height: 20, fontSize: 10.5, minWidth: 34 }}
+                  />
+                </Stack>
+              </TableCell>
               <TableCell>
                 <TextField
                   size="small"
@@ -173,7 +248,7 @@ function ModelPoolEditor({
                 <TextField
                   size="small"
                   fullWidth
-                  placeholder="留空复用主 URL"
+                  placeholder={idx === 0 ? 'https://api.example.com/v1' : '留空复用主 URL'}
                   value={row.base_url}
                   onChange={e => updateRow(idx, { base_url: e.target.value })}
                   inputProps={{ style: { fontSize: 12.5 } }}
@@ -183,7 +258,7 @@ function ModelPoolEditor({
                 <TextField
                   size="small"
                   fullWidth
-                  placeholder="留空复用主 Key"
+                  placeholder={idx === 0 ? 'sk-...' : '留空复用主 Key'}
                   value={row.api_key}
                   onChange={e => updateRow(idx, { api_key: e.target.value })}
                   inputProps={{ style: { fontSize: 12.5 } }}
@@ -198,8 +273,8 @@ function ModelPoolEditor({
           ))}
         </TableBody>
       </Table>
-      <Typography sx={{ fontSize: 11.2, color: 'text.secondary', mt: 0.8 }}>
-        主模型仍优先；候选模型按上到下兜底。每一行都可以单独指定 URL / Key。
+      <Typography sx={{ fontSize: 11.2, color: 'text.secondary', mt: 0.75 }}>
+        可拖拽调整顺序。调用失败时自动降到下一行；失败模型进入冷却，稍后会按原队列顺序重新尝试并恢复主位。
       </Typography>
     </Paper>
   )
@@ -220,8 +295,6 @@ export default function SettingsPage() {
   const [chatModels, setChatModels] = useState('')
   const [imageModels, setImageModels] = useState('')
   const [publicBaseUrl, setPublicBaseUrl] = useState('')
-  const [showChatKey, setShowChatKey] = useState(true)
-  const [showImageKey, setShowImageKey] = useState(true)
 
   const [my, setMy] = useState<MySettings | null>(null)
   const [myChatKey, setMyChatKey] = useState('')
@@ -233,8 +306,6 @@ export default function SettingsPage() {
   const [myChatModels, setMyChatModels] = useState('')
   const [myImageModels, setMyImageModels] = useState('')
   const [useOwnKey, setUseOwnKey] = useState(false)
-  const [showMyChatKey, setShowMyChatKey] = useState(true)
-  const [showMyImageKey, setShowMyImageKey] = useState(true)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -519,42 +590,14 @@ export default function SettingsPage() {
               <Typography sx={{ ...wideSx, fontSize: 13, fontWeight: 700, color: 'text.secondary' }}>
                 文本 / 对话模型
               </Typography>
-              <TextField
-                size="small"
-                label="文本 API Key"
-                placeholder={my?.chat_api_key_set || my?.openai_api_key_set ? '留空则保持不变' : '填入 sk-...'}
-                fullWidth
-                value={myChatKey}
-                type={showMyChatKey ? 'text' : 'password'}
-                onChange={e => setMyChatKey(e.target.value)}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton onClick={() => setShowMyChatKey(v => !v)} edge="end" size="small">
-                        {showMyChatKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <TextField
-                size="small"
-                label="文本 Base URL"
-                placeholder="https://api.openai.com/v1"
-                fullWidth
-                value={myChatBaseUrl}
-                onChange={e => setMyChatBaseUrl(e.target.value)}
-              />
-              <TextField
-                size="small"
-                label="对话模型"
-                placeholder="留空则用全局"
-                fullWidth
-                value={myChatModel}
-                onChange={e => setMyChatModel(e.target.value)}
-              />
-              <ModelPoolEditor
-                title="对话候选模型 / 兜底"
+              <ModelQueueEditor
+                title="对话模型队列"
+                model={myChatModel}
+                baseUrl={myChatBaseUrl}
+                apiKey={myChatKey}
+                onModelChange={setMyChatModel}
+                onBaseUrlChange={setMyChatBaseUrl}
+                onApiKeyChange={setMyChatKey}
                 value={myChatModels}
                 onChange={setMyChatModels}
                 modelPlaceholder="gpt-5.4"
@@ -564,42 +607,14 @@ export default function SettingsPage() {
               <Typography sx={{ ...wideSx, fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 0.3 }}>
                 生图模型
               </Typography>
-              <TextField
-                size="small"
-                label="生图 API Key"
-                placeholder={my?.image_api_key_set ? '留空则保持不变；不填则复用文本 Key' : '可留空复用文本 Key'}
-                fullWidth
-                value={myImageKey}
-                type={showMyImageKey ? 'text' : 'password'}
-                onChange={e => setMyImageKey(e.target.value)}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton onClick={() => setShowMyImageKey(v => !v)} edge="end" size="small">
-                        {showMyImageKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <TextField
-                size="small"
-                label="生图 Base URL"
-                placeholder="可留空复用文本 Base URL"
-                fullWidth
-                value={myImageBaseUrl}
-                onChange={e => setMyImageBaseUrl(e.target.value)}
-              />
-              <TextField
-                size="small"
-                label="图片模型"
-                placeholder="留空则用全局"
-                fullWidth
-                value={myImageModel}
-                onChange={e => setMyImageModel(e.target.value)}
-              />
-              <ModelPoolEditor
-                title="生图候选模型 / 兜底"
+              <ModelQueueEditor
+                title="生图模型队列"
+                model={myImageModel}
+                baseUrl={myImageBaseUrl}
+                apiKey={myImageKey}
+                onModelChange={setMyImageModel}
+                onBaseUrlChange={setMyImageBaseUrl}
+                onApiKeyChange={setMyImageKey}
                 value={myImageModels}
                 onChange={setMyImageModels}
                 modelPlaceholder="gpt-image-2"
@@ -716,41 +731,14 @@ export default function SettingsPage() {
               <Typography sx={{ ...wideSx, fontSize: 13, fontWeight: 700, color: 'text.secondary' }}>
                 文本 / 对话模型
               </Typography>
-              <TextField
-                size="small"
-                label="文本 API Key"
-                placeholder={(s.chat_api_key_set || s.openai_api_key_set) ? '留空则保持不变' : '填入 sk-...'}
-                fullWidth
-                value={chatApiKey}
-                type={showChatKey ? 'text' : 'password'}
-                onChange={e => setChatApiKey(e.target.value)}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton onClick={() => setShowChatKey(v => !v)} edge="end" size="small">
-                        {showChatKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <TextField
-                size="small"
-                label="文本 Base URL"
-                placeholder="https://api.openai.com/v1"
-                fullWidth
-                value={chatBaseUrl}
-                onChange={e => setChatBaseUrl(e.target.value)}
-              />
-              <TextField
-                size="small"
-                label="对话模型"
-                fullWidth
-                value={chatModel}
-                onChange={e => setChatModel(e.target.value)}
-              />
-              <ModelPoolEditor
-                title="对话候选模型 / 兜底"
+              <ModelQueueEditor
+                title="对话模型队列"
+                model={chatModel}
+                baseUrl={chatBaseUrl}
+                apiKey={chatApiKey}
+                onModelChange={setChatModel}
+                onBaseUrlChange={setChatBaseUrl}
+                onApiKeyChange={setChatApiKey}
                 value={chatModels}
                 onChange={setChatModels}
                 modelPlaceholder="gpt-5.4"
@@ -760,41 +748,14 @@ export default function SettingsPage() {
               <Typography sx={{ ...wideSx, fontSize: 13, fontWeight: 700, color: 'text.secondary', pt: 0.3 }}>
                 生图模型
               </Typography>
-              <TextField
-                size="small"
-                label="生图 API Key"
-                placeholder={s.image_api_key_set ? '留空则保持不变；不填则复用文本 Key' : '可留空复用文本 Key'}
-                fullWidth
-                value={imageApiKey}
-                type={showImageKey ? 'text' : 'password'}
-                onChange={e => setImageApiKey(e.target.value)}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton onClick={() => setShowImageKey(v => !v)} edge="end" size="small">
-                        {showImageKey ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <TextField
-                size="small"
-                label="生图 Base URL"
-                placeholder="可留空复用文本 Base URL"
-                fullWidth
-                value={imageBaseUrl}
-                onChange={e => setImageBaseUrl(e.target.value)}
-              />
-              <TextField
-                size="small"
-                label="图片模型"
-                fullWidth
-                value={imageModel}
-                onChange={e => setImageModel(e.target.value)}
-              />
-              <ModelPoolEditor
-                title="生图候选模型 / 兜底"
+              <ModelQueueEditor
+                title="生图模型队列"
+                model={imageModel}
+                baseUrl={imageBaseUrl}
+                apiKey={imageApiKey}
+                onModelChange={setImageModel}
+                onBaseUrlChange={setImageBaseUrl}
+                onApiKeyChange={setImageApiKey}
                 value={imageModels}
                 onChange={setImageModels}
                 modelPlaceholder="gpt-image-2"

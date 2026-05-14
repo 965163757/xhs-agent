@@ -19,10 +19,12 @@ from ..config import Settings, get_settings
 
 
 _clients: Dict[tuple, AsyncOpenAI] = {}
+_model_health: Dict[tuple, Dict[str, Any]] = {}
 _current_settings: contextvars.ContextVar[Optional[Settings]] = contextvars.ContextVar(
     "_current_llm_settings", default=None
 )
 DEFAULT_LLM_TIMEOUT_SECONDS = 180.0
+MODEL_FAILURE_COOLDOWN_SECONDS = 5 * 60.0
 IMAGE_GENERATION_TIMEOUT_SECONDS = 8 * 60.0
 # Secondary JSON/data-url compatibility probes should fail quickly, while the
 # primary image generation/edit upload path keeps the full 8 min cap.
@@ -69,6 +71,7 @@ def _effective_settings(settings: Optional[Settings] = None) -> Settings:
 
 def reset_client() -> None:
     _clients.clear()
+    _model_health.clear()
 
 
 def _client_credentials(s: Settings, kind: str = "chat") -> Tuple[str, str]:
@@ -134,6 +137,61 @@ def _settings_for_model(s: Settings, kind: str, candidate: Dict[str, str]) -> Se
             copied.chat_api_key = api_key
         copied.chat_models = ""
     return copied
+
+
+def _model_health_key(kind: str, s: Settings) -> tuple:
+    if kind == "image":
+        return (kind, s.image_model, s.effective_image_base_url.rstrip("/"), s.effective_image_api_key)
+    return (kind, s.chat_model, s.effective_chat_base_url.rstrip("/"), s.effective_chat_api_key)
+
+
+def _record_model_success(kind: str, s: Settings) -> None:
+    key = _model_health_key(kind, s)
+    state = _model_health.setdefault(key, {})
+    state.update({
+        "failures": 0,
+        "failed_until": 0.0,
+        "last_success_at": time.time(),
+        "last_error": "",
+    })
+
+
+def _record_model_failure(kind: str, s: Settings, exc: BaseException) -> None:
+    key = _model_health_key(kind, s)
+    state = _model_health.setdefault(key, {})
+    failures = int(state.get("failures") or 0) + 1
+    # First failure drops the model below healthier candidates for 5 minutes.
+    # Repeated failures back off more, but periodically expire so the original
+    # queue order is probed again and can recover to the main position.
+    cooldown = min(30 * 60.0, MODEL_FAILURE_COOLDOWN_SECONDS * (2 ** min(failures - 1, 3)))
+    state.update({
+        "failures": failures,
+        "failed_until": time.monotonic() + cooldown,
+        "last_failure_at": time.time(),
+        "last_error": f"{type(exc).__name__}: {exc}"[:500],
+    })
+
+
+def _ordered_model_candidates(s: Settings, kind: str, explicit_model: Optional[str] = None) -> List[Dict[str, str]]:
+    candidates = _model_candidates(s, kind, explicit_model)
+    if explicit_model:
+        return candidates
+    now = time.monotonic()
+    healthy: List[Dict[str, str]] = []
+    cooled_down: List[Dict[str, str]] = []
+    for candidate in candidates:
+        candidate_settings = _settings_for_model(s, kind, candidate)
+        state = _model_health.get(_model_health_key(kind, candidate_settings), {})
+        failed_until = float(state.get("failed_until") or 0)
+        if failed_until > now:
+            cooled_down.append(candidate)
+        else:
+            healthy.append(candidate)
+    # Healthy candidates preserve the configured drag order. Failed candidates
+    # are temporarily demoted, but remain as last-resort fallbacks if all else
+    # fails. Once cooldown expires, they naturally return to their configured
+    # position and act as the timed recovery probe.
+    return healthy + cooled_down
 
 
 def _fallback_error(action: str, errors: List[str]) -> RuntimeError:
@@ -583,7 +641,7 @@ async def chat_completion(
     inline_messages: Optional[List[Dict[str, Any]]] = None
     has_images = _has_images(messages)
     errors: List[str] = []
-    for candidate in _model_candidates(s, "chat", model):
+    for candidate in _ordered_model_candidates(s, "chat", model):
         candidate_settings = _settings_for_model(s, "chat", candidate)
         client = get_client(candidate_settings, kind="chat")
         kwargs: Dict[str, Any] = {
@@ -595,21 +653,27 @@ async def chat_completion(
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice
         try:
-            return await client.chat.completions.create(**kwargs)
+            resp = await client.chat.completions.create(**kwargs)
+            _record_model_success("chat", candidate_settings)
+            return resp
         except Exception as e:
             # Public image URLs are optimal when the provider can fetch them.
             # Some OpenAI-compatible gateways cannot, so retry this same model
             # once by fetching server-side and sending original bytes as data URL.
             errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url}: {type(e).__name__}: {e}")
+            _record_model_failure("chat", candidate_settings, e)
             if not has_images or not _should_retry_inline_images(e):
                 continue
             try:
                 if inline_messages is None:
                     inline_messages = await to_openai_messages(messages, inline_remote_images=True, settings=s)
                 kwargs["messages"] = inline_messages
-                return await client.chat.completions.create(**kwargs)
+                resp = await client.chat.completions.create(**kwargs)
+                _record_model_success("chat", candidate_settings)
+                return resp
             except Exception as inline_e:
                 errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} inline-images: {type(inline_e).__name__}: {inline_e}")
+                _record_model_failure("chat", candidate_settings, inline_e)
                 continue
     raise _fallback_error("文本模型调用失败", errors)
 
@@ -627,7 +691,7 @@ async def chat_completion_stream(
     has_images = _has_images(messages)
     errors: List[str] = []
 
-    for candidate in _model_candidates(s, "chat", model):
+    for candidate in _ordered_model_candidates(s, "chat", model):
         candidate_settings = _settings_for_model(s, "chat", candidate)
         client = get_client(candidate_settings, kind="chat")
         kwargs: Dict[str, Any] = {
@@ -644,6 +708,7 @@ async def chat_completion_stream(
             stream = await client.chat.completions.create(**kwargs)
         except Exception as e:
             errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url}: {type(e).__name__}: {e}")
+            _record_model_failure("chat", candidate_settings, e)
             if has_images and _should_retry_inline_images(e):
                 try:
                     if inline_messages is None:
@@ -652,6 +717,7 @@ async def chat_completion_stream(
                     stream = await client.chat.completions.create(**kwargs)
                 except Exception as inline_e:
                     errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} inline-images: {type(inline_e).__name__}: {inline_e}")
+                    _record_model_failure("chat", candidate_settings, inline_e)
                     continue
             else:
                 continue
@@ -661,11 +727,14 @@ async def chat_completion_stream(
             async for chunk in stream:
                 yielded = True
                 yield chunk
+            _record_model_success("chat", candidate_settings)
             return
         except Exception as e:
             if yielded:
+                _record_model_failure("chat", candidate_settings, e)
                 raise
             errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} stream: {type(e).__name__}: {e}")
+            _record_model_failure("chat", candidate_settings, e)
             if has_images and _should_retry_inline_images(e):
                 try:
                     if inline_messages is None:
@@ -675,11 +744,14 @@ async def chat_completion_stream(
                     async for chunk in retry_stream:
                         yielded = True
                         yield chunk
+                    _record_model_success("chat", candidate_settings)
                     return
                 except Exception as inline_e:
                     if yielded:
+                        _record_model_failure("chat", candidate_settings, inline_e)
                         raise
                     errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} inline-images stream: {type(inline_e).__name__}: {inline_e}")
+                    _record_model_failure("chat", candidate_settings, inline_e)
             continue
     raise _fallback_error("文本流式模型调用失败", errors)
 
@@ -696,10 +768,10 @@ async def generate_image(
     size = _normalize_image_size(size)
     n = _normalize_image_count(n)
     attempt_errors: List[str] = []
-    for candidate in _model_candidates(s, "image"):
+    for candidate in _ordered_model_candidates(s, "image"):
         model_settings = _settings_for_model(s, "image", candidate)
         try:
-            return await _generate_image_once(
+            urls = await _generate_image_once(
                 prompt=prompt,
                 size=size,
                 n=n,
@@ -707,8 +779,11 @@ async def generate_image(
                 reference_images=reference_images,
                 settings=model_settings,
             )
+            _record_model_success("image", model_settings)
+            return urls
         except Exception as e:
             attempt_errors.append(f"{model_settings.image_model}@{model_settings.effective_image_base_url}: {type(e).__name__}: {e}")
+            _record_model_failure("image", model_settings, e)
             continue
     raise _fallback_error("图片生成失败", attempt_errors)
 
@@ -1272,10 +1347,10 @@ async def edit_image(
     size = _normalize_image_size(size)
     n = _normalize_image_count(n)
     attempt_errors: List[str] = []
-    for candidate in _model_candidates(s, "image"):
+    for candidate in _ordered_model_candidates(s, "image"):
         model_settings = _settings_for_model(s, "image", candidate)
         try:
-            return await _edit_image_once(
+            urls = await _edit_image_once(
                 image_url=image_url,
                 mask_url=mask_url,
                 prompt=prompt,
@@ -1284,8 +1359,11 @@ async def edit_image(
                 quality=quality,
                 settings=model_settings,
             )
+            _record_model_success("image", model_settings)
+            return urls
         except Exception as e:
             attempt_errors.append(f"{model_settings.image_model}@{model_settings.effective_image_base_url}: {type(e).__name__}: {e}")
+            _record_model_failure("image", model_settings, e)
             continue
     raise _fallback_error("图片编辑失败", attempt_errors)
 
