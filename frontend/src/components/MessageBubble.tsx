@@ -2,11 +2,13 @@ import { Box, Chip, Collapse, Dialog, IconButton, Stack, Tooltip, Typography } f
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import CloseIcon from '@mui/icons-material/Close'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import Markdown from './Markdown'
+import ImageEditor from './ImageEditor'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import type { ChatMessage } from '../api/client'
+import type { ChatMessage, EditBinding } from '../api/client'
 
 const toolNameZh: Record<string, string> = {
   generate_article: '生成笔记',
@@ -67,6 +69,53 @@ function toAbs(url: string) {
   return url // same-origin /static/images/... works via vite proxy
 }
 
+function uniqImages(values: Array<string | undefined | null>): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of values) {
+    const u = String(raw || '').trim()
+    if (!u || seen.has(u)) continue
+    seen.add(u)
+    out.push(u)
+  }
+  return out
+}
+
+function collectToolImages(payload: any): string[] {
+  if (!payload || payload.ok === false) return []
+  const urls: Array<string | undefined | null> = []
+  const push = (value: any) => {
+    if (Array.isArray(value)) value.forEach(push)
+    else if (typeof value === 'string') urls.push(value)
+  }
+  push(payload.image)
+  push(payload.images)
+  push(payload.generated_cover)
+  push(payload.generated_content_images)
+  push(payload.generated_visual_queue)
+  push(payload.visual_queue)
+  push(payload.workflow?.generated_cover)
+  push(payload.workflow?.generated_content_images)
+  push(payload.workflow?.generated_visual_queue)
+  push(payload.workflow?.visual_queue)
+  push(payload.article?.cover_image)
+  push(payload.article?.images)
+  return uniqImages(urls)
+}
+
+function bindingFromToolArgs(args: any): EditBinding | undefined {
+  if (!args || typeof args !== 'object') return undefined
+  const articleId = Number(args.article_id)
+  const binding: EditBinding = {}
+  if (Number.isFinite(articleId) && articleId > 0) binding.article_id = articleId
+  if (args.role === 'cover' || args.role === 'content') binding.role = args.role
+  if (args.replace_index !== undefined && args.replace_index !== null && args.replace_index !== '') {
+    const idx = Number(args.replace_index)
+    if (Number.isFinite(idx) && idx >= 0) binding.replace_index = idx
+  }
+  return Object.keys(binding).length ? binding : undefined
+}
+
 function scoreValue(score: Record<string, any> | undefined, key: string) {
   if (!score) return undefined
   const direct = Number(score[key])
@@ -97,10 +146,12 @@ function ToolCard({
   call,
   result,
   onImageClick,
+  onImageEdit,
 }: {
   call?: ToolEvent
   result?: ToolEvent
   onImageClick?: (url: string) => void
+  onImageEdit?: (url: string, binding?: EditBinding) => void
 }) {
   const [open, setOpen] = useState(false)
   const [searchParams] = useSearchParams()
@@ -112,12 +163,8 @@ function ToolCard({
   const ok = !result || result.result?.ok !== false
   const errorText: string | undefined = result?.result?.error
   const retryOptions: Array<{ label: string; reason?: string; arguments?: any }> = result?.result?.retry_options || []
-  const images: string[] =
-    (result?.result?.images as string[]) ||
-    (result?.result?.article?.images as string[]) ||
-    []
-  const cover: string | undefined =
-    result?.result?.article?.cover_image || undefined
+  const images: string[] = collectToolImages(result?.result)
+  const editBinding = bindingFromToolArgs(call?.arguments)
   const article = result?.result?.article
   const titles: string[] | undefined = result?.result?.titles || result?.result?.workflow?.title_candidates
   const tags: string[] | undefined = result?.result?.tags
@@ -256,41 +303,78 @@ function ToolCard({
       </Collapse>
 
       {/* Rich previews below the card */}
-      {(cover || images.length > 0) && (
+      {images.length > 0 && (
         <Box sx={{ px: 1.4, pb: 1.4, pt: 0.2 }}>
           <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-            {cover && (
-              <Box
-                component="img"
-                src={toAbs(cover)}
-                onClick={() => onImageClick?.(toAbs(cover))}
-                sx={{
-                  width: 180,
-                  borderRadius: 2,
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  objectFit: 'cover',
-                  cursor: 'pointer',
-                  '&:hover': { opacity: 0.85 },
-                }}
-              />
-            )}
             {images.map((u, i) => (
               <Box
-                key={i}
-                component="img"
-                src={toAbs(u)}
-                onClick={() => onImageClick?.(toAbs(u))}
+                key={`${u}-${i}`}
                 sx={{
                   width: 180,
+                  position: 'relative',
                   borderRadius: 2,
+                  overflow: 'hidden',
                   border: '1px solid',
                   borderColor: 'divider',
-                  objectFit: 'cover',
-                  cursor: 'pointer',
-                  '&:hover': { opacity: 0.85 },
+                  bgcolor: 'background.paper',
                 }}
-              />
+              >
+                <Box
+                  component="img"
+                  src={toAbs(u)}
+                  onClick={() => onImageClick?.(toAbs(u))}
+                  sx={{
+                    width: '100%',
+                    maxHeight: 220,
+                    display: 'block',
+                    objectFit: 'cover',
+                    cursor: 'zoom-in',
+                    '&:hover': { opacity: 0.9 },
+                  }}
+                />
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  sx={{
+                    position: 'absolute',
+                    left: 6,
+                    right: 6,
+                    bottom: 6,
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <Chip
+                    size="small"
+                    label={i === 0 && name !== 'generate_image' ? '结果图' : `图片 ${i + 1}`}
+                    sx={{
+                      height: 22,
+                      fontSize: 11,
+                      bgcolor: 'rgba(0,0,0,0.62)',
+                      color: '#fff',
+                      backdropFilter: 'blur(8px)',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                  <Chip
+                    size="small"
+                    icon={<AutoFixHighIcon sx={{ fontSize: '14px !important', color: '#fff !important' }} />}
+                    label="继续编辑"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onImageEdit?.(u, editBinding)
+                    }}
+                    sx={{
+                      height: 22,
+                      fontSize: 11,
+                      bgcolor: 'rgba(255,39,65,0.88)',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      pointerEvents: 'auto',
+                      '&:hover': { bgcolor: '#D61030' },
+                    }}
+                  />
+                </Stack>
+              </Box>
             ))}
           </Stack>
         </Box>
@@ -557,6 +641,15 @@ export default function MessageBubble({
   const isUser = msg.role === 'user'
   const pairs = pairToolEvents((msg.tool_events as ToolEvent[]) || [])
   const [previewImg, setPreviewImg] = useState<string | null>(null)
+  const [editorImg, setEditorImg] = useState<string | null>(null)
+  const [editorBinding, setEditorBinding] = useState<EditBinding | undefined>(undefined)
+  const [localEditedImages, setLocalEditedImages] = useState<Array<{ url: string; binding?: EditBinding }>>([])
+
+  function openEditor(url: string, binding?: EditBinding) {
+    setPreviewImg(null)
+    setEditorImg(url)
+    setEditorBinding(binding)
+  }
 
   return (
     <Box sx={{ py: 1.5 }}>
@@ -607,8 +700,65 @@ export default function MessageBubble({
           )}
 
           {pairs.map((p, i) => (
-            <ToolCard key={i} call={p.call} result={p.result} onImageClick={setPreviewImg} />
+            <ToolCard
+              key={i}
+              call={p.call}
+              result={p.result}
+              onImageClick={setPreviewImg}
+              onImageEdit={openEditor}
+            />
           ))}
+
+          {localEditedImages.length > 0 && (
+            <Box sx={{ my: 1 }}>
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.7 }}>
+                继续编辑产生的新图
+              </Typography>
+              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                {localEditedImages.map((item, i) => (
+                  <Box
+                    key={`${item.url}-${i}`}
+                    sx={{
+                      width: 180,
+                      position: 'relative',
+                      borderRadius: 2,
+                      overflow: 'hidden',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      bgcolor: 'background.paper',
+                    }}
+                  >
+                    <Box
+                      component="img"
+                      src={toAbs(item.url)}
+                      onClick={() => setPreviewImg(toAbs(item.url))}
+                      sx={{ width: '100%', maxHeight: 220, display: 'block', objectFit: 'cover', cursor: 'zoom-in' }}
+                    />
+                    <Chip
+                      size="small"
+                      icon={<AutoFixHighIcon sx={{ fontSize: '14px !important', color: '#fff !important' }} />}
+                      label="继续编辑"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openEditor(item.url, item.binding)
+                      }}
+                      sx={{
+                        position: 'absolute',
+                        right: 6,
+                        bottom: 6,
+                        height: 22,
+                        fontSize: 11,
+                        bgcolor: 'rgba(255,39,65,0.88)',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        '&:hover': { bgcolor: '#D61030' },
+                      }}
+                    />
+                  </Box>
+                ))}
+              </Stack>
+            </Box>
+          )}
 
           {msg.content ? (
             isUser ? (
@@ -659,6 +809,23 @@ export default function MessageBubble({
           <CloseIcon />
         </IconButton>
         {previewImg && (
+          <Chip
+            icon={<AutoFixHighIcon sx={{ color: '#fff !important' }} />}
+            label="编辑这张图"
+            onClick={() => openEditor(previewImg)}
+            sx={{
+              position: 'absolute',
+              top: 12,
+              left: 12,
+              zIndex: 1,
+              bgcolor: 'rgba(255,39,65,0.92)',
+              color: '#fff',
+              fontWeight: 700,
+              '&:hover': { bgcolor: '#D61030' },
+            }}
+          />
+        )}
+        {previewImg && (
           <Box
             component="img"
             src={previewImg}
@@ -666,6 +833,21 @@ export default function MessageBubble({
           />
         )}
       </Dialog>
+      <ImageEditor
+        open={!!editorImg}
+        src={editorImg}
+        binding={editorBinding}
+        defaultMode="variation"
+        onClose={() => setEditorImg(null)}
+        onDone={(newUrl) => {
+          setLocalEditedImages(prev => [
+            { url: newUrl, binding: editorBinding },
+            ...prev.filter(item => item.url !== newUrl),
+          ])
+          setPreviewImg(toAbs(newUrl))
+          toast.success('图片编辑完成，已展示在当前聊天里')
+        }}
+      />
     </Box>
   )
 }
