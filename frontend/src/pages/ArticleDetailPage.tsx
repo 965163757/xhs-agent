@@ -1229,7 +1229,7 @@ export default function ArticleDetailPage() {
             <Box sx={{ order: 2, mt: 0.2, p: 1.25, borderRadius: 2.5, bgcolor: 'rgba(255,255,255,0.86)', border: '1px solid rgba(15,23,42,0.08)' }}>
               <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" sx={{ gap: 0.8, mb: 1 }}>
                 <Typography sx={{ fontSize: 12, color: 'text.secondary', fontWeight: 700 }}>
-                  图片队列（第 1 张 = 首图/封面）
+                  图片队列
                 </Typography>
                 <Chip size="small" label={`共 ${visualImages.length} 张`} sx={{ height: 20, fontSize: 11 }} />
                 <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
