@@ -37,6 +37,7 @@ import ChatPanel from '../components/ChatPanel'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor, getSession } from '../chatStore'
 import { formatBeijingDateTime } from '../utils/time'
+import { navigateWithTransition } from '../utils/navigation'
 import { useAuth } from '../AuthContext'
 
 const suggestions = [
@@ -164,6 +165,15 @@ export default function ChatPage() {
     if (articleId) next.article = articleId
     setParams(next, { replace: true })
   }, [articleId, setParams, currentSessionKey])
+
+  const handleArticleCreated = useCallback((id: number, conversationId?: number | null) => {
+    const activeConvId = conversationId || getSession(currentSessionKey).conversationId || (convId ? Number(convId) : null)
+    const qs = new URLSearchParams()
+    if (activeConvId) qs.set('c', String(activeConvId))
+    qs.set('chat', '1')
+    qs.set('from', 'agent')
+    navigateWithTransition(nav, `/articles/${id}?${qs.toString()}`)
+  }, [nav, convId, currentSessionKey])
 
   const removeConvo = async (id: number) => {
     setDeleteConvoId(id)
@@ -481,7 +491,7 @@ export default function ChatPage() {
             placeholder={article ? '继续对这篇笔记说…' : '发消息给小红书助手…'}
             heroActions={article ? undefined : suggestions}
             onConversationCreated={handleConversationCreated}
-            onArticleCreated={(id) => nav(`/articles/${id}`)}
+            onArticleCreated={handleArticleCreated}
             quickActions={
               article
                 ? [

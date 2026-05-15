@@ -46,7 +46,7 @@ export default function ChatPanel({
   article?: Article | null
   onArticleMayChange?: (article?: Article | null) => void
   onConversationCreated?: (id: number) => void
-  onArticleCreated?: (id: number) => void
+  onArticleCreated?: (id: number, conversationId?: number | null) => void
   quickActions?: Array<{ label: string; prompt: string }>
   heroActions?: HeroAction[]
   heroTitle?: string

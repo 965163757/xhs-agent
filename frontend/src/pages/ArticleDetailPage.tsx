@@ -488,6 +488,7 @@ export default function ArticleDetailPage() {
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [sidebar, setSidebar] = useState(false)
   const [mobileChat, setMobileChat] = useState(false)
+  const [agentChatPulse, setAgentChatPulse] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
   const [articleOptions, setArticleOptions] = useState<Article[]>([])
   const [articleMenuAnchor, setArticleMenuAnchor] = useState<HTMLElement | null>(null)
@@ -516,6 +517,7 @@ export default function ArticleDetailPage() {
   const selectedCount = selectedConvoIds.length
   const allSelected = convos.length > 0 && selectedCount === convos.length
   const selectedConversation = convId ? convos.find(c => c.id === Number(convId)) : undefined
+  const shouldOpenChat = params.get('chat') === '1'
   const conversationRows = useMemo<ConversationRow[]>(() => {
     if (!isAdmin) {
       return convos.map(conversation => ({ type: 'conversation', key: `conversation-${conversation.id}`, conversation }))
@@ -721,6 +723,20 @@ export default function ArticleDetailPage() {
       }).catch(() => {})
     }
   }, [convId, currentSessionKey, load])
+
+  useEffect(() => {
+    if (!shouldOpenChat) return
+    if (window.matchMedia('(max-width:1199.95px)').matches) setMobileChat(true)
+    setAgentChatPulse(true)
+    const timer = window.setTimeout(() => setAgentChatPulse(false), 900)
+    setParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete('chat')
+      next.delete('from')
+      return next
+    }, { replace: true })
+    return () => window.clearTimeout(timer)
+  }, [shouldOpenChat, setParams])
 
   const handleConversationCreated = useCallback((newConvId: number) => {
     const newKey = `conv:${newConvId}`
@@ -932,6 +948,7 @@ export default function ArticleDetailPage() {
   return (
     <Box
       ref={rootRef}
+      className={agentChatPulse ? 'agent-opened-article' : undefined}
       sx={{
         height: 'calc(100dvh - 56px)',
         minHeight: 0,
@@ -942,6 +959,7 @@ export default function ArticleDetailPage() {
     >
       {/* left: chat panel */}
       <Box
+        className={agentChatPulse ? 'agent-chat-open-pulse' : undefined}
         sx={{
           width: { lg: layout.left },
           flexShrink: 0,

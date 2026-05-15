@@ -227,10 +227,12 @@ async function persistToBackend(key: string, articleId?: number | null) {
   const title = s.messages.find(m => m.role === 'user')?.content?.slice(0, 30) || '新对话'
   try {
     if (s.conversationId) {
-      await updateConversation(s.conversationId, {
+      const payload: any = {
         messages: s.messages as any,
         title,
-      })
+      }
+      if (articleId !== undefined) payload.article_id = articleId
+      await updateConversation(s.conversationId, payload)
     } else {
       const conv = await createConversation({
         title,
@@ -253,7 +255,7 @@ export async function sendMessage(
     images?: string[]
     onArticleMayChange?: (article?: Article | null) => void
     onConversationCreated?: (id: number) => void
-    onArticleCreated?: (id: number) => void
+    onArticleCreated?: (id: number, conversationId?: number | null) => void
   } = {}
 ) {
   const s = ensure(key)
@@ -292,6 +294,8 @@ export async function sendMessage(
     ...buildContextPreface(opts.article, content),
     ...s.messages.slice(0, -1),
   ]
+  let activeArticleId: number | null | undefined = opts.article?.id
+  let articleCreatedNotified = false
 
   // Throttled save: persist at most once every 3s during streaming
   let lastPersist = Date.now()
@@ -299,7 +303,7 @@ export async function sendMessage(
     const now = Date.now()
     if (now - lastPersist > 3000) {
       lastPersist = now
-      persistToBackend(key, opts.article?.id)
+      persistToBackend(key, activeArticleId)
     }
   }
 
@@ -322,8 +326,16 @@ export async function sendMessage(
         } else if (ev.type === 'tool_result') {
           cur.status = ev.elapsed_ms ? `${toolLabel[ev.name] || ev.name}完成，用时 ${(ev.elapsed_ms / 1000).toFixed(1)}s，整合结果…` : '整合结果…'
           opts.onArticleMayChange?.(ev.result?.article || null)
-          if (ev.name === 'generate_article' && ev.result?.ok && ev.result?.article?.id) {
-            opts.onArticleCreated?.(ev.result.article.id)
+          const createdByTool = ['generate_article', 'create_complete_note_workflow', 'create_article', 'imitate_article_style'].includes(ev.name)
+          const createdArticleId = Number(ev.result?.article?.id || 0)
+          if (!opts.article?.id && createdByTool && ev.result?.ok && createdArticleId > 0) {
+            activeArticleId = createdArticleId
+            const cid = ensure(key).conversationId
+            if (cid) updateConversation(cid, { article_id: createdArticleId } as any).catch(() => {})
+            if (!articleCreatedNotified) {
+              articleCreatedNotified = true
+              opts.onArticleCreated?.(createdArticleId, cid)
+            }
           }
           maybePersist()
         } else if (ev.type === 'done') {
@@ -387,7 +399,7 @@ export async function sendMessage(
   }
 
   // Final persist with complete messages
-  await persistToBackend(key, opts.article?.id)
+  await persistToBackend(key, activeArticleId)
 }
 
 export async function reconnectTask(

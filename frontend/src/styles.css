@@ -252,6 +252,64 @@ body {
   background-color: var(--paper);
 }
 
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+::view-transition-old(root) {
+  animation-name: route-fade-out;
+}
+
+::view-transition-new(root) {
+  animation-name: route-rise-in;
+}
+
+.route-soft-opening body {
+  opacity: .94;
+  transform: scale(.996);
+  transition: opacity 180ms ease, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.agent-opened-article {
+  animation: article-soft-enter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.agent-chat-open-pulse {
+  animation: agent-chat-dock 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes route-fade-out {
+  from { opacity: 1; filter: blur(0); transform: scale(1); }
+  to { opacity: .45; filter: blur(2px); transform: scale(.992); }
+}
+
+@keyframes route-rise-in {
+  from { opacity: 0; filter: blur(6px); transform: translateY(18px) scale(.992); }
+  to { opacity: 1; filter: blur(0); transform: translateY(0) scale(1); }
+}
+
+@keyframes article-soft-enter {
+  from { opacity: 0; transform: translateY(16px) scale(.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes agent-chat-dock {
+  0% {
+    transform: translateX(-16px);
+    box-shadow: inset -1px 0 0 rgba(190, 92, 77, 0), 0 0 0 rgba(190, 92, 77, 0);
+  }
+  48% {
+    transform: translateX(0);
+    box-shadow: inset -2px 0 0 rgba(190, 92, 77, .7), 14px 0 36px rgba(190, 92, 77, .12);
+  }
+  100% {
+    transform: translateX(0);
+    box-shadow: inset -1px 0 0 rgba(190, 92, 77, 0), 0 0 0 rgba(190, 92, 77, 0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;
