@@ -201,7 +201,7 @@ function ToolCard({
         border: '1px solid',
         borderColor: running ? 'warning.main' : ok ? 'divider' : 'error.main',
         bgcolor: running ? 'action.hover' : 'action.selected',
-        borderRadius: 2,
+        borderRadius: 0,
         my: 1,
         overflow: 'hidden',
       }}
@@ -217,8 +217,8 @@ function ToolCard({
           sx={{
             width: 8,
             height: 8,
-            borderRadius: '50%',
-            bgcolor: running ? '#F59E0B' : ok ? '#16A34A' : '#DC2626',
+            borderRadius: 0,
+            bgcolor: running ? 'warning.main' : ok ? 'success.main' : 'error.main',
           }}
         />
         <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.primary' }}>
@@ -366,7 +366,7 @@ function ToolCard({
                 sx={{
                   width: 180,
                   position: 'relative',
-                  borderRadius: 2,
+                  borderRadius: 0,
                   overflow: 'hidden',
                   border: '1px solid',
                   borderColor: 'divider',
@@ -403,15 +403,14 @@ function ToolCard({
                     sx={{
                       height: 22,
                       fontSize: 11,
-                      bgcolor: 'rgba(0,0,0,0.62)',
-                      color: '#fff',
-                      backdropFilter: 'blur(8px)',
+                      bgcolor: 'text.primary',
+                      color: 'background.paper',
                       pointerEvents: 'none',
                     }}
                   />
                   <Chip
                     size="small"
-                    icon={<AutoFixHighIcon sx={{ fontSize: '14px !important', color: '#fff !important' }} />}
+                    icon={<AutoFixHighIcon sx={{ fontSize: '14px !important', color: 'var(--paper) !important' }} />}
                     label="继续编辑"
                     onClick={(e) => {
                       e.stopPropagation()
@@ -420,11 +419,11 @@ function ToolCard({
                     sx={{
                       height: 22,
                       fontSize: 11,
-                      bgcolor: 'rgba(255,39,65,0.88)',
-                      color: '#fff',
+                      bgcolor: 'primary.main',
+                      color: 'background.paper',
                       cursor: 'pointer',
                       pointerEvents: 'auto',
-                      '&:hover': { bgcolor: '#D61030' },
+                      '&:hover': { bgcolor: 'primary.dark' },
                     }}
                   />
                 </Stack>
@@ -447,7 +446,7 @@ function ToolCard({
               border: '1px solid',
               borderColor: 'divider',
               bgcolor: 'background.paper',
-              borderRadius: 2,
+              borderRadius: 0,
               p: 1.2,
             }}
           >
@@ -484,7 +483,7 @@ function ToolCard({
                 component="a"
                 clickable
                 href={`/articles/${article.id}${searchParams.get('c') ? `?c=${searchParams.get('c')}` : ''}`}
-                sx={{ bgcolor: 'text.primary', color: '#fff', '&:hover': { bgcolor: 'text.primary' } }}
+                sx={{ bgcolor: 'text.primary', color: 'background.paper', '&:hover': { bgcolor: 'text.primary' } }}
               />
               <IconButton
                 size="small"
@@ -536,7 +535,7 @@ function ToolCard({
 
       {outline && (
         <Box sx={{ px: 1.4, pb: 1.4 }}>
-          <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.2, bgcolor: 'background.paper' }}>
+          <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 0, p: 1.2, bgcolor: 'background.paper' }}>
             {outline.hook && (
               <>
                 <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>钩子</Typography>
@@ -568,9 +567,9 @@ function ToolCard({
 
       {diagnostic && (
         <Box sx={{ px: 1.4, pb: 1.4 }}>
-          <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 1.2, bgcolor: 'background.paper' }}>
+          <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 0, p: 1.2, bgcolor: 'background.paper' }}>
             <Typography sx={{ fontSize: 13, fontWeight: 700, mb: 0.5 }}>
-              {diagnostic.publish_ready ? '✅ 可发布' : '⚠️ 建议修改再发'}
+              {diagnostic.publish_ready ? 'READY · 可发布' : 'CHECK · 建议修改再发'}
             </Typography>
             {['risks', 'missing', 'suggestions'].map(k =>
               Array.isArray(diagnostic[k]) && diagnostic[k].length > 0 ? (
@@ -614,7 +613,7 @@ function ToolCard({
             sx={{
               border: '1px solid',
               borderColor: 'divider',
-              borderRadius: 2,
+              borderRadius: 0,
               p: 1.2,
               bgcolor: 'background.paper',
               fontSize: 13,
@@ -689,8 +688,10 @@ function pairToolEvents(events: ToolEvent[]): Array<{ call?: ToolEvent; result?:
 
 export default function MessageBubble({
   msg,
+  streaming = false,
 }: {
   msg: ChatMessage & { tool_events?: ToolEvent[] }
+  streaming?: boolean
 }) {
   const isUser = msg.role === 'user'
   const pairs = pairToolEvents((msg.tool_events as ToolEvent[]) || [])
@@ -712,18 +713,20 @@ export default function MessageBubble({
           sx={{
             width: 28,
             height: 28,
-            borderRadius: '50%',
+            borderRadius: isUser ? '50%' : 0,
             flexShrink: 0,
-            bgcolor: isUser ? 'action.hover' : 'transparent',
-            background: isUser ? undefined : 'linear-gradient(135deg,#ef4444,#f97316)',
-            color: isUser ? 'text.primary' : '#fff',
+            bgcolor: isUser ? 'text.primary' : 'background.paper',
+            border: isUser ? 0 : '1px solid',
+            borderColor: 'text.primary',
+            color: isUser ? 'background.paper' : 'primary.main',
             display: 'grid',
             placeItems: 'center',
             fontSize: 12,
             fontWeight: 700,
+            fontFamily: isUser ? 'var(--serif)' : 'var(--mono)',
           }}
         >
-          {isUser ? '我' : '红'}
+          {isUser ? '我' : 'A'}
         </Box>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary', mb: 0.6 }}>
@@ -741,7 +744,7 @@ export default function MessageBubble({
                   sx={{
                     maxWidth: 220,
                     maxHeight: 180,
-                    borderRadius: 2,
+                    borderRadius: 0,
                     border: '1px solid',
                     borderColor: 'divider',
                     objectFit: 'cover',
@@ -775,7 +778,7 @@ export default function MessageBubble({
                     sx={{
                       width: 180,
                       position: 'relative',
-                      borderRadius: 2,
+                      borderRadius: 0,
                       overflow: 'hidden',
                       border: '1px solid',
                       borderColor: 'divider',
@@ -790,7 +793,7 @@ export default function MessageBubble({
                     />
                     <Chip
                       size="small"
-                      icon={<AutoFixHighIcon sx={{ fontSize: '14px !important', color: '#fff !important' }} />}
+                      icon={<AutoFixHighIcon sx={{ fontSize: '14px !important', color: 'var(--paper) !important' }} />}
                       label="继续编辑"
                       onClick={(e) => {
                         e.stopPropagation()
@@ -802,10 +805,10 @@ export default function MessageBubble({
                         bottom: 6,
                         height: 22,
                         fontSize: 11,
-                        bgcolor: 'rgba(255,39,65,0.88)',
-                        color: '#fff',
+                        bgcolor: 'primary.main',
+                        color: 'background.paper',
                         cursor: 'pointer',
-                        '&:hover': { bgcolor: '#D61030' },
+                        '&:hover': { bgcolor: 'primary.dark' },
                       }}
                     />
                   </Box>
@@ -831,7 +834,7 @@ export default function MessageBubble({
             )
           ) : null}
 
-          {!isUser && msg.content && (
+          {!isUser && msg.content && !streaming && (
             <Tooltip title="复制内容">
               <IconButton
                 size="small"
@@ -858,13 +861,13 @@ export default function MessageBubble({
       >
         <IconButton
           onClick={() => setPreviewImg(null)}
-          sx={{ position: 'absolute', top: 8, right: 8, color: '#fff', zIndex: 1 }}
+          sx={{ position: 'absolute', top: 8, right: 8, color: 'background.paper', zIndex: 1 }}
         >
           <CloseIcon />
         </IconButton>
         {previewImg && (
           <Chip
-            icon={<AutoFixHighIcon sx={{ color: '#fff !important' }} />}
+            icon={<AutoFixHighIcon sx={{ color: 'var(--paper) !important' }} />}
             label="编辑这张图"
             onClick={() => openEditor(previewImg)}
             sx={{
@@ -872,10 +875,10 @@ export default function MessageBubble({
               top: 12,
               left: 12,
               zIndex: 1,
-              bgcolor: 'rgba(255,39,65,0.92)',
-              color: '#fff',
+              bgcolor: 'primary.main',
+              color: 'background.paper',
               fontWeight: 700,
-              '&:hover': { bgcolor: '#D61030' },
+              '&:hover': { bgcolor: 'primary.dark' },
             }}
           />
         )}

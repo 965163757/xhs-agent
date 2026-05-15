@@ -8,27 +8,27 @@ const STEPS = [
   {
     title: '智能创作对话',
     desc: '在「创作」页直接告诉 AI 你想写什么，它会帮你生成标题、正文、标签和封面图。支持多轮对话持续优化。',
-    icon: '💬',
+    code: 'S01',
   },
   {
     title: '笔记管理 & 编辑',
     desc: '所有生成的笔记都在「笔记」页。点击进入可编辑内容、管理图片、查看版本历史，还能一键诊断质量。',
-    icon: '📝',
+    code: 'S02',
   },
   {
     title: '多维度智能诊断',
     desc: '4 个 AI 专家从内容质量、视觉表现、增长潜力、用户体验维度打分，给出优化建议和模拟评论。',
-    icon: '🔍',
+    code: 'S03',
   },
   {
     title: '违禁词实时检测',
     desc: '编辑笔记时自动检测小红书违禁词（广告法、医疗、金融等），并提供安全替代用语。',
-    icon: '🛡️',
+    code: 'S04',
   },
   {
     title: '热门标签推荐',
     desc: '输入标签时自动推荐热门标签，显示热度等级（S/A/B/C），帮你获得更多流量曝光。',
-    icon: '🏷️',
+    code: 'S05',
   },
 ]
 
@@ -54,9 +54,10 @@ export default function OnboardingDialog() {
       fullWidth
       PaperProps={{
         sx: {
-          borderRadius: 4,
           overflow: 'hidden',
           bgcolor: 'background.paper',
+          border: '1px solid',
+          borderColor: 'text.primary',
         },
       }}
     >
@@ -69,8 +70,25 @@ export default function OnboardingDialog() {
       </IconButton>
 
       <Box sx={{ px: 4, pt: 5, pb: 3, textAlign: 'center' }}>
-        <Box sx={{ fontSize: 48, mb: 2 }}>{current.icon}</Box>
-        <Typography sx={{ fontSize: 20, fontWeight: 700, mb: 1.5 }}>
+        <Box
+          className="editorial-mono"
+          sx={{
+            width: 52,
+            height: 52,
+            mx: 'auto',
+            mb: 2,
+            display: 'grid',
+            placeItems: 'center',
+            border: '1px solid',
+            borderColor: 'text.primary',
+            color: 'primary.main',
+            fontSize: 11,
+            fontWeight: 800,
+          }}
+        >
+          {current.code}
+        </Box>
+        <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 22, fontWeight: 800, mb: 1.5, letterSpacing: -0.4 }}>
           {current.title}
         </Typography>
         <Typography sx={{ fontSize: 14, color: 'text.secondary', lineHeight: 1.7, minHeight: 60 }}>
@@ -84,9 +102,8 @@ export default function OnboardingDialog() {
             key={i}
             sx={{
               width: i === step ? 20 : 8,
-              height: 8,
-              borderRadius: 4,
-              bgcolor: i === step ? '#FF2741' : '#E0E0E0',
+              height: 3,
+              bgcolor: i === step ? 'primary.main' : 'divider',
               transition: 'all .2s',
             }}
           />
@@ -98,7 +115,7 @@ export default function OnboardingDialog() {
           <Button
             variant="outlined"
             onClick={() => setStep(s => s - 1)}
-            sx={{ borderRadius: 99, px: 3, textTransform: 'none' }}
+            sx={{ px: 3, textTransform: 'none' }}
           >
             上一步
           </Button>
@@ -108,10 +125,8 @@ export default function OnboardingDialog() {
             variant="contained"
             onClick={handleClose}
             sx={{
-              borderRadius: 99,
               px: 4,
               textTransform: 'none',
-              background: 'linear-gradient(135deg,#FF2741,#FF7A00)',
               fontWeight: 600,
             }}
           >
@@ -122,10 +137,8 @@ export default function OnboardingDialog() {
             variant="contained"
             onClick={() => setStep(s => s + 1)}
             sx={{
-              borderRadius: 99,
               px: 4,
               textTransform: 'none',
-              background: 'linear-gradient(135deg,#FF2741,#FF7A00)',
               fontWeight: 600,
             }}
           >

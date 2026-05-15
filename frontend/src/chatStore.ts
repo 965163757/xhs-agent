@@ -251,7 +251,7 @@ export async function sendMessage(
   opts: {
     article?: Article | null
     images?: string[]
-    onArticleMayChange?: () => void
+    onArticleMayChange?: (article?: Article | null) => void
     onConversationCreated?: (id: number) => void
     onArticleCreated?: (id: number) => void
   } = {}
@@ -321,7 +321,7 @@ export async function sendMessage(
           cur.status = ev.message || `${toolLabel[ev.name] || ev.name}…`
         } else if (ev.type === 'tool_result') {
           cur.status = ev.elapsed_ms ? `${toolLabel[ev.name] || ev.name}完成，用时 ${(ev.elapsed_ms / 1000).toFixed(1)}s，整合结果…` : '整合结果…'
-          opts.onArticleMayChange?.()
+          opts.onArticleMayChange?.(ev.result?.article || null)
           if (ev.name === 'generate_article' && ev.result?.ok && ev.result?.article?.id) {
             opts.onArticleCreated?.(ev.result.article.id)
           }
@@ -393,7 +393,7 @@ export async function sendMessage(
 export async function reconnectTask(
   key: string,
   taskId: string,
-  opts: { onArticleMayChange?: () => void } = {}
+  opts: { onArticleMayChange?: (article?: Article | null) => void } = {}
 ) {
   const s = ensure(key)
   if (s.streaming) return
@@ -433,7 +433,11 @@ export async function reconnectTask(
       cur.taskId = null
       cur.abort = undefined
       bump(key)
-      opts.onArticleMayChange?.()
+      const latestArticleEvent = [...(task.events || [])]
+        .reverse()
+        .find((ev): ev is Extract<StreamEvent, { type: 'tool_result' }> => ev.type === 'tool_result' && !!ev.result?.article)
+      const latestArticle = latestArticleEvent?.result?.article
+      opts.onArticleMayChange?.(latestArticle || null)
       return
     }
 
@@ -474,7 +478,7 @@ export async function reconnectTask(
           cur.status = ev.message || `${toolLabel[ev.name] || ev.name}…`
         } else if (ev.type === 'tool_result') {
           cur.status = ev.elapsed_ms ? `${toolLabel[ev.name] || ev.name}完成，用时 ${(ev.elapsed_ms / 1000).toFixed(1)}s，整合结果…` : '整合结果…'
-          opts.onArticleMayChange?.()
+          opts.onArticleMayChange?.(ev.result?.article || null)
         } else if (ev.type === 'done') {
           cur.status = ''
         } else if (ev.type === 'cancelled') {

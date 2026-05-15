@@ -625,10 +625,10 @@ export default function AiImageLabPage() {
   } : undefined
 
   return (
-    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1680, mx: 'auto' }}>
+    <Box className="editorial-page" sx={{ p: { xs: 2, md: 3 }, maxWidth: 1680, mx: 'auto' }}>
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} sx={{ mb: 2 }}>
         <Box flex={1}>
-          <Typography sx={{ fontSize: 26, fontWeight: 900, letterSpacing: -0.8 }}>PS式图片拆层编辑 Demo</Typography>
+          <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 30, fontWeight: 800, letterSpacing: -0.8 }}>PS式图片拆层编辑 Demo</Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary', mt: 0.5 }}>
             核心走本地像素拆层：扁平图 → 清理背景 + 透明 PNG 图层 → 拖拽/缩放/删除/调层级 → 合成导出；AI 只作为整体生成和局部重绘的增强能力。
           </Typography>
@@ -636,8 +636,8 @@ export default function AiImageLabPage() {
         <Chip icon={<LayersIcon />} label="真实透明 PNG 像素图层，不再只是画框" sx={{ alignSelf: { xs: 'flex-start', md: 'center' } }} />
       </Stack>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '360px minmax(0,1fr) 360px' }, gap: 2 }}>
-        <Paper sx={{ p: 2, borderRadius: 3 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '280px minmax(0,1fr) 280px', xl: '360px minmax(0,1fr) 360px' }, gap: 2 }}>
+        <Paper sx={{ p: 2, borderRadius: 0 }}>
           <Typography sx={{ fontSize: 15, fontWeight: 800, mb: 1 }}>1. 整图生成 / 上传</Typography>
           <TextField label="整图生成 Prompt" multiline minRows={5} fullWidth value={prompt} onChange={e => setPrompt(e.target.value)} />
           <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
@@ -681,7 +681,7 @@ export default function AiImageLabPage() {
           <Button size="small" startIcon={<RestartAltIcon />} onClick={() => { setSelection(null); setResultUrl('') }} sx={{ mt: 1 }}>清空选区/结果</Button>
         </Paper>
 
-        <Paper sx={{ p: 2, borderRadius: 3, minHeight: 720, display: 'flex', flexDirection: 'column' }}>
+        <Paper sx={{ p: 2, borderRadius: 0, minHeight: 720, display: 'flex', flexDirection: 'column' }}>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
             <Typography sx={{ fontSize: 15, fontWeight: 800 }}>智能画布</Typography>
             {natural.w > 0 && <Chip size="small" label={`${natural.w}×${natural.h}`} />}
@@ -689,26 +689,26 @@ export default function AiImageLabPage() {
             <Box flex={1} />
             {busy && <Chip color="warning" size="small" label={busy} />}
           </Stack>
-          <Box sx={{ flex: 1, minHeight: 620, borderRadius: 3, border: '1px dashed', borderColor: 'divider', bgcolor: 'rgba(0,0,0,0.025)', display: 'grid', placeItems: 'center', overflow: 'hidden', p: 2 }}>
+          <Box sx={{ flex: 1, minHeight: 620, borderRadius: 0, border: '1px dashed', borderColor: 'divider', bgcolor: 'background.default', display: 'grid', placeItems: 'center', overflow: 'hidden', p: 2 }}>
             {!imageUrl ? (
               <Stack alignItems="center" spacing={1} sx={{ color: 'text.secondary' }}><ImageSearchIcon sx={{ fontSize: 48, opacity: 0.5 }} /><Typography>先生成或上传一张图片</Typography></Stack>
             ) : (
               <Box sx={{ position: 'relative', maxWidth: '100%', maxHeight: '100%' }} onPointerMove={onCanvasPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
-                <Box component="img" ref={imgRef} src={absUrl(imageUrl)} onLoad={e => { const img = e.currentTarget; setNatural({ w: img.naturalWidth, h: img.naturalHeight }); requestAnimationFrame(syncDisplayRect) }} onPointerDown={onCanvasPointerDown} draggable={false} sx={{ maxWidth: '100%', maxHeight: '680px', display: 'block', userSelect: 'none', cursor: 'crosshair', borderRadius: 2, boxShadow: '0 22px 60px rgba(0,0,0,0.14)' }} />
+                <Box component="img" ref={imgRef} src={absUrl(imageUrl)} onLoad={e => { const img = e.currentTarget; setNatural({ w: img.naturalWidth, h: img.naturalHeight }); requestAnimationFrame(syncDisplayRect) }} onPointerDown={onCanvasPointerDown} draggable={false} sx={{ maxWidth: '100%', maxHeight: '680px', display: 'block', userSelect: 'none', cursor: 'crosshair', borderRadius: 0, boxShadow: 'none', border: '1px solid', borderColor: 'divider' }} />
                 {layers.filter(l => !l.hidden).sort((a, b) => a.zIndex - b.zIndex).map(layer => {
                   const selected = layer.id === selectedLayerId
                   const isText = layer.type === 'text'
                   const isImage = layer.type === 'image_overlay'
                   return (
-                    <Box key={layer.id} onPointerDown={e => { e.stopPropagation(); setSelection(null); setSelectedLayerId(layer.id); setDrag({ id: layer.id, mode: 'move', start: eventToImagePoint(e), original: { x: layer.x, y: layer.y, w: layer.w, h: layer.h } }) }} sx={{ position: 'absolute', ...layerStyle(layer), border: selected ? '2px solid #FF2442' : (isImage ? '1px solid transparent' : '1px dashed rgba(255,36,66,0.65)'), bgcolor: isText ? 'rgba(255,255,255,0.08)' : (isImage ? 'transparent' : 'rgba(255,36,66,0.06)'), cursor: 'move', overflow: 'hidden', zIndex: 20 + layer.zIndex, borderRadius: 0.8, opacity: layer.opacity ?? 1 }}>
+                    <Box key={layer.id} onPointerDown={e => { e.stopPropagation(); setSelection(null); setSelectedLayerId(layer.id); setDrag({ id: layer.id, mode: 'move', start: eventToImagePoint(e), original: { x: layer.x, y: layer.y, w: layer.w, h: layer.h } }) }} sx={{ position: 'absolute', ...layerStyle(layer), border: selected ? '2px solid var(--accent)' : (isImage ? '1px solid transparent' : '1px dashed rgba(200,48,46,0.65)'), bgcolor: isText ? 'rgba(255,255,255,0.08)' : (isImage ? 'transparent' : 'rgba(200,48,46,0.06)'), cursor: 'move', overflow: 'hidden', zIndex: 20 + layer.zIndex, borderRadius: 0, opacity: layer.opacity ?? 1 }}>
                       {isImage && layer.imageUrl && <Box component="img" src={layer.imageUrl} sx={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }} />}
                       {isText && <Typography sx={{ p: 0.3, fontFamily: layer.fontFamily, fontWeight: layer.fontWeight, fontSize: `${Math.max(8, (layer.fontSize || 36) * (display.w / natural.w))}px`, lineHeight: 1.12, color: layer.color, whiteSpace: 'pre-wrap', overflow: 'hidden', textShadow: '0 1px 8px rgba(255,255,255,0.65)' }}>{layer.text || layer.label}</Typography>}
-                      {!isText && !isImage && <Chip size="small" label={layer.label} sx={{ m: 0.4, height: 20, fontSize: 10, bgcolor: selected ? '#FF2442' : 'rgba(0,0,0,0.55)', color: '#fff' }} />}
-                      <Box onPointerDown={e => { e.stopPropagation(); setSelectedLayerId(layer.id); setDrag({ id: layer.id, mode: 'resize', start: eventToImagePoint(e), original: { x: layer.x, y: layer.y, w: layer.w, h: layer.h } }) }} sx={{ position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, bgcolor: selected ? '#FF2442' : 'rgba(0,0,0,0.45)', cursor: 'nwse-resize' }} />
+                      {!isText && !isImage && <Chip size="small" label={layer.label} sx={{ m: 0.4, height: 20, fontSize: 10, bgcolor: selected ? 'primary.main' : 'rgba(26,24,20,0.72)', color: 'background.paper' }} />}
+                      <Box onPointerDown={e => { e.stopPropagation(); setSelectedLayerId(layer.id); setDrag({ id: layer.id, mode: 'resize', start: eventToImagePoint(e), original: { x: layer.x, y: layer.y, w: layer.w, h: layer.h } }) }} sx={{ position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, bgcolor: selected ? 'primary.main' : 'rgba(0,0,0,0.45)', cursor: 'nwse-resize' }} />
                     </Box>
                   )
                 })}
-                {selectionStyle && <Box sx={{ position: 'absolute', border: '2px solid #FF2442', boxShadow: '0 0 0 9999px rgba(0,0,0,0.28)', pointerEvents: 'none', borderRadius: 0.8, ...selectionStyle }} />}
+                {selectionStyle && <Box sx={{ position: 'absolute', border: '2px solid var(--accent)', boxShadow: '0 0 0 9999px rgba(0,0,0,0.28)', pointerEvents: 'none', borderRadius: 0, ...selectionStyle }} />}
               </Box>
             )}
           </Box>
@@ -716,10 +716,10 @@ export default function AiImageLabPage() {
         </Paper>
 
         <Stack spacing={2}>
-          <Paper sx={{ p: 2, borderRadius: 3 }}>
+          <Paper sx={{ p: 2, borderRadius: 0 }}>
             <Typography sx={{ fontSize: 15, fontWeight: 800, mb: 1 }}>图层面板</Typography>
             {layers.length === 0 ? <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>点击「PS式像素拆层」后会出现可移动的真实透明 PNG 图层；AI 语义识别只作为辅助。</Typography> : [...layers].sort((a, b) => b.zIndex - a.zIndex).map(layer => (
-              <Box key={layer.id} onClick={() => setSelectedLayerId(layer.id)} sx={{ p: 1, border: '1px solid', borderColor: layer.id === selectedLayerId ? '#FF2442' : 'divider', borderRadius: 2, mb: 1, cursor: 'pointer', bgcolor: layer.hidden ? 'action.hover' : 'background.paper' }}>
+              <Box key={layer.id} onClick={() => setSelectedLayerId(layer.id)} sx={{ p: 1, border: '1px solid', borderColor: layer.id === selectedLayerId ? 'primary.main' : 'divider', borderRadius: 0, mb: 1, cursor: 'pointer', bgcolor: layer.hidden ? 'action.hover' : 'background.paper' }}>
                 <Stack direction="row" spacing={0.6} alignItems="center">
                   {layer.type === 'image_overlay' && layer.imageUrl && <Box component="img" src={layer.imageUrl} sx={{ width: 30, height: 30, objectFit: 'contain', bgcolor: 'rgba(0,0,0,0.04)', borderRadius: 1, border: '1px solid', borderColor: 'divider' }} />}
                   <Chip size="small" label={layer.type} sx={{ height: 20, fontSize: 10 }} />
@@ -735,7 +735,7 @@ export default function AiImageLabPage() {
             ))}
           </Paper>
 
-          <Paper sx={{ p: 2, borderRadius: 3 }}>
+          <Paper sx={{ p: 2, borderRadius: 0 }}>
             <Typography sx={{ fontSize: 15, fontWeight: 800, mb: 1 }}>选中层编辑</Typography>
             {!selectedLayer ? <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>请选择一个图层。</Typography> : (
               <Stack spacing={1}>
@@ -787,13 +787,13 @@ export default function AiImageLabPage() {
             )}
           </Paper>
 
-          <Paper sx={{ p: 2, borderRadius: 3 }}>
+          <Paper sx={{ p: 2, borderRadius: 0 }}>
             <Typography sx={{ fontSize: 15, fontWeight: 800, mb: 1 }}>结果图</Typography>
             {busy && <CircularProgress size={18} sx={{ mb: 1 }} />}
-            {resultUrl ? <><Box component="img" src={absUrl(resultUrl)} sx={{ width: '100%', borderRadius: 2, border: '1px solid', borderColor: 'divider' }} /><Stack direction="row" spacing={1} sx={{ mt: 1 }}><Button size="small" variant="contained" onClick={useResultAsCurrent}>设为当前底图</Button><Button size="small" variant="outlined" href={absUrl(resultUrl)} target="_blank">打开</Button></Stack></> : <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>编辑/导出成功后会显示在这里。</Typography>}
+            {resultUrl ? <><Box component="img" src={absUrl(resultUrl)} sx={{ width: '100%', borderRadius: 0, border: '1px solid', borderColor: 'divider' }} /><Stack direction="row" spacing={1} sx={{ mt: 1 }}><Button size="small" variant="contained" onClick={useResultAsCurrent}>设为当前底图</Button><Button size="small" variant="outlined" href={absUrl(resultUrl)} target="_blank">打开</Button></Stack></> : <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>编辑/导出成功后会显示在这里。</Typography>}
           </Paper>
 
-          <Paper sx={{ p: 2, borderRadius: 3 }}>
+          <Paper sx={{ p: 2, borderRadius: 0 }}>
             <Typography sx={{ fontSize: 15, fontWeight: 800, mb: 1 }}>调用日志</Typography>
             {logs.length === 0 ? <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>暂无调用。</Typography> : logs.map((l, i) => <Box key={i} sx={{ p: 1, borderBottom: i === logs.length - 1 ? 0 : '1px solid', borderColor: 'divider' }}><Stack direction="row" spacing={0.6} alignItems="center"><Chip size="small" color={l.ok === false ? 'error' : 'success'} label={l.ok === false ? '失败' : '成功'} sx={{ height: 20, fontSize: 10 }} /><Typography sx={{ fontSize: 13, fontWeight: 700 }}>{l.title}</Typography>{l.elapsedSec !== undefined && <Typography sx={{ fontSize: 11, color: 'text.secondary', ml: 'auto' }}>{l.elapsedSec.toFixed(1)}s</Typography>}</Stack><Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.3 }} noWrap>{l.detail}</Typography></Box>)}
           </Paper>

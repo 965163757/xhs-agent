@@ -2001,7 +2001,8 @@ async def tool_score_article(args: Dict[str, Any]) -> Dict[str, Any]:
         art.score = data
         await s.commit()
         await s.refresh(art)
-    return {"ok": True, "score": data, "article_id": aid}
+        article_payload = _article_payload(art)
+    return {"ok": True, "score": data, "article_id": aid, "article": article_payload}
 
 
 def _diagnosis_result_payload(

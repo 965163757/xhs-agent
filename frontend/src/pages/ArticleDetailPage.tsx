@@ -56,24 +56,25 @@ import { getSession, loadFromConversation, migrateSession, reconnectTask, resetS
 import { appDateTimestamp, formatBeijingDateTime } from '../utils/time'
 import { useAuth } from '../AuthContext'
 
-const EDITOR_LAYOUT_KEY = 'xhs_article_editor_layout_v2'
+const EDITOR_LAYOUT_KEY = 'xhs_article_editor_layout_v3'
+const DEFAULT_EDITOR_LAYOUT = { left: 300, right: 318 }
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))
 }
 
 function getInitialEditorLayout() {
-  if (typeof window === 'undefined') return { left: 360, right: 372 }
+  if (typeof window === 'undefined') return DEFAULT_EDITOR_LAYOUT
   try {
     const raw = localStorage.getItem(EDITOR_LAYOUT_KEY)
-    if (!raw) return { left: 360, right: 372 }
+    if (!raw) return DEFAULT_EDITOR_LAYOUT
     const parsed = JSON.parse(raw)
     return {
-      left: clamp(Number(parsed.left) || 360, 280, 520),
-      right: clamp(Number(parsed.right) || 372, 340, 560),
+      left: clamp(Number(parsed.left) || DEFAULT_EDITOR_LAYOUT.left, 270, 440),
+      right: clamp(Number(parsed.right) || DEFAULT_EDITOR_LAYOUT.right, 276, 430),
     }
   } catch {
-    return { left: 360, right: 372 }
+    return DEFAULT_EDITOR_LAYOUT
   }
 }
 
@@ -88,7 +89,7 @@ function adaptiveBodyRows(
   bannedCount: number,
 ) {
   const leftWidth = viewport.width >= 1200 ? layout.left + 10 : 0
-  const rightWidth = viewport.width >= 1536 ? layout.right + 10 : 0
+  const rightWidth = viewport.width >= 1280 ? layout.right + 10 : 0
   const centerWidth = clamp(viewport.width - leftWidth - rightWidth, 360, 1280)
   const charsPerLine = clamp(Math.floor((centerWidth - 56) / 14), 30, 82)
   const visualLines = body
@@ -126,22 +127,22 @@ function adaptiveBodyRows(
 }
 
 function fitEditorLayout(layout: { left: number; right: number }, rootWidth: number) {
-  const showRight = rootWidth >= 1536
-  const minCenter = rootWidth >= 1900 ? 820 : rootWidth >= 1536 ? 700 : 560
-  let left = clamp(layout.left, 280, 520)
-  let right = clamp(layout.right, 340, 560)
+  const showRight = rootWidth >= 1040
+  const minCenter = rootWidth >= 1900 ? 820 : rootWidth >= 1280 ? 620 : 500
+  let left = clamp(layout.left, 270, 440)
+  let right = clamp(layout.right, 276, 430)
 
   if (showRight) {
     const overflow = left + right + minCenter + 24 - rootWidth
     if (overflow > 0) {
-      const leftRoom = left - 280
-      const rightRoom = right - 340
+      const leftRoom = left - 270
+      const rightRoom = right - 276
       const room = Math.max(1, leftRoom + rightRoom)
-      left = clamp(left - Math.ceil(overflow * (leftRoom / room)), 280, 520)
-      right = clamp(right - Math.ceil(overflow * (rightRoom / room)), 340, 560)
+      left = clamp(left - Math.ceil(overflow * (leftRoom / room)), 270, 440)
+      right = clamp(right - Math.ceil(overflow * (rightRoom / room)), 276, 430)
     }
   } else {
-    left = clamp(left, 280, Math.max(280, Math.min(520, rootWidth - minCenter - 12)))
+    left = clamp(left, 270, Math.max(270, Math.min(440, rootWidth - minCenter - 12)))
   }
 
   return { left, right }
@@ -173,8 +174,8 @@ function ResizeGrip({
         borderColor: 'divider',
         transition: 'background .15s',
         '&:hover': {
-          bgcolor: 'rgba(255,36,66,0.04)',
-          '& .resize-grip-line': { bgcolor: '#FF2741', height: 54 },
+          bgcolor: 'var(--accent-soft)',
+          '& .resize-grip-line': { bgcolor: 'var(--accent)', height: 54 },
         },
       }}
     >
@@ -184,7 +185,7 @@ function ResizeGrip({
           width: 3,
           height: 36,
           borderRadius: 1,
-          bgcolor: 'rgba(148,163,184,0.65)',
+          bgcolor: 'var(--rule)',
           transition: 'all .15s',
         }}
       />
@@ -232,10 +233,10 @@ function ImageFrame({
         position: 'relative',
         width: '100%',
         aspectRatio: aspect,
-        borderRadius: 1,
+        borderRadius: 0,
         overflow: 'hidden',
         border: '1px solid',
-        borderColor: dragging ? '#FF2741' : 'divider',
+        borderColor: dragging ? 'primary.main' : 'divider',
         bgcolor: 'background.default',
         opacity: dragging ? 0.55 : 1,
         cursor: draggable ? 'grab' : 'default',
@@ -282,8 +283,8 @@ function ImageFrame({
             position: 'absolute',
             top: 6,
             left: 6,
-            bgcolor: 'rgba(15,23,42,0.72)',
-            color: '#fff',
+            bgcolor: 'text.primary',
+            color: 'background.paper',
             fontSize: 10,
             height: 18,
             '& .MuiChip-label': { px: 0.8 },
@@ -310,12 +311,12 @@ function ImageFrame({
                 size="small"
                 onClick={onEdit}
                 sx={{
-                  bgcolor: '#FF2741',
-                  color: '#fff',
+                  bgcolor: 'primary.main',
+                  color: 'background.paper',
                   width: 28,
                   height: 28,
-                  borderRadius: '50%',
-                  '&:hover': { bgcolor: '#D61030' },
+                  borderRadius: 0,
+                  '&:hover': { bgcolor: 'primary.dark' },
                 }}
               >
                 <AutoFixHighIcon sx={{ fontSize: 14 }} />
@@ -326,11 +327,11 @@ function ImageFrame({
             size="small"
             onClick={e => setAnchor(e.currentTarget)}
             sx={{
-              bgcolor: 'rgba(31,31,31,0.85)',
-              color: '#fff',
+              bgcolor: 'text.primary',
+              color: 'background.paper',
               width: 28,
               height: 28,
-              borderRadius: '50%',
+              borderRadius: 0,
               '&:hover': { bgcolor: 'text.primary' },
             }}
           >
@@ -367,7 +368,7 @@ function ImageFrame({
           </MenuItem>
         )}
         {onRemove && src && (
-          <MenuItem onClick={() => { onRemove(); setAnchor(null) }} sx={{ color: '#D61030' }}>
+          <MenuItem onClick={() => { onRemove(); setAnchor(null) }} sx={{ color: 'error.main' }}>
             <DeleteOutlineIcon fontSize="small" sx={{ mr: 1 }} />
             删除
           </MenuItem>
@@ -402,20 +403,20 @@ function ScoreRadar({ score }: { score: Record<string, any> }) {
     <Box sx={{ height: 220, display: 'grid', placeItems: 'center' }}>
       <svg width="260" height="220" viewBox="0 0 260 220">
         {[0.25, 0.5, 0.75, 1].map(scale => (
-          <polygon key={scale} points={polygon(metrics.map((_, i) => point(i, scale)))} fill="none" stroke="#EEE9E1" strokeWidth="1" />
+          <polygon key={scale} points={polygon(metrics.map((_, i) => point(i, scale)))} fill="none" stroke="var(--rule)" strokeWidth="1" />
         ))}
         {metrics.map((_, i) => {
           const p = point(i)
-          return <line key={i} x1={cx} y1={cy} x2={p[0]} y2={p[1]} stroke="#EEE9E1" strokeWidth="1" />
+          return <line key={i} x1={cx} y1={cy} x2={p[0]} y2={p[1]} stroke="var(--rule)" strokeWidth="1" />
         })}
-        <polygon points={polygon(dataPoints)} fill="rgba(255,39,65,0.13)" stroke="#FF2741" strokeWidth="2.2" />
+        <polygon points={polygon(dataPoints)} fill="rgba(200,48,46,0.13)" stroke="#C8302E" strokeWidth="2.2" />
         {dataPoints.map((p, i) => (
-          <circle key={i} cx={p[0]} cy={p[1]} r="3.5" fill="#FF2741" />
+          <circle key={i} cx={p[0]} cy={p[1]} r="3.5" fill="#C8302E" />
         ))}
         {metrics.map(([, label], i) => {
           const p = point(i, 1.18)
           return (
-            <text key={label} x={p[0]} y={p[1]} textAnchor="middle" dominantBaseline="middle" fontSize="12" fill="#8C8C8C" fontWeight="600">
+            <text key={label} x={p[0]} y={p[1]} textAnchor="middle" dominantBaseline="middle" fontSize="12" fill="#8C8578" fontWeight="600">
               {label}
             </text>
           )
@@ -672,6 +673,15 @@ export default function ArticleDetailPage() {
     setSavedArt(a)
   }, [id])
 
+  const handleArticleMayChange = useCallback((next?: Article | null) => {
+    if (next && Number(next.id) === Number(id)) {
+      setArt(next)
+      setSavedArt(next)
+      return
+    }
+    load()
+  }, [id, load])
+
   useEffect(() => {
     load()
   }, [load])
@@ -706,7 +716,7 @@ export default function ArticleDetailPage() {
       if (current.streaming) return
       loadFromConversation(Number(convId), currentSessionKey).then((activeTaskId) => {
         if (activeTaskId) {
-          reconnectTask(currentSessionKey, activeTaskId, { onArticleMayChange: load })
+          reconnectTask(currentSessionKey, activeTaskId, { onArticleMayChange: handleArticleMayChange })
         }
       }).catch(() => {})
     }
@@ -775,18 +785,18 @@ export default function ArticleDetailPage() {
   ), 0.58, 1)
   const textFieldSx = {
     '& .MuiOutlinedInput-root': {
-      borderRadius: 1,
-      bgcolor: '#fff',
+      borderRadius: 0,
+      bgcolor: 'background.paper',
       alignItems: 'flex-start',
       '& fieldset': { borderColor: 'transparent' },
       '&:hover fieldset': { borderColor: 'transparent' },
       '&.Mui-focused fieldset': { borderColor: 'transparent', borderWidth: 1 },
     },
-    '& .MuiInputLabel-root.Mui-focused': { color: '#FF2741' },
+    '& .MuiInputLabel-root.Mui-focused': { color: 'primary.main' },
   }
   const toolbarButtonSx = {
     height: 30,
-    borderRadius: 1,
+    borderRadius: 0,
     px: 1.35,
     fontSize: 12,
     fontWeight: 700,
@@ -795,24 +805,26 @@ export default function ArticleDetailPage() {
     boxShadow: 'none',
   }
   const sectionCardSx = {
-    borderRadius: 1,
-    bgcolor: '#fff',
-    border: '1px solid rgba(15,23,42,0.10)',
-    boxShadow: '0 8px 24px rgba(15,23,42,0.04)',
-    overflow: 'hidden',
+    borderRadius: 0,
+    bgcolor: 'background.paper',
+    border: '1px solid',
+    borderColor: 'divider',
+    boxShadow: 'none',
+    overflow: 'visible',
   }
   const sectionHeaderSx = {
     px: 1.25,
     py: 0.6,
     minHeight: 34,
-    borderBottom: '1px solid rgba(15,23,42,0.08)',
-    bgcolor: 'rgba(248,250,252,0.72)',
-    '& .MuiChip-root': { borderRadius: 1 },
+    borderBottom: '1px solid',
+    borderColor: 'divider',
+    bgcolor: 'var(--paper-soft)',
+    '& .MuiChip-root': { borderRadius: 0 },
   }
   const sectionBodySx = {
     px: 1.25,
     py: 0.75,
-    bgcolor: '#fff',
+    bgcolor: 'background.paper',
   }
   const imageBindingForPosition = (pos: number) => (
     pos === 0
@@ -901,7 +913,7 @@ export default function ArticleDetailPage() {
         <Chip
           size="small"
           label={`综合 ${getScoreValue(art.score, 'overall')}`}
-          sx={{ bgcolor: '#E6F7EC', color: '#0F8C3D', fontSize: 11, height: 20 }}
+          sx={{ bgcolor: 'rgba(62,107,78,0.10)', color: 'success.main', fontSize: 11, height: 20 }}
         />
       </Stack>
       <ScoreRadar score={art.score || {}} />
@@ -924,8 +936,7 @@ export default function ArticleDetailPage() {
         height: 'calc(100dvh - 56px)',
         minHeight: 0,
         display: 'flex',
-        bgcolor: '#F8F7F5',
-        background: 'linear-gradient(135deg, #FFF7F3 0%, #F8FAFC 36%, #FFFFFF 100%)',
+        bgcolor: 'background.default',
         overflow: 'hidden',
       }}
     >
@@ -937,8 +948,7 @@ export default function ArticleDetailPage() {
           display: { xs: 'none', lg: 'flex' },
           flexDirection: 'column',
           minHeight: 0,
-          bgcolor: 'rgba(255,255,255,0.86)',
-          backdropFilter: 'blur(10px)',
+          bgcolor: 'background.paper',
         }}
       >
         <Stack
@@ -957,7 +967,7 @@ export default function ArticleDetailPage() {
               {convId ? `对话 #${convId}` : '新对话'} · 当前上下文：笔记 #{art.id}
             </Typography>
             {selectedConversation?.article_id && selectedConversation.article_id !== art.id && (
-              <Typography noWrap sx={{ fontSize: 10.5, color: '#D97706' }}>
+              <Typography noWrap sx={{ fontSize: 10.5, color: 'warning.main' }}>
                 该对话原关联笔记 #{selectedConversation.article_id}，仍可在当前笔记继续；指定 ID 时 Agent 可跨笔记操作
               </Typography>
             )}
@@ -971,7 +981,7 @@ export default function ArticleDetailPage() {
         <ChatPanel
           article={art}
           sessionKey={currentSessionKey}
-          onArticleMayChange={load}
+          onArticleMayChange={handleArticleMayChange}
           onConversationCreated={handleConversationCreated}
           showHeader={false}
           quickActions={[
@@ -982,7 +992,7 @@ export default function ArticleDetailPage() {
             { label: '段落润色', prompt: '帮我润色正文，让表达更自然流畅' },
             { label: '生成封面', prompt: '为这篇笔记生成一张干净、有高级感的竖版封面' },
             { label: '内容配图', prompt: '根据这篇笔记按段落生成 4 张 3:4 竖版内容配图；如我指定 2K/4K/比例，按指定尺寸来' },
-            { label: '打分', prompt: '帮我从内容、视觉、增长、互动四个维度给这篇笔记打分' },
+            { label: '打分', prompt: `请直接调用 score_article 工具，对 article_id=${art.id} 做内容、视觉、增长、互动、综合五维评分，并写回这篇笔记的 score。` },
             { label: '发布前诊断', prompt: '帮我诊断一下能不能发，重点检查违禁词和 CTA' },
           ]}
         />
@@ -1019,12 +1029,11 @@ export default function ArticleDetailPage() {
               mb: 1.4,
               px: 1.1,
               py: 0.85,
-              bgcolor: 'rgba(255,255,255,0.92)',
-              backdropFilter: 'blur(12px)',
+              bgcolor: 'background.paper',
               border: '1px solid',
-              borderColor: 'rgba(15,23,42,0.08)',
-              borderRadius: 1,
-              boxShadow: '0 10px 30px rgba(15,23,42,0.06)',
+              borderColor: 'divider',
+              borderRadius: 0,
+              boxShadow: 'none',
               flexWrap: 'wrap',
               gap: 0.8,
               '& .MuiChip-root': { borderRadius: 1 },
@@ -1033,7 +1042,7 @@ export default function ArticleDetailPage() {
             <IconButton onClick={() => nav(-1)} size="small">
               <ArrowBackIcon />
             </IconButton>
-            <Typography sx={{ fontSize: 20, fontWeight: 600, letterSpacing: -0.2 }}>
+            <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 20, fontWeight: 700, letterSpacing: -0.2 }}>
               笔记 #{art.id}
             </Typography>
             <Chip
@@ -1047,11 +1056,11 @@ export default function ArticleDetailPage() {
                 icon={<PersonOutlineIcon sx={{ fontSize: '13px !important' }} />}
                 label={art.owner_user.username || `用户 ${art.user_id || ''}`}
                 sx={{
-                  bgcolor: 'rgba(59,130,246,0.08)',
-                  color: '#2563EB',
+                bgcolor: 'var(--accent-soft)',
+                color: 'primary.main',
                   fontSize: 11,
                   height: 20,
-                  '& .MuiChip-icon': { color: '#2563EB' },
+                  '& .MuiChip-icon': { color: 'primary.main' },
                 }}
               />
             )}
@@ -1062,10 +1071,10 @@ export default function ArticleDetailPage() {
               sx={{
                 ...toolbarButtonSx,
                 maxWidth: { xs: 170, lg: 190 },
-                borderColor: 'rgba(15,23,42,0.12)',
-                color: '#475569',
-                bgcolor: '#fff',
-                '&:hover': { borderColor: 'rgba(15,23,42,0.26)', bgcolor: '#F8FAFC' },
+                borderColor: 'divider',
+                color: 'text.secondary',
+                bgcolor: 'background.paper',
+                '&:hover': { borderColor: 'text.primary', bgcolor: 'background.default' },
               }}
             >
               <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1076,7 +1085,7 @@ export default function ArticleDetailPage() {
               <Chip
                 size="small"
                 label={`评分 ${getScoreValue(art.score, 'overall')}`}
-                sx={{ bgcolor: '#E6F7EC', color: '#0F8C3D', fontSize: 11, height: 20 }}
+                sx={{ bgcolor: 'background.paper', color: 'success.main', borderColor: 'success.main', fontSize: 11, height: 20 }}
               />
             )}
             <Box sx={{ flex: 1 }} />
@@ -1098,10 +1107,10 @@ export default function ArticleDetailPage() {
               startIcon={extractingTemplate ? <CircularProgress size={14} /> : undefined}
               sx={{
                 ...toolbarButtonSx,
-                borderColor: 'rgba(15,23,42,0.12)',
-                color: '#475569',
-                bgcolor: '#fff',
-                '&:hover': { borderColor: 'rgba(15,23,42,0.26)', bgcolor: '#F8FAFC' },
+                borderColor: 'divider',
+                color: 'text.secondary',
+                bgcolor: 'background.paper',
+                '&:hover': { borderColor: 'text.primary', bgcolor: 'background.default' },
               }}
             >
               {extractingTemplate ? '提取中' : '提取模板'}
@@ -1112,10 +1121,10 @@ export default function ArticleDetailPage() {
               size="small"
               sx={{
                 ...toolbarButtonSx,
-                borderColor: 'rgba(99,102,241,0.22)',
-                color: '#4F46E5',
-                bgcolor: 'rgba(99,102,241,0.06)',
-                '&:hover': { borderColor: 'rgba(99,102,241,0.35)', bgcolor: 'rgba(99,102,241,0.10)' },
+                borderColor: 'primary.main',
+                color: 'primary.main',
+                bgcolor: 'var(--accent-soft)',
+                '&:hover': { borderColor: 'primary.main', bgcolor: 'var(--accent-soft)' },
               }}
             >
               诊断
@@ -1127,10 +1136,10 @@ export default function ArticleDetailPage() {
               disabled={publishing || art.status === 'published'}
               sx={{
                 ...toolbarButtonSx,
-                borderColor: art.status === 'published' ? 'rgba(15,23,42,0.12)' : 'transparent',
-                color: art.status === 'published' ? '#64748B' : '#fff',
-                bgcolor: art.status === 'published' ? '#F1F5F9' : '#16A34A',
-                '&:hover': { bgcolor: art.status === 'published' ? '#F1F5F9' : '#15803D', boxShadow: 'none' },
+                borderColor: art.status === 'published' ? 'divider' : 'transparent',
+                color: art.status === 'published' ? 'text.secondary' : 'background.paper',
+                bgcolor: art.status === 'published' ? 'background.default' : 'success.main',
+                '&:hover': { bgcolor: art.status === 'published' ? 'background.default' : 'success.main', boxShadow: 'none' },
               }}
             >
               {art.status === 'published' ? '已发布' : publishing ? '发布中' : '发布'}
@@ -1142,9 +1151,9 @@ export default function ArticleDetailPage() {
               disabled={saving}
               sx={{
                 ...toolbarButtonSx,
-                color: '#fff',
-                background: 'linear-gradient(135deg,#FF2442,#FF6A3D)',
-                '&:hover': { background: 'linear-gradient(135deg,#E11D3C,#F05A2D)', boxShadow: 'none' },
+                color: 'background.paper',
+                bgcolor: 'primary.main',
+                '&:hover': { bgcolor: 'primary.dark', boxShadow: 'none' },
               }}
             >
               保存
@@ -1200,21 +1209,21 @@ export default function ArticleDetailPage() {
                     minHeight: 24,
                     height: 24,
                     px: 0.8,
-                    borderRadius: 1,
+                    borderRadius: 0,
                     fontSize: 11,
                     fontWeight: 800,
                     boxShadow: 'none',
-                    color: showVersions ? '#fff' : '#64748B',
-                    bgcolor: showVersions ? '#334155' : 'rgba(15,23,42,0.04)',
+                    color: showVersions ? 'background.paper' : 'text.secondary',
+                    bgcolor: showVersions ? 'text.primary' : 'background.default',
                     '&:hover': {
-                      bgcolor: showVersions ? '#1E293B' : 'rgba(15,23,42,0.08)',
+                      bgcolor: showVersions ? 'text.primary' : 'background.default',
                       boxShadow: 'none',
                     },
                   }}
                 >
                   版本{versions.length > 0 ? ` ${versions.length}` : ''}
                 </Button>
-                <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'text.primary' }}>
                   内容
                 </Typography>
                 <Box sx={{ flex: 1 }} />
@@ -1225,8 +1234,8 @@ export default function ArticleDetailPage() {
                     height: 20,
                     fontSize: 10.5,
                     fontWeight: 700,
-                    bgcolor: art.title.length > 20 ? '#FEF2F2' : '#F1F5F9',
-                    color: art.title.length > 20 ? '#DC2626' : '#64748B',
+                    bgcolor: art.title.length > 20 ? 'rgba(139,37,32,0.08)' : 'background.paper',
+                    color: art.title.length > 20 ? 'error.main' : 'text.secondary',
                   }}
                 />
                 <Chip
@@ -1236,8 +1245,8 @@ export default function ArticleDetailPage() {
                     height: 20,
                     fontSize: 10.5,
                     fontWeight: 700,
-                    bgcolor: '#F1F5F9',
-                    color: '#64748B',
+                    bgcolor: 'background.paper',
+                    color: 'text.secondary',
                   }}
                 />
                 <Chip
@@ -1247,8 +1256,8 @@ export default function ArticleDetailPage() {
                     height: 20,
                     fontSize: 10.5,
                     fontWeight: 700,
-                    bgcolor: art.body.length < 300 || art.body.length > 1000 ? '#FFF7ED' : '#ECFDF3',
-                    color: art.body.length < 300 || art.body.length > 1000 ? '#C2410C' : '#15803D',
+                    bgcolor: art.body.length < 300 || art.body.length > 1000 ? 'rgba(168,112,41,0.08)' : 'rgba(62,107,78,0.08)',
+                    color: art.body.length < 300 || art.body.length > 1000 ? 'warning.main' : 'success.main',
                   }}
                 />
               </Stack>
@@ -1258,16 +1267,17 @@ export default function ArticleDetailPage() {
                   sx={{
                     ...sectionBodySx,
                     py: 0.65,
-                    bgcolor: 'rgba(248,250,252,0.9)',
-                    borderBottom: '1px solid rgba(15,23,42,0.08)',
+                    bgcolor: 'var(--paper-soft)',
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
                   }}
                 >
                   {versions.length === 0 && (
                     <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>暂无版本记录（改写/优化时自动保存）</Typography>
                   )}
                   {versions.map(v => (
-                    <Stack key={v.id} direction="row" alignItems="center" spacing={1} sx={{ p: 0.75, borderRadius: 1, bgcolor: '#fff', border: '1px solid rgba(15,23,42,0.06)' }}>
-                      <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>v{v.version}</Typography>
+                    <Stack key={v.id} direction="row" alignItems="center" spacing={1} sx={{ p: 0.75, borderRadius: 0, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' }}>
+                      <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'text.primary' }}>v{v.version}</Typography>
                       <Typography sx={{ fontSize: 11, color: 'text.secondary', flex: 1 }} noWrap>
                         {v.title || '(无标题)'} · {v.trigger}
                       </Typography>
@@ -1288,11 +1298,11 @@ export default function ArticleDetailPage() {
                   size="small"
                   value={art.title}
                   onChange={e => setArt({ ...art, title: e.target.value })}
-                  InputProps={{ sx: { fontSize: 17, fontWeight: 700, bgcolor: '#fff', px: 0, py: 0 } }}
+                  InputProps={{ sx: { fontSize: 17, fontWeight: 700, bgcolor: 'background.paper', px: 0, py: 0 } }}
                   sx={textFieldSx}
                   error={art.title.length > 20}
                 />
-                <Divider sx={{ my: 0.8, borderColor: 'rgba(15,23,42,0.08)' }} />
+                <Divider sx={{ my: 0.8 }} />
                 <TextField
                   placeholder="输入正文，建议用短句、分段和情绪钩子增强小红书感"
                   fullWidth
@@ -1319,15 +1329,15 @@ export default function ArticleDetailPage() {
                   }}
                   sx={textFieldSx}
                 />
-                <Divider sx={{ my: 0.8, borderColor: 'rgba(15,23,42,0.08)' }} />
+                <Divider sx={{ my: 0.8 }} />
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.65 }}>
-                  <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'text.primary' }}>
                     标签
                   </Typography>
                   <Chip
                     size="small"
                     label={`${(art.tags || []).length} 个`}
-                    sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: '#F1F5F9', color: '#64748B' }}
+                    sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: 'var(--paper-soft)', color: 'text.primary' }}
                   />
                 </Stack>
                 <TagInput
@@ -1340,18 +1350,18 @@ export default function ArticleDetailPage() {
 
             {/* banned words warning */}
             {bannedHits.length > 0 && (
-              <Box sx={{ order: 5, p: 1.5, borderRadius: 1, bgcolor: '#FEF2F2', border: '1px solid #FECACA' }}>
-                <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#DC2626', mb: 0.5 }}>
-                  ⚠️ 检测到 {bannedHits.length} 个违禁/敏感词
+              <Box sx={{ order: 5, p: 1.5, borderRadius: 0, bgcolor: 'rgba(139,37,32,0.06)', border: '1px solid', borderColor: 'error.main' }}>
+                <Typography className="editorial-mono" sx={{ fontSize: 10.5, fontWeight: 700, color: 'error.main', mb: 0.5 }}>
+                  BANNED WORDS · {bannedHits.length}
                 </Typography>
                 <Stack spacing={0.3}>
                   {bannedHits.slice(0, 8).map((h, i) => (
-                    <Typography key={i} sx={{ fontSize: 11, color: '#991B1B' }}>
+                    <Typography key={i} sx={{ fontSize: 11, color: 'error.main' }}>
                       · 「{h.word}」— {h.category}{h.replacement ? `，建议替换为：${h.replacement}` : ''}
                     </Typography>
                   ))}
                   {bannedHits.length > 8 && (
-                    <Typography sx={{ fontSize: 11, color: '#991B1B' }}>
+                    <Typography sx={{ fontSize: 11, color: 'error.main' }}>
                       …还有 {bannedHits.length - 8} 个
                     </Typography>
                   )}
@@ -1363,10 +1373,10 @@ export default function ArticleDetailPage() {
             <Box sx={{ order: 2, mt: 0.2, ...sectionCardSx }}>
               <Box sx={sectionHeaderSx}>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ flexWrap: 'wrap', gap: 0.8 }}>
-                  <Typography sx={{ fontSize: 12, color: '#334155', fontWeight: 800 }}>
+                  <Typography sx={{ fontSize: 12, color: 'text.primary', fontWeight: 800 }}>
                     图片队列
                   </Typography>
-                  <Chip size="small" label={`共 ${visualImages.length} 张`} sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: '#F1F5F9', color: '#64748B' }} />
+                  <Chip size="small" label={`共 ${visualImages.length} 张`} sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: 'background.paper', color: 'text.secondary' }} />
                   <Typography sx={{ fontSize: 11.5, color: 'text.secondary', whiteSpace: { xs: 'normal', md: 'nowrap' } }}>
                     可拖拽调换顺序，也可在菜单中设为首图、前移、后移或删除。
                   </Typography>
@@ -1379,12 +1389,12 @@ export default function ArticleDetailPage() {
                       sx={{
                         minHeight: 24,
                         px: 0.9,
-                        borderRadius: 1,
+                        borderRadius: 0,
                         fontSize: 11.5,
-                        color: '#64748B',
+                        color: 'text.secondary',
                         textTransform: 'none',
                         whiteSpace: 'nowrap',
-                        '&:hover': { bgcolor: 'rgba(15,23,42,0.05)' },
+                        '&:hover': { bgcolor: 'background.default' },
                       }}
                     >
                       {showImageContext ? '收起上下文' : '图片上下文'}
@@ -1446,7 +1456,7 @@ export default function ArticleDetailPage() {
                       minHeight: 126,
                       border: '1px dashed',
                       borderColor: 'divider',
-                      borderRadius: 1,
+                      borderRadius: 0,
                       display: 'grid',
                       placeItems: 'center',
                       color: 'text.secondary',
@@ -1466,8 +1476,9 @@ export default function ArticleDetailPage() {
                     mb: 1.05,
                     p: 1.1,
                     borderRadius: 1,
-                    bgcolor: 'rgba(15,23,42,0.025)',
-                    border: '1px solid rgba(15,23,42,0.08)',
+                    bgcolor: 'var(--paper-soft)',
+                    border: '1px solid',
+                    borderColor: 'divider',
                   }}
                 >
                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ gap: 0.8, mb: 0.8 }}>
@@ -1488,7 +1499,7 @@ export default function ArticleDetailPage() {
                           img.exists === false ? '文件未找到' : '',
                         ].filter(Boolean).join(' · ')
                         return (
-                          <Typography key={`${img.role}-${img.index ?? i}-${img.url}`} sx={{ fontSize: 11.5, color: img.exists === false ? '#B91C1C' : 'text.secondary' }} noWrap>
+                          <Typography key={`${img.role}-${img.index ?? i}-${img.url}`} sx={{ fontSize: 11.5, color: img.exists === false ? 'error.main' : 'text.secondary' }} noWrap>
                             {img.role === 'cover' ? '首图/封面' : `第 ${(img.index ?? 0) + 2} 张`}：{meta ? `${meta} · ` : ''}{img.full_url && img.full_url !== img.url ? `${img.url} → ${img.full_url}` : img.url}
                           </Typography>
                         )
@@ -1512,7 +1523,7 @@ export default function ArticleDetailPage() {
       </Box>
 
       <ResizeGrip
-        minBreakpoint="xl"
+        minBreakpoint="lg"
         title="拖动调整预览栏宽度"
         onMouseDown={startColumnResize('right')}
       />
@@ -1520,13 +1531,14 @@ export default function ArticleDetailPage() {
       {/* right: phone preview */}
       <Box
         sx={{
-          width: { xl: layout.right },
+          width: { lg: layout.right },
           flexShrink: 0,
-          display: { xs: 'none', xl: 'flex' },
+          display: { xs: 'none', lg: 'flex' },
           alignItems: 'flex-start',
           justifyContent: 'center',
-          bgcolor: 'rgba(255,255,255,0.54)',
-          backdropFilter: 'blur(10px)',
+          bgcolor: 'background.paper',
+          borderLeft: '1px solid',
+          borderColor: 'divider',
           minHeight: 0,
           overflow: 'auto',
           px: 1,
@@ -1589,7 +1601,7 @@ export default function ArticleDetailPage() {
               <Chip
                 size="small"
                 label="按用户"
-                sx={{ height: 20, fontSize: 10.5, bgcolor: 'rgba(59,130,246,0.08)', color: '#2563EB' }}
+                sx={{ height: 20, fontSize: 10.5, bgcolor: 'var(--accent-soft)', color: 'primary.main' }}
               />
             )}
             <Box sx={{ flex: 1 }} />
@@ -1645,7 +1657,7 @@ export default function ArticleDetailPage() {
                     spacing={0.75}
                     sx={{ px: 1.2, pt: 1.1, pb: 0.45 }}
                   >
-                    <PersonOutlineIcon sx={{ fontSize: 15, color: '#2563EB' }} />
+                    <PersonOutlineIcon sx={{ fontSize: 15, color: 'primary.main' }} />
                     <Typography noWrap sx={{ fontSize: 12, fontWeight: 800, color: 'text.primary', flex: 1 }}>
                       {row.ownerName}
                     </Typography>
@@ -1695,8 +1707,8 @@ export default function ArticleDetailPage() {
                           sx={{
                             height: 18,
                             fontSize: 10,
-                            bgcolor: isCurrentArticle ? '#E6F7EC' : isOtherArticle ? '#FFF7ED' : 'action.hover',
-                            color: isCurrentArticle ? '#0F8C3D' : isOtherArticle ? '#C2410C' : 'text.secondary',
+                            bgcolor: isCurrentArticle ? 'rgba(62,107,78,0.10)' : isOtherArticle ? 'rgba(168,112,41,0.10)' : 'action.hover',
+                            color: isCurrentArticle ? 'success.main' : isOtherArticle ? 'warning.main' : 'text.secondary',
                           }}
                         />
                         {c.owner_user && (
@@ -1706,8 +1718,8 @@ export default function ArticleDetailPage() {
                             sx={{
                               height: 18,
                               fontSize: 10,
-                              bgcolor: 'rgba(59,130,246,0.08)',
-                              color: '#2563EB',
+                              bgcolor: 'var(--accent-soft)',
+                              color: 'primary.main',
                             }}
                           />
                         )}
@@ -1726,7 +1738,7 @@ export default function ArticleDetailPage() {
                               switchToArticle(Number(c.article_id), true)
                               setSidebar(false)
                             }}
-                            sx={{ alignSelf: 'flex-start', fontSize: 11, p: 0, minWidth: 0, color: '#C2410C' }}
+                            sx={{ alignSelf: 'flex-start', fontSize: 11, p: 0, minWidth: 0, color: 'warning.main' }}
                           >
                             切到关联笔记并保留此对话
                           </Button>
@@ -1766,8 +1778,9 @@ export default function ArticleDetailPage() {
           width: 52,
           height: 52,
           bgcolor: 'primary.main',
-          color: '#fff',
-          boxShadow: '0 4px 16px rgba(255,39,65,0.3)',
+          color: 'background.paper',
+          borderRadius: 0,
+          boxShadow: 'none',
           '&:hover': { bgcolor: 'primary.dark' },
           zIndex: 1100,
         }}
@@ -1780,7 +1793,7 @@ export default function ArticleDetailPage() {
         anchor="bottom"
         open={mobileChat}
         onClose={() => setMobileChat(false)}
-        PaperProps={{ sx: { height: 'min(85dvh, calc(100dvh - 20px))', borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: 'hidden' } }}
+        PaperProps={{ sx: { height: 'min(85dvh, calc(100dvh - 20px))', borderTopLeftRadius: 0, borderTopRightRadius: 0, overflow: 'hidden' } }}
         sx={{ display: { xs: 'block', lg: 'none' } }}
       >
         <Box sx={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -1793,13 +1806,13 @@ export default function ArticleDetailPage() {
           <ChatPanel
             article={art}
             sessionKey={currentSessionKey}
-            onArticleMayChange={load}
+            onArticleMayChange={handleArticleMayChange}
             onConversationCreated={handleConversationCreated}
             showHeader={false}
             quickActions={[
               { label: '整体改写', prompt: '帮我整体改写这篇笔记，风格更有网感、更口语化' },
               { label: '参考仿写', prompt: `参考笔记 #${art.id} 的中文小红书写法，仿写一篇【新主题】的小红书笔记。主题可以变化，只参考结构、语气、节奏；如果需要配图，我会明确说“同时仿图”。` },
-              { label: '打分', prompt: '帮我从内容、视觉、增长、互动四个维度给这篇笔记打分' },
+              { label: '打分', prompt: `请直接调用 score_article 工具，对 article_id=${art.id} 做内容、视觉、增长、互动、综合五维评分，并写回这篇笔记的 score。` },
               { label: '生成封面', prompt: '为这篇笔记生成一张干净、有高级感的竖版封面' },
             ]}
           />

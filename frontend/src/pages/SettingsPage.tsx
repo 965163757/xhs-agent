@@ -47,7 +47,7 @@ import { formatBeijingDate } from '../utils/time'
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: any }) {
   return (
-    <Paper sx={{ p: { xs: 1.5, md: 2 }, mb: 1.5, borderRadius: 2.2 }}>
+    <Paper sx={{ p: { xs: 1.5, md: 2 }, mb: 1.5, borderRadius: 0 }}>
       <Typography sx={{ fontSize: 15, fontWeight: 800, color: 'text.primary', mb: 0.2 }}>{title}</Typography>
       {desc && (
         <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 1.4 }}>{desc}</Typography>
@@ -259,7 +259,7 @@ function ModelQueueEditor({
   }
 
   return (
-    <Paper variant="outlined" sx={{ p: 1.1, borderRadius: 2, bgcolor: 'rgba(15,23,42,0.015)', ...sx }}>
+    <Paper variant="outlined" sx={{ p: 1.1, borderRadius: 0, bgcolor: 'rgba(15,23,42,0.015)', ...sx }}>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.8 }}>
         <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#334155' }}>{title}</Typography>
         <Chip size="small" label={`${filledCount} 个模型`} sx={{ height: 20, fontSize: 10.5 }} />
@@ -711,7 +711,7 @@ export default function SettingsPage() {
         </Box>
       )}
 
-      {msg && <Alert severity={msg.kind} sx={{ mb: 2, borderRadius: 2 }}>{msg.text}</Alert>}
+      {msg && <Alert severity={msg.kind} sx={{ mb: 2, borderRadius: 0 }}>{msg.text}</Alert>}
 
       {/* Personal settings */}
       {s && (
@@ -774,7 +774,6 @@ export default function SettingsPage() {
               variant="contained"
               onClick={saveMy}
               disabled={busy}
-              sx={{ background: 'linear-gradient(135deg,#FF2442,#FF7A00)', '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' } }}
             >
               保存个人设置
             </Button>
@@ -943,7 +942,7 @@ export default function SettingsPage() {
                 sx={{
                   ...wideSx,
                   p: 1.5,
-                  borderRadius: 2,
+                  borderRadius: 0,
                   bgcolor: staticTest
                     ? (staticTest.ok
                       ? (staticTest.provider_readable ? 'rgba(22,163,74,0.04)' : 'rgba(37,99,235,0.04)')
@@ -1008,7 +1007,7 @@ export default function SettingsPage() {
                 sx={{
                   ...wideSx,
                   p: 1.5,
-                  borderRadius: 2,
+                  borderRadius: 0,
                   bgcolor: imageTest ? (imageTest.ok ? 'rgba(22,163,74,0.04)' : 'rgba(220,38,38,0.04)') : 'rgba(0,0,0,0.015)',
                 }}
               >
@@ -1040,7 +1039,7 @@ export default function SettingsPage() {
                       {imageTest.quality && <Chip size="small" label={`quality=${imageTest.quality}`} sx={{ height: 22, fontSize: 11 }} />}
                     </Stack>
                     {Array.isArray(imageTest.image_attempts) && imageTest.image_attempts.length > 0 && (
-                      <Box sx={{ mb: 1, p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, bgcolor: 'background.paper' }}>
+                      <Box sx={{ mb: 1, p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 0, bgcolor: 'background.paper' }}>
                         <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mb: 0.6 }}>
                           重试链路：失败即切换到下一候选，成功后停止
                         </Typography>
@@ -1075,7 +1074,7 @@ export default function SettingsPage() {
                           component="img"
                           src={imageTest.image}
                           alt="生图测试结果"
-                          sx={{ width: 92, height: 122, objectFit: 'cover', borderRadius: 2, border: '1px solid', borderColor: 'divider' }}
+                          sx={{ width: 92, height: 122, objectFit: 'cover', borderRadius: 0, border: '1px solid', borderColor: 'divider' }}
                         />
                         <Typography sx={{ fontSize: 11.5, color: 'text.secondary', wordBreak: 'break-all' }}>
                           URL：<a href={imageTest.image} target="_blank" rel="noreferrer">{imageTest.image}</a>
@@ -1095,7 +1094,7 @@ export default function SettingsPage() {
                   variant="contained"
                   onClick={saveGlobal}
                   disabled={busy}
-                  sx={{ alignSelf: 'flex-start', background: 'linear-gradient(135deg,#FF2442,#FF7A00)', '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' } }}
+                  sx={{ alignSelf: 'flex-start' }}
                 >
                   保存全局配置
                 </Button>
@@ -1120,7 +1119,7 @@ export default function SettingsPage() {
             />
 
             <Typography sx={{ fontSize: 13.5, fontWeight: 600, mb: 1.5 }}>用户列表</Typography>
-            <Box sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
+            <Box sx={{ borderRadius: 0, border: '1px solid', borderColor: 'divider', overflow: 'hidden' }}>
               <Table size="small">
                 <TableHead>
                   <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.02)' }}>
@@ -1140,14 +1139,14 @@ export default function SettingsPage() {
                           <Chip
                             size="small"
                             label="admin"
-                            sx={{ bgcolor: 'rgba(255,36,66,0.08)', color: '#FF2442', fontSize: 11, fontWeight: 600, height: 22 }}
+                            sx={{ bgcolor: 'var(--accent-soft)', color: 'primary.main', fontSize: 11, fontWeight: 600, height: 22 }}
                           />
                         ) : (
                           <Select
                             size="small"
                             value={u.role}
                             onChange={e => handleRoleChange(u.id, e.target.value as 'admin' | 'user')}
-                            sx={{ fontSize: 12, height: 28, borderRadius: 1.5 }}
+                            sx={{ fontSize: 12, height: 28, borderRadius: 0 }}
                           >
                             <MenuItem value="user">user</MenuItem>
                             <MenuItem value="admin">admin</MenuItem>
@@ -1172,10 +1171,10 @@ export default function SettingsPage() {
       >
         <Stack spacing={0.6} sx={{ mb: 2 }}>
           <Typography sx={{ fontSize: 12.5, color: 'text.primary' }}>
-            · HTTP 桥：<code style={{ fontSize: 11.5, padding: '1px 5px', borderRadius: 4, background: 'rgba(0,0,0,0.04)' }}>GET /api/mcp/tools</code> · <code style={{ fontSize: 11.5, padding: '1px 5px', borderRadius: 4, background: 'rgba(0,0,0,0.04)' }}>POST /api/mcp/call</code>
+            · HTTP 桥：<code style={{ fontSize: 11.5, padding: '1px 5px', borderRadius: 0, background: 'rgba(0,0,0,0.04)' }}>GET /api/mcp/tools</code> · <code style={{ fontSize: 11.5, padding: '1px 5px', borderRadius: 0, background: 'rgba(0,0,0,0.04)' }}>POST /api/mcp/call</code>
           </Typography>
           <Typography sx={{ fontSize: 12.5, color: 'text.primary' }}>
-            · stdio server：<code style={{ fontSize: 11.5, padding: '1px 5px', borderRadius: 4, background: 'rgba(0,0,0,0.04)' }}>bash start_mcp.sh</code>，适配 Claude Desktop / Cursor
+            · stdio server：<code style={{ fontSize: 11.5, padding: '1px 5px', borderRadius: 0, background: 'rgba(0,0,0,0.04)' }}>bash start_mcp.sh</code>，适配 Claude Desktop / Cursor
           </Typography>
         </Stack>
         <Box
@@ -1183,7 +1182,7 @@ export default function SettingsPage() {
             p: 2,
             bgcolor: '#1A1A1A',
             color: '#E5E5E5',
-            borderRadius: 2.5,
+            borderRadius: 0,
             fontFamily: '"JetBrains Mono", ui-monospace, Menlo, monospace',
             fontSize: 12,
             whiteSpace: 'pre-wrap',

@@ -40,10 +40,10 @@ import { formatBeijingDateTime } from '../utils/time'
 import { useAuth } from '../AuthContext'
 
 const suggestions = [
-  { icon: '✍️', title: '一键完整成稿', prompt: '帮我完整做一篇关于「早C晚A护肤」的小红书笔记，目标受众是20-25岁学生党，包含标题候选、标签、封面方向和发布前自检' },
-  { icon: '📋', title: '给我选题灵感', prompt: '我是美妆博主，帮我列5个最近适合发的选题方向，要有爆款潜力' },
-  { icon: '🎨', title: '生成封面图', prompt: '帮我生成一张小红书风格的封面图，主题是「秋冬护肤」，要干净高级感' },
-  { icon: '🧪', title: '诊断我的笔记', prompt: '帮我诊断笔记 #1，看看哪里可以优化' },
+  { icon: 'A01', title: '一键完整成稿', desc: '标题候选、标签、封面方向和发布前自检', prompt: '帮我完整做一篇关于「早C晚A护肤」的小红书笔记，目标受众是20-25岁学生党，包含标题候选、标签、封面方向和发布前自检' },
+  { icon: 'A02', title: '选题灵感', desc: '5 个有爆款潜力的垂类选题方向', prompt: '我是美妆博主，帮我列5个最近适合发的选题方向，要有爆款潜力' },
+  { icon: 'A03', title: '生成封面图', desc: '小红书 3:4 首图，带标题区和收藏理由', prompt: '帮我生成一张小红书风格的封面图，主题是「秋冬护肤」，要干净高级感' },
+  { icon: 'A04', title: '发布前审稿', desc: '违禁词、钩子、CTA、标签缺失检查', prompt: '帮我诊断笔记 #1，看看哪里可以优化' },
 ]
 
 type ConversationRow =
@@ -246,7 +246,7 @@ export default function ChatPage() {
                   height: 30,
                   border: '1px solid',
                   borderColor: 'divider',
-                  borderRadius: 2,
+                  borderRadius: 0,
                 }}
               >
                 <ChecklistIcon sx={{ fontSize: 17 }} />
@@ -290,7 +290,7 @@ export default function ChatPage() {
                 spacing={0.75}
                 sx={{ px: 1, pt: 1.1, pb: 0.45 }}
               >
-                <PersonOutlineIcon sx={{ fontSize: 15, color: '#2563EB' }} />
+                <PersonOutlineIcon sx={{ fontSize: 15, color: 'primary.main' }} />
                 <Typography noWrap sx={{ fontSize: 12, fontWeight: 800, color: 'text.primary', flex: 1 }}>
                   {row.ownerName}
                 </Typography>
@@ -313,7 +313,7 @@ export default function ChatPage() {
               setParams(next)
               if (temporary) setMobileSidebar(false)
             }}
-            sx={{ borderRadius: 2, mb: 0.35, py: 0.9 }}
+            sx={{ borderRadius: 0, mb: 0.35, py: 0.9 }}
           >
             {batchMode && (
               <Checkbox
@@ -354,7 +354,7 @@ export default function ChatPage() {
   )
 
   return (
-    <Box sx={{ height: 'calc(100vh - 56px)', display: 'flex', overflow: 'hidden' }}>
+    <Box className="editorial-page" sx={{ height: 'calc(100vh - 56px)', display: 'flex', overflow: 'hidden' }}>
       {isDesktop && (
         <Box
           sx={{
@@ -398,12 +398,12 @@ export default function ChatPage() {
               gap: 0.8,
               px: 1.2,
               py: 0.4,
-              borderRadius: 2,
-              bgcolor: 'rgba(255,36,66,0.05)',
-              border: '1px solid rgba(255,36,66,0.1)',
+              bgcolor: 'var(--accent-soft)',
+              border: '1px solid',
+              borderColor: 'primary.main',
             }}
           >
-            <Box sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: '#FF2442' }} />
+            <Box className="editorial-dot" sx={{ width: 5, height: 5 }} />
             <Typography sx={{ fontSize: 12, color: 'text.primary', fontWeight: 500 }}>
               笔记 #{article.id} · {article.title?.slice(0, 18) || ''}
             </Typography>
@@ -417,7 +417,7 @@ export default function ChatPage() {
           <Chip
             size="small"
             label={article.owner_user.username}
-            sx={{ height: 22, fontSize: 11, bgcolor: 'rgba(59,130,246,0.08)', color: '#2563EB' }}
+            sx={{ height: 22, fontSize: 11, bgcolor: 'var(--accent-soft)', color: 'primary.main' }}
           />
         )}
         <Button

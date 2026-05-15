@@ -1,0 +1,1173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>XHS Agent · Editorial Magazine Studio · Full Overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700;6..72,800;6..72,900&family=Noto+Serif+SC:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #F2EEE5;
+  --paper-soft: #E9E1D2;
+  --paper-quiet: #FAF7F0;
+  --paper-deep: #DCD0BC;
+  --ink: #17130F;
+  --ink-soft: #5E564B;
+  --ink-mute: #948A7A;
+  --rule: #CEC2AE;
+  --rule-soft: #E1D7C7;
+  --accent: #B82B29;
+  --accent-soft: #F0D7D4;
+  --green: #3B6A4D;
+  --gold: #A36C24;
+  --hazard: #7F1D1D;
+  --blueblack: #232B33;
+  --display: "Newsreader", "Noto Serif SC", "Songti SC", Georgia, serif;
+  --body: "IBM Plex Sans", "PingFang SC", "HarmonyOS Sans SC", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 13px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, input, textarea { font: inherit; }
+.cover {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 88px 92px 72px;
+  border-bottom: 1px solid var(--rule);
+}
+.cover-kicker {
+  font: 600 10px/1 var(--mono);
+  letter-spacing: .22em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 26px;
+}
+.cover h1 {
+  font: 850 124px/.9 var(--display);
+  letter-spacing: -.055em;
+  margin: 0;
+}
+.cover h1 em {
+  font-style: italic;
+  font-weight: 460;
+  color: var(--accent);
+}
+.cover-note {
+  display: grid;
+  grid-template-columns: 440px 1fr;
+  gap: 76px;
+  margin-top: 56px;
+  padding-top: 32px;
+  border-top: 1px solid var(--ink);
+}
+.cover-copy {
+  font: italic 25px/1.36 var(--display);
+  color: var(--ink-soft);
+}
+.cover-copy strong {
+  color: var(--ink);
+  font-weight: 560;
+}
+.cover-system {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+.spec-block {
+  border-top: 1px solid var(--rule);
+  padding-top: 12px;
+}
+.spec-block b {
+  display: block;
+  font: 600 10px/1 var(--mono);
+  letter-spacing: .18em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.spec-block p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.7;
+}
+.toc {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0 22px;
+  margin: 42px 0 0;
+  padding: 0;
+}
+.toc li {
+  list-style: none;
+  border-top: 1px solid var(--rule);
+  padding: 13px 0;
+  min-height: 72px;
+}
+.toc .num, .frame-label .num, .page-num {
+  font: 650 10px var(--mono);
+  letter-spacing: .18em;
+  color: var(--accent);
+}
+.toc .name {
+  display: block;
+  margin-top: 8px;
+  font: italic 17px/1.2 var(--display);
+}
+.toc .role {
+  display: block;
+  margin-top: 6px;
+  font: 500 9px var(--mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.canvas {
+  max-width: 3160px;
+  margin: 0 auto;
+  padding: 80px 48px 104px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 72px 56px;
+}
+.cell {
+  width: 1440px;
+}
+.frame-label {
+  height: 36px;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 14px;
+}
+.frame-label .title {
+  font: italic 18px/1.1 var(--display);
+}
+.frame-label .desc {
+  color: var(--ink-mute);
+  font-size: 12px;
+}
+.frame-label .role {
+  margin-left: auto;
+  font: 550 9px var(--mono);
+  letter-spacing: .18em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+}
+.frame {
+  width: 1440px;
+  height: 900px;
+  background: var(--paper-quiet);
+  border: 1px solid var(--rule);
+  overflow: hidden;
+}
+.browser {
+  height: 34px;
+  background: var(--paper-soft);
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+}
+.dots {
+  display: flex;
+  gap: 6px;
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--ink-mute);
+  border-radius: 50%;
+}
+.path {
+  font: 500 10px var(--mono);
+  letter-spacing: .06em;
+  color: var(--ink-mute);
+}
+.path b { color: var(--ink-soft); }
+.viewport {
+  height: 866px;
+  display: flex;
+  min-height: 0;
+}
+.sidebar {
+  width: 218px;
+  flex: 0 0 auto;
+  background: var(--paper);
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 0 16px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 20px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  border: 1.5px solid var(--ink);
+  display: grid;
+  place-items: center;
+  font: 700 11px var(--mono);
+  color: var(--accent);
+}
+.brand-name {
+  font: 700 16px/1.05 var(--display);
+  letter-spacing: -.02em;
+}
+.brand-sub {
+  font: 500 9px var(--mono);
+  letter-spacing: .16em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+.nav-section {
+  margin: 16px 16px 7px;
+  font: 600 9px var(--mono);
+  letter-spacing: .18em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+}
+.nav-item {
+  display: grid;
+  grid-template-columns: 13px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 31px;
+  padding: 7px 14px 7px 16px;
+  color: var(--ink-soft);
+  border-left: 2px solid transparent;
+}
+.nav-item.active {
+  color: var(--ink);
+  background: var(--paper-soft);
+  border-left-color: var(--accent);
+}
+.nav-item i {
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--rule);
+}
+.nav-item.active i {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.nav-badge {
+  font: 600 9px var(--mono);
+  color: var(--ink-mute);
+}
+.user-card {
+  margin: auto 16px 0;
+  border-top: 1px solid var(--rule);
+  padding-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.avatar {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 650 12px var(--display);
+  background: var(--ink);
+  color: var(--paper);
+}
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.topbar {
+  height: 58px;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 30px;
+}
+.topbar h2 {
+  margin: 0;
+  font: italic 25px/1.05 var(--display);
+  letter-spacing: -.015em;
+}
+.top-meta {
+  border-left: 1px solid var(--rule);
+  padding-left: 16px;
+  font: 500 10px var(--mono);
+  letter-spacing: .08em;
+  color: var(--ink-mute);
+}
+.top-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.content {
+  flex: 1;
+  min-height: 0;
+  padding: 24px 30px;
+  overflow: hidden;
+}
+.btn {
+  border: 1px solid var(--ink);
+  background: var(--paper-quiet);
+  color: var(--ink);
+  min-height: 31px;
+  padding: 6px 12px;
+  font: 600 12px var(--body);
+  border-radius: 3px;
+}
+.btn.dark {
+  background: var(--ink);
+  color: var(--paper);
+}
+.btn.red {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.btn.ghost {
+  border-color: var(--rule);
+  color: var(--ink-soft);
+  background: transparent;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--rule);
+  padding: 2px 7px;
+  min-height: 20px;
+  font: 600 10px var(--mono);
+  letter-spacing: .04em;
+  color: var(--ink-soft);
+  background: var(--paper-quiet);
+}
+.chip.red { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.chip.green { color: var(--green); border-color: rgba(59,106,77,.55); }
+.chip.gold { color: var(--gold); border-color: rgba(163,108,36,.55); }
+.section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+.section-title b {
+  font: italic 18px/1.1 var(--display);
+}
+.section-title span {
+  font: 600 10px var(--mono);
+  letter-spacing: .16em;
+  color: var(--accent);
+}
+.panel {
+  border: 1px solid var(--rule);
+  background: var(--paper-quiet);
+}
+.panel.pad { padding: 16px; }
+.panel.soft { background: var(--paper); }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.field-label {
+  display: block;
+  font: 650 10px var(--mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  margin-bottom: 7px;
+}
+.input {
+  border: 1px solid var(--rule);
+  background: var(--paper-quiet);
+  min-height: 38px;
+  padding: 9px 10px;
+  color: var(--ink-soft);
+}
+.textarea {
+  border: 1px solid var(--rule);
+  background: var(--paper-quiet);
+  padding: 14px;
+  white-space: pre-wrap;
+  line-height: 1.72;
+}
+.hero-title {
+  font: 760 46px/.98 var(--display);
+  letter-spacing: -.035em;
+  margin: 0;
+}
+.italic { font-family: var(--display); font-style: italic; }
+.mono { font-family: var(--mono); }
+.muted { color: var(--ink-mute); }
+.soft { color: var(--ink-soft); }
+.red { color: var(--accent); }
+.login-stage {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  min-height: 0;
+}
+.login-left {
+  padding: 84px 76px;
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+}
+.login-left h2 {
+  font: 820 84px/.9 var(--display);
+  letter-spacing: -.05em;
+  margin: 28px 0 24px;
+}
+.login-left h2 em { color: var(--accent); font-weight: 460; }
+.login-card {
+  align-self: center;
+  width: 348px;
+  border: 1px solid var(--rule);
+  padding: 30px;
+  background: var(--paper-quiet);
+}
+.quote-rule {
+  width: 56px;
+  height: 1px;
+  background: var(--ink);
+}
+.chat-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr 330px;
+  gap: 16px;
+  height: 100%;
+}
+.history-row {
+  border-bottom: 1px solid var(--rule-soft);
+  padding: 11px 0;
+}
+.history-row b {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+.message {
+  max-width: 72%;
+  border: 1px solid var(--rule);
+  padding: 13px 14px;
+  margin-bottom: 12px;
+  background: var(--paper);
+}
+.message.user {
+  margin-left: auto;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+.trace-line {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 12px;
+}
+.composer {
+  border: 1px solid var(--ink);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  margin-top: auto;
+  background: var(--paper-quiet);
+}
+.composer div {
+  padding: 14px;
+  color: var(--ink-soft);
+}
+.article-layout {
+  display: grid;
+  grid-template-columns: 310px 1fr 345px;
+  gap: 14px;
+  height: 100%;
+}
+.article-list-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.article-title {
+  font: 760 38px/1.05 var(--display);
+  letter-spacing: -.025em;
+  margin: 0 0 16px;
+}
+.phone {
+  width: 244px;
+  height: 500px;
+  border: 2px solid var(--ink);
+  border-radius: 30px;
+  margin: 0 auto;
+  overflow: hidden;
+  background: white;
+}
+.phone-img {
+  height: 292px;
+  background:
+    linear-gradient(135deg, rgba(184,43,41,.18), rgba(59,106,77,.18)),
+    repeating-linear-gradient(45deg, #F6C8C3 0 12px, #F6EEE1 12px 24px);
+  border-bottom: 1px solid #E7DDD0;
+}
+.phone-body { padding: 13px; }
+.diagnose-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr 320px;
+  gap: 14px;
+  height: 100%;
+}
+.grade {
+  font: 850 88px/.82 var(--display);
+  letter-spacing: -.06em;
+  color: var(--accent);
+}
+.radar {
+  width: 220px;
+  height: 220px;
+  margin: 6px auto;
+}
+.debate-row {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.monogram {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 700 12px var(--display);
+}
+.stat {
+  border-top: 1px solid var(--rule);
+  padding-top: 12px;
+}
+.stat-num {
+  font: 800 42px/.95 var(--display);
+  letter-spacing: -.035em;
+}
+.bar-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 28px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 11px;
+  font-size: 11px;
+}
+.bar {
+  height: 8px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+.bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.day {
+  min-height: 48px;
+  border: 1px solid var(--rule-soft);
+  padding: 5px;
+  font: 600 10px var(--mono);
+  color: var(--ink-mute);
+}
+.day.today {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.article-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 90px 70px 86px;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.score {
+  font: 800 28px/.9 var(--display);
+}
+.template-card {
+  border: 1px solid var(--rule);
+  background: var(--paper-quiet);
+  padding: 15px;
+  min-height: 186px;
+}
+.template-card h3 {
+  font: italic 21px/1.1 var(--display);
+  margin: 0 0 9px;
+}
+.codebox {
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  padding: 12px;
+  font: 500 11px/1.7 var(--mono);
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+}
+.task-row {
+  border: 1px solid var(--rule);
+  padding: 13px;
+  background: var(--paper-quiet);
+  margin-bottom: 12px;
+}
+.task-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+.setting-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  height: 100%;
+}
+.model-row {
+  display: grid;
+  grid-template-columns: 1fr 180px 74px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.image-lab {
+  display: grid;
+  grid-template-columns: 315px 1fr 330px;
+  gap: 14px;
+  height: 100%;
+}
+.canvas-box {
+  height: 586px;
+  border: 1px solid var(--ink);
+  background:
+    linear-gradient(rgba(250,247,240,.72), rgba(250,247,240,.72)),
+    repeating-linear-gradient(0deg, transparent 0 23px, rgba(206,194,174,.55) 23px 24px),
+    repeating-linear-gradient(90deg, transparent 0 23px, rgba(206,194,174,.55) 23px 24px);
+  position: relative;
+}
+.poster {
+  position: absolute;
+  width: 270px;
+  height: 360px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%,-50%);
+  background: #F7EFE4;
+  border: 1px solid var(--ink);
+  padding: 22px;
+}
+.poster h3 {
+  font: 850 38px/.9 var(--display);
+  letter-spacing: -.04em;
+  margin: 0;
+}
+.selection {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: rgba(184,43,41,.08);
+}
+.layer-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--rule-soft);
+  padding: 9px 0;
+}
+.footer {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 54px 92px 86px;
+  border-top: 1px solid var(--rule);
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 56px;
+  color: var(--ink-soft);
+}
+.footer h2 {
+  margin: 0 0 12px;
+  font: italic 24px/1.1 var(--display);
+  color: var(--ink);
+}
+</style>
+</head>
+<body>
+<header class="cover">
+  <div class="cover-kicker">XHS-Agent / Full System Overview / 2026-05-15</div>
+  <h1>Editorial<br><em>Magazine Studio</em></h1>
+  <div class="cover-note">
+    <div class="cover-copy">
+      把小红书创作从「AI 聊天」重新定义成一间<strong>高级杂志编辑工作室</strong>：稿件、审稿、封面、数据、任务轨迹都在同一张编辑台上。
+    </div>
+    <div class="cover-system">
+      <div class="spec-block"><b>Display</b><p>Newsreader + Noto Serif SC。标题像杂志封面，模块像编辑栏目。</p></div>
+      <div class="spec-block"><b>Body</b><p>IBM Plex Sans。比 Inter 更有工具气质，保持阅读和操作清楚。</p></div>
+      <div class="spec-block"><b>Trace</b><p>JetBrains Mono。模型、任务、函数调用和评分维度成为系统纹理。</p></div>
+    </div>
+  </div>
+  <ol class="toc">
+    <li><span class="num">01</span><span class="name">Login</span><span class="role">Entry</span></li>
+    <li><span class="num">02</span><span class="name">Chat Studio</span><span class="role">Hero</span></li>
+    <li><span class="num">03</span><span class="name">Article Desk</span><span class="role">Hero</span></li>
+    <li><span class="num">04</span><span class="name">Diagnosis Review</span><span class="role">Hero</span></li>
+    <li><span class="num">05</span><span class="name">Analytics</span><span class="role">Ops</span></li>
+    <li><span class="num">06</span><span class="name">Articles</span><span class="role">Archive</span></li>
+    <li><span class="num">07</span><span class="name">Templates</span><span class="role">Library</span></li>
+    <li><span class="num">08</span><span class="name">Tasks</span><span class="role">Trace</span></li>
+    <li><span class="num">09</span><span class="name">Settings</span><span class="role">Config</span></li>
+    <li><span class="num">10</span><span class="name">Image Lab</span><span class="role">Tool</span></li>
+  </ol>
+</header>
+
+<main class="canvas">
+  <section class="cell">
+    <div class="frame-label"><span class="num">01</span><span class="title">Login · 进入编辑室</span><span class="desc">身份入口与产品气质第一屏</span><span class="role">Entry</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>login</b></span></div>
+      <div class="viewport">
+        <div class="login-stage">
+          <div class="login-left">
+            <div class="quote-rule"></div>
+            <h2>创作者的<br><em>编辑室</em></h2>
+            <p style="font:italic 25px/1.35 var(--display);max-width:620px;color:var(--ink-soft);margin:0;">AI 是 staff writer，你是 editor-in-chief。每篇笔记从灵感、稿件、封面到审稿，都在同一个工作室完成。</p>
+            <div style="margin-top:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:18px;">
+              <div class="stat"><div class="stat-num">20+</div><div class="field-label">Agent Tools</div></div>
+              <div class="stat"><div class="stat-num">5D</div><div class="field-label">Content Score</div></div>
+              <div class="stat"><div class="stat-num">3:4</div><div class="field-label">XHS Cover</div></div>
+            </div>
+          </div>
+          <div style="display:grid;place-items:center;background:var(--paper);">
+            <div class="login-card">
+              <div class="brand" style="padding:0 0 22px;margin-bottom:24px;">
+                <div class="brand-mark">书</div>
+                <div><div class="brand-name">小红书创作 Agent</div><div class="brand-sub">Editorial Access</div></div>
+              </div>
+              <div style="display:flex;border-bottom:1px solid var(--rule);margin-bottom:22px;">
+                <button class="btn" style="border:0;border-bottom:2px solid var(--ink);border-radius:0;">登录</button>
+                <button class="btn ghost" style="border:0;border-radius:0;">注册</button>
+              </div>
+              <label class="field-label">Username</label>
+              <div class="input" style="margin-bottom:14px;">editor_yuan</div>
+              <label class="field-label">Password</label>
+              <div class="input" style="margin-bottom:22px;color:var(--ink-mute);">••••••••</div>
+              <button class="btn dark" style="width:100%;height:42px;">进入工作室 →</button>
+              <p class="mono muted" style="font-size:10px;margin:18px 0 0;text-align:center;">AUTH / LOCAL ACCOUNT / MIN 6 CHARS</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cell">
+    <div class="frame-label"><span class="num">02</span><span class="title">Chat Studio · 创作对话现场</span><span class="desc">对话、工具调用、上下文稿件并置</span><span class="role">Hero</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>chat</b></span></div>
+      <div class="viewport">
+        <aside class="sidebar">
+          <div class="brand"><div class="brand-mark">书</div><div><div class="brand-name">XHS Agent</div><div class="brand-sub">Magazine Desk</div></div></div>
+          <div class="nav-section">Studio</div>
+          <div class="nav-item active"><i></i><span>创作</span><span class="nav-badge">12</span></div>
+          <div class="nav-item"><i></i><span>笔记</span><span class="nav-badge">48</span></div>
+          <div class="nav-item"><i></i><span>模板</span><span class="nav-badge">05</span></div>
+          <div class="nav-item"><i></i><span>数据</span></div>
+          <div class="nav-section">System</div>
+          <div class="nav-item"><i></i><span>任务</span><span class="nav-badge">03</span></div>
+          <div class="nav-item"><i></i><span>设置</span></div>
+          <div class="user-card"><div class="avatar">Y</div><div><b>editor_yuan</b><div class="brand-sub">Admin</div></div></div>
+        </aside>
+        <div class="main">
+          <div class="topbar"><h2><span class="page-num">02</span> 创作对话现场</h2><div class="top-meta">MODEL / GPT-4O · IMAGE / HIGH</div><div class="top-actions"><button class="btn ghost">历史</button><button class="btn dark">新稿件</button></div></div>
+          <div class="content">
+            <div class="chat-layout">
+              <div class="panel pad">
+                <div class="section-title"><span>I</span><b>历史对话</b></div>
+                <div class="history-row"><b>早 C 晚 A 护肤成稿</b><span class="mono muted">今天 14:22 · 7 tools</span></div>
+                <div class="history-row"><b>五一威海民宿封面</b><span class="mono muted">今天 11:06 · image.edit</span></div>
+                <div class="history-row"><b>水光针避雷大纲</b><span class="mono muted">昨天 21:45 · diagnose</span></div>
+                <div class="history-row"><b>小个子穿搭标题候选</b><span class="mono muted">昨天 17:30 · titles</span></div>
+                <div style="margin-top:22px;" class="section-title"><span>II</span><b>快捷动作</b></div>
+                <button class="btn ghost" style="width:100%;margin-bottom:8px;">完整成稿</button>
+                <button class="btn ghost" style="width:100%;margin-bottom:8px;">生成封面</button>
+                <button class="btn ghost" style="width:100%;">发布前自检</button>
+              </div>
+              <div style="display:flex;flex-direction:column;min-width:0;">
+                <div style="text-align:center;margin:20px auto 26px;max-width:660px;">
+                  <h3 class="hero-title">今天想写什么笔记？</h3>
+                  <p class="soft" style="font-size:15px;">说出你的灵感，我会帮你创作、改写、打分、诊断和配图。</p>
+                </div>
+                <div class="message user">帮我完整做一篇关于「早 C 晚 A 护肤」的小红书笔记，目标受众是 20-25 岁学生党。</div>
+                <div class="message"><b class="italic">Senior Editor</b><br>我先搭标题、结构和封面方向，再跑一轮发布前诊断。下面是工具轨迹：</div>
+                <div class="panel pad soft" style="margin-bottom:14px;">
+                  <div class="trace-line"><span class="mono red">00:01</span><span>suggest_titles</span><span class="chip green">OK</span></div>
+                  <div class="trace-line"><span class="mono red">00:03</span><span>generate_article</span><span class="chip green">OK</span></div>
+                  <div class="trace-line"><span class="mono red">00:07</span><span>cover_prompt</span><span class="chip green">OK</span></div>
+                  <div class="trace-line"><span class="mono red">00:11</span><span>diagnose_article</span><span class="chip gold">RUNNING</span></div>
+                </div>
+                <div class="composer"><div>继续要求：换个更有钩子的开头 / 生成 3 张封面 / 检查违禁词…</div><button class="btn red" style="margin:8px;">发送</button></div>
+              </div>
+              <div class="panel pad">
+                <div class="section-title"><span>III</span><b>当前稿件</b></div>
+                <h3 style="font:760 28px/1.05 var(--display);margin:0 0 10px;">早 C 晚 A 新手别乱用</h3>
+                <p class="soft">适合学生党的 7 天入门护肤节奏，主打“低预算 + 低刺激”。</p>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:14px 0;"><span class="chip red">#护肤</span><span class="chip">#早C晚A</span><span class="chip">#学生党</span></div>
+                <div class="section-title" style="margin-top:20px;"><span>IV</span><b>编辑建议</b></div>
+                <p>钩子可以更具体：把“新手指南”换成“我踩过的 3 个坑”。</p>
+                <p>封面建议使用前后对照式标题区，避免纯产品堆叠。</p>
+                <div class="stat" style="margin-top:20px;"><div class="stat-num red">86</div><div class="field-label">Pre Score</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cell">
+    <div class="frame-label"><span class="num">03</span><span class="title">Article Desk · 三栏写作工作台</span><span class="desc">稿件编辑、图片队列、手机预览、AI 侧栏</span><span class="role">Hero</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>articles/128</b></span></div>
+      <div class="viewport">
+        <aside class="sidebar">
+          <div class="brand"><div class="brand-mark">稿</div><div><div class="brand-name">稿件库</div><div class="brand-sub">Draft Archive</div></div></div>
+          <div class="nav-section">Recent</div>
+          <div class="nav-item active"><i></i><span>早 C 晚 A 护肤</span><span class="nav-badge">86</span></div>
+          <div class="nav-item"><i></i><span>威海民宿避坑</span><span class="nav-badge">91</span></div>
+          <div class="nav-item"><i></i><span>小个子通勤穿搭</span><span class="nav-badge">78</span></div>
+          <div class="user-card"><div class="avatar">Y</div><div><b>editor_yuan</b><div class="brand-sub">Editing</div></div></div>
+        </aside>
+        <div class="main">
+          <div class="topbar"><h2><span class="page-num">03</span> 三栏写作工作台</h2><div class="top-meta">ARTICLE #128 · UPDATED 14:26</div><div class="top-actions"><button class="btn ghost">版本</button><button class="btn red">诊断</button><button class="btn dark">保存</button></div></div>
+          <div class="content">
+            <div class="article-layout">
+              <div class="panel pad">
+                <div class="section-title"><span>I</span><b>稿件索引</b></div>
+                <div class="article-list-item"><b>早 C 晚 A 新手别乱用</b><div class="mono muted">draft · #128 · 86</div></div>
+                <div class="article-list-item"><b>威海海景民宿收藏清单</b><div class="mono muted">published · #127 · 91</div></div>
+                <div class="article-list-item"><b>新手水光针避雷</b><div class="mono muted">scheduled · #126 · 82</div></div>
+                <div class="section-title" style="margin-top:20px;"><span>II</span><b>图片队列</b></div>
+                <div class="grid-2">
+                  <div class="panel soft" style="height:118px;background:linear-gradient(135deg,#F7D7D0,#F7EFE4);"></div>
+                  <div class="panel soft" style="height:118px;background:linear-gradient(135deg,#D9E6DB,#F6EFE3);"></div>
+                  <div class="panel soft" style="height:118px;background:linear-gradient(135deg,#EEE0C8,#F8F2E8);"></div>
+                  <div class="panel soft" style="height:118px;display:grid;place-items:center;color:var(--ink-mute);">+</div>
+                </div>
+              </div>
+              <div class="panel pad" style="overflow:hidden;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:13px;"><span class="chip gold">草稿</span><span class="chip red">违禁词 1</span><span class="chip">#护肤</span><span class="chip">#学生党</span></div>
+                <h1 class="article-title">早 C 晚 A 新手别乱用：学生党 7 天低刺激入门法</h1>
+                <div class="textarea" style="height:354px;overflow:hidden;">姐妹们，早 C 晚 A 真的不是越猛越好。
+
+我第一次跟风的时候，以为维 C + A 醇堆满就能一周发光，结果屏障直接报警。后来才明白：新手真正要学的不是买最贵，而是先把节奏降下来。
+
+第一天到第三天：只建立早间抗氧化，不叠太多功效。
+第四天开始：晚上隔天用一次低浓度 A 醇，白天一定做好防晒。
+
+这篇适合预算有限、皮肤容易泛红、又想开始抗初老的学生党。</div>
+                <div style="display:flex;gap:8px;margin-top:14px;"><button class="btn ghost">局部润色</button><button class="btn ghost">标题候选</button><button class="btn ghost">提取模板</button><button class="btn dark">应用 AI 修改</button></div>
+                <div class="section-title" style="margin-top:18px;"><span>III</span><b>版本记录</b><span class="muted">v5 比 v4 强化了开头冲突</span></div>
+              </div>
+              <div class="panel pad">
+                <div class="section-title"><span>IV</span><b>手机预览</b></div>
+                <div class="phone"><div class="phone-img"></div><div class="phone-body"><b>早 C 晚 A 新手别乱用</b><p style="font-size:11px;line-height:1.6;">学生党 7 天低刺激入门法，别再一上来就猛药叠满…</p><p class="red" style="font-size:11px;">#护肤 #早C晚A #学生党</p></div></div>
+                <div class="section-title" style="margin-top:18px;"><span>V</span><b>AI 侧栏</b></div>
+                <div class="message" style="max-width:100%;margin-bottom:8px;">我建议把第 2 段的“屏障报警”换成更具象的症状。</div>
+                <div class="composer"><div>继续打磨当前稿件…</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cell">
+    <div class="frame-label"><span class="num">04</span><span class="title">Diagnosis Review · 发布前审稿会</span><span class="desc">五维评分、专家辩论、裁判建议</span><span class="role">Hero</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>articles/128/diagnose</b></span></div>
+      <div class="viewport">
+        <aside class="sidebar">
+          <div class="brand"><div class="brand-mark">审</div><div><div class="brand-name">审稿会</div><div class="brand-sub">Diagnosis</div></div></div>
+          <div class="nav-section">Steps</div>
+          <div class="nav-item active"><i></i><span>品类检测</span><span class="nav-badge">OK</span></div>
+          <div class="nav-item active"><i></i><span>Model A 预评分</span><span class="nav-badge">OK</span></div>
+          <div class="nav-item active"><i></i><span>专家诊断</span><span class="nav-badge">OK</span></div>
+          <div class="nav-item active"><i></i><span>专家辩论</span><span class="nav-badge">LIVE</span></div>
+          <div class="nav-item"><i></i><span>综合裁判</span></div>
+        </aside>
+        <div class="main">
+          <div class="topbar"><h2><span class="page-num">04</span> 发布前审稿会</h2><div class="top-meta">BACKGROUND TASK · RECOVERABLE</div><div class="top-actions"><button class="btn ghost">历史报告</button><button class="btn red">应用建议</button></div></div>
+          <div class="content">
+            <div class="diagnose-layout">
+              <div class="panel pad">
+                <div class="section-title"><span>I</span><b>总评</b></div>
+                <div style="display:flex;align-items:end;gap:16px;"><div class="grade">A</div><div><div class="stat-num">86</div><div class="field-label">Overall Score</div></div></div>
+                <p class="soft">内容结构完整，钩子有改进空间；封面标题建议更强对比。</p>
+                <svg class="radar" viewBox="0 0 240 240">
+                  <polygon points="120,28 206,91 174,196 66,196 34,91" fill="none" stroke="#CEC2AE"/>
+                  <polygon points="120,50 184,97 160,176 80,176 56,97" fill="none" stroke="#E1D7C7"/>
+                  <polygon points="120,42 190,95 158,172 78,184 50,98" fill="rgba(184,43,41,.14)" stroke="#B82B29" stroke-width="2"/>
+                  <text x="120" y="18" text-anchor="middle" class="mono" font-size="10">内容</text><text x="220" y="92" class="mono" font-size="10">视觉</text><text x="180" y="220" class="mono" font-size="10">增长</text><text x="32" y="220" class="mono" font-size="10">互动</text><text x="0" y="92" class="mono" font-size="10">综合</text>
+                </svg>
+              </div>
+              <div class="panel pad">
+                <div class="section-title"><span>II</span><b>专家辩论纪要</b><span class="muted">signature detail</span></div>
+                <div class="debate-row"><div class="monogram">A</div><div><b>内容专家</b><p class="soft" style="margin:4px 0 0;">标题有明确人群，但「别乱用」还可以补一个更具体后果。</p></div></div>
+                <div class="debate-row"><div class="monogram">B</div><div><b>增长专家</b><p class="soft" style="margin:4px 0 0;">建议首图用「错误做法 vs 正确节奏」两栏对照，提高收藏动机。</p></div></div>
+                <div class="debate-row"><div class="monogram">C</div><div><b>用户反应模拟</b><p class="soft" style="margin:4px 0 0;">学生党会关心预算，正文里应加“百元内替代方案”。</p></div></div>
+                <div style="margin-top:18px;" class="section-title"><span>III</span><b>裁判建议</b></div>
+                <div class="codebox">CHANGESET
+title: 加入「屏障受损」后果词
+body: 第二段补充预算范围
+tags: 新增 #敏感肌护肤 #平价护肤
+cover: 采用对照式封面</div>
+              </div>
+              <div class="panel pad">
+                <div class="section-title"><span>IV</span><b>风险检查</b></div>
+                <div class="trace-line"><span class="mono red">违禁词</span><span>“美白”需弱化为“提亮”</span><span class="chip red">1</span></div>
+                <div class="trace-line"><span class="mono">CTA</span><span>收藏提示位置合理</span><span class="chip green">OK</span></div>
+                <div class="trace-line"><span class="mono">标签</span><span>缺少敏感肌垂类标签</span><span class="chip gold">ADD</span></div>
+                <div class="section-title" style="margin-top:22px;"><span>V</span><b>历史报告</b></div>
+                <div class="history-row"><b>2026-05-15 14:28</b><span class="mono muted">A · 86 · current</span></div>
+                <div class="history-row"><b>2026-05-15 13:54</b><span class="mono muted">B · 78 · before rewrite</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cell">
+    <div class="frame-label"><span class="num">05</span><span class="title">Analytics · 编辑部数据看板</span><span class="desc">内容日历、标签分布、状态分布</span><span class="role">Ops</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>analytics</b></span></div>
+      <div class="viewport">
+        <aside class="sidebar">
+          <div class="brand"><div class="brand-mark">数</div><div><div class="brand-name">数据室</div><div class="brand-sub">Analytics</div></div></div>
+          <div class="nav-section">Views</div><div class="nav-item active"><i></i><span>本月概览</span></div><div class="nav-item"><i></i><span>标签分布</span></div><div class="nav-item"><i></i><span>内容日历</span></div>
+        </aside>
+        <div class="main">
+          <div class="topbar"><h2><span class="page-num">05</span> 编辑部数据看板</h2><div class="top-meta">MAY 2026 · BEIJING TIME</div><div class="top-actions"><button class="btn ghost">导出</button><button class="btn dark">新建计划</button></div></div>
+          <div class="content">
+            <div class="grid-4" style="margin-bottom:18px;">
+              <div class="stat"><div class="stat-num">48</div><div class="field-label">总笔记数</div></div>
+              <div class="stat"><div class="stat-num red">86</div><div class="field-label">平均评分</div></div>
+              <div class="stat"><div class="stat-num">17</div><div class="field-label">已发布</div></div>
+              <div class="stat"><div class="stat-num">09</div><div class="field-label">待诊断</div></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div class="panel pad"><div class="section-title"><span>I</span><b>标签分布 Top 10</b></div>
+                <div class="bar-row"><span>#护肤</span><div class="bar"><i style="width:92%"></i></div><b>18</b></div>
+                <div class="bar-row"><span>#穿搭</span><div class="bar"><i style="width:74%"></i></div><b>14</b></div>
+                <div class="bar-row"><span>#旅行</span><div class="bar"><i style="width:62%"></i></div><b>11</b></div>
+                <div class="bar-row"><span>#教程</span><div class="bar"><i style="width:48%"></i></div><b>08</b></div>
+                <div class="bar-row"><span>#避雷</span><div class="bar"><i style="width:42%"></i></div><b>07</b></div>
+              </div>
+              <div class="panel pad"><div class="section-title"><span>II</span><b>状态分布</b></div>
+                <div style="display:grid;grid-template-columns:220px 1fr;align-items:center;">
+                  <svg width="210" height="210" viewBox="0 0 210 210"><circle cx="105" cy="105" r="72" fill="none" stroke="#E1D7C7" stroke-width="24"/><circle cx="105" cy="105" r="72" fill="none" stroke="#B82B29" stroke-width="24" stroke-dasharray="230 452" transform="rotate(-90 105 105)"/><circle cx="105" cy="105" r="72" fill="none" stroke="#3B6A4D" stroke-width="24" stroke-dasharray="130 452" stroke-dashoffset="-230" transform="rotate(-90 105 105)"/><text x="105" y="101" text-anchor="middle" font-family="Newsreader" font-size="34" font-weight="800">48</text><text x="105" y="124" text-anchor="middle" class="mono" font-size="10" fill="#948A7A">TOTAL</text></svg>
+                  <div><p><span class="chip red">草稿 22</span></p><p><span class="chip green">已发布 17</span></p><p><span class="chip gold">定时发布 9</span></p></div>
+                </div>
+              </div>
+            </div>
+            <div class="panel pad"><div class="section-title"><span>III</span><b>内容日历 · 2026 年 5 月</b></div><div class="calendar">
+              <div class="day">日</div><div class="day">一</div><div class="day">二</div><div class="day">三</div><div class="day">四</div><div class="day">五</div><div class="day">六</div>
+              <div class="day"></div><div class="day"></div><div class="day"></div><div class="day"></div><div class="day">1</div><div class="day">2</div><div class="day">3</div>
+              <div class="day">4<br><span class="chip">1</span></div><div class="day">5</div><div class="day">6<br><span class="chip red">2</span></div><div class="day">7</div><div class="day">8<br><span class="chip green">1</span></div><div class="day">9</div><div class="day">10</div>
+              <div class="day">11</div><div class="day">12<br><span class="chip">1</span></div><div class="day">13</div><div class="day">14<br><span class="chip red">3</span></div><div class="day today">15<br><span class="chip red">2</span></div><div class="day">16</div><div class="day">17</div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cell">
+    <div class="frame-label"><span class="num">06</span><span class="title">Articles · 稿件库</span><span class="desc">搜索、分组、状态、评分排序</span><span class="role">Archive</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>articles</b></span></div>
+      <div class="viewport">
+        <aside class="sidebar">
+          <div class="brand"><div class="brand-mark">库</div><div><div class="brand-name">稿件库</div><div class="brand-sub">Archive</div></div></div>
+          <div class="nav-section">Filters</div><div class="nav-item active"><i></i><span>全部</span><span class="nav-badge">48</span></div><div class="nav-item"><i></i><span>草稿</span><span class="nav-badge">22</span></div><div class="nav-item"><i></i><span>已发布</span><span class="nav-badge">17</span></div>
+        </aside>
+        <div class="main">
+          <div class="topbar"><h2><span class="page-num">06</span> 全部稿件</h2><div class="top-meta">GROUP BY USER · SORT BY SCORE</div><div class="top-actions"><button class="btn ghost">搜索标题 / 用户</button><button class="btn red">去创作</button></div></div>
+          <div class="content">
+            <div class="section-title"><span>I</span><b>editor_yuan</b><span class="muted">48 篇笔记</span></div>
+            <div class="panel pad">
+              <div class="article-row"><span class="mono red">#128</span><div><b>早 C 晚 A 新手别乱用</b><div class="soft">护肤 · 学生党 · 2026-05-15</div></div><span class="chip gold">草稿</span><div class="score red">86</div><button class="btn ghost">打开</button></div>
+              <div class="article-row"><span class="mono red">#127</span><div><b>威海海景民宿收藏清单</b><div class="soft">旅行 · 民宿 · 2026-05-14</div></div><span class="chip green">已发布</span><div class="score">91</div><button class="btn ghost">打开</button></div>
+              <div class="article-row"><span class="mono red">#126</span><div><b>新手水光针避雷指南</b><div class="soft">医美 · 避雷 · 2026-05-13</div></div><span class="chip">定时</span><div class="score">82</div><button class="btn ghost">打开</button></div>
+              <div class="article-row"><span class="mono red">#125</span><div><b>小个子通勤穿搭公式</b><div class="soft">穿搭 · 通勤 · 2026-05-12</div></div><span class="chip gold">草稿</span><div class="score">78</div><button class="btn ghost">打开</button></div>
+              <div class="article-row"><span class="mono red">#124</span><div><b>平价防晒空瓶复盘</b><div class="soft">护肤 · 清单 · 2026-05-11</div></div><span class="chip green">已发布</span><div class="score">89</div><button class="btn ghost">打开</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cell">
+    <div class="frame-label"><span class="num">07</span><span class="title">Templates · 结构骨架库</span><span class="desc">踩坑、清单、种草、共鸣、教程</span><span class="role">Library</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>templates</b></span></div>
+      <div class="viewport">
+        <aside class="sidebar"><div class="brand"><div class="brand-mark">模</div><div><div class="brand-name">模板库</div><div class="brand-sub">Structures</div></div></div><div class="nav-section">Category</div><div class="nav-item active"><i></i><span>全部模板</span></div><div class="nav-item"><i></i><span>踩坑</span></div><div class="nav-item"><i></i><span>种草</span></div><div class="nav-item"><i></i><span>教程</span></div></aside>
+        <div class="main">
+          <div class="topbar"><h2><span class="page-num">07</span> 结构骨架库</h2><div class="top-meta">APPLY TEMPLATE · EXTRACT FROM ARTICLE</div><div class="top-actions"><button class="btn ghost">从稿件提取</button><button class="btn dark">自定义模板</button></div></div>
+          <div class="content">
+            <div class="grid-3">
+              <div class="template-card"><span class="chip red">踩坑</span><h3>先痛点，后复盘</h3><p class="soft">适合避雷、经验复盘、真实踩坑。</p><div class="codebox">1. 我遇到的问题
+2. 错误做法
+3. 正确替代
+4. 收藏总结</div></div>
+              <div class="template-card"><span class="chip gold">清单</span><h3>收藏型清单</h3><p class="soft">适合工具、好物、路线、产品合集。</p><div class="codebox">标题：X 个值得收藏
+每项：场景 / 优点 / 注意
+结尾：适合谁</div></div>
+              <div class="template-card"><span class="chip green">教程</span><h3>步骤型教程</h3><p class="soft">适合护肤流程、修图、穿搭公式。</p><div class="codebox">Step 01
+Step 02
+Step 03
+常见错误</div></div>
+              <div class="template-card"><span class="chip">种草</span><h3>体验式种草</h3><p class="soft">用真实使用场景建立可信度。</p><div class="codebox">场景痛点 → 使用过程 → 细节感受 → 推荐边界</div></div>
+              <div class="template-card"><span class="chip">共鸣</span><h3>情绪共鸣文</h3><p class="soft">适合生活方式、成长、女性议题。</p><div class="codebox">一句扎心开头
+一个具体瞬间
+转折
+轻 CTA</div></div>
+              <div class="template-card"><span class="chip red">生成</span><h3>按模板成稿</h3><p class="soft">输入主题，AI 按骨架生成完整笔记。</p><label class="field-label">Topic</label><div class="input">新手入门水光针避雷</div><button class="btn red" style="margin-top:10px;">生成稿件</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cell">
+    <div class="frame-label"><span class="num">08</span><span class="title">Tasks · 后台任务监控</span><span class="desc">Agent trace、工具耗时、任务恢复</span><span class="role">Trace</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>tasks</b></span></div>
+      <div class="viewport">
+        <aside class="sidebar"><div class="brand"><div class="brand-mark">轨</div><div><div class="brand-name">任务中心</div><div class="brand-sub">Trace</div></div></div><div class="nav-section">Status</div><div class="nav-item active"><i></i><span>Running</span><span class="nav-badge">03</span></div><div class="nav-item"><i></i><span>Completed</span></div><div class="nav-item"><i></i><span>Failed</span></div></aside>
+        <div class="main">
+          <div class="topbar"><h2><span class="page-num">08</span> 后台任务监控</h2><div class="top-meta">SSE REPLAY · RECOVERABLE TASKS</div><div class="top-actions"><button class="btn ghost">刷新</button><button class="btn dark">查看 Trace</button></div></div>
+          <div class="content">
+            <div class="task-row"><div style="display:flex;align-items:center;gap:8px;"><b class="mono">task_diag_01HZ8R7K</b><span class="chip gold">running</span><span class="chip">诊断任务</span><span class="chip">笔记 #128</span></div><p class="soft">正在执行专家辩论 · 事件 42 · 耗时 18.6s</p><div class="task-grid"><div class="panel pad"><span class="field-label">首事件</span><b>0.6s</b></div><div class="panel pad"><span class="field-label">首字</span><b>1.4s</b></div><div class="panel pad"><span class="field-label">输出字符</span><b>4821</b></div><div class="panel pad"><span class="field-label">工具数</span><b>6</b></div></div></div>
+            <div class="task-row"><div style="display:flex;align-items:center;gap:8px;"><b class="mono">task_img_01HZ8Q2B</b><span class="chip green">completed</span><span class="chip">image.edit</span><span class="chip">trace 7F2A</span></div><p class="soft">封面局部重绘完成，已保存到 images/edited_*.png。</p><div class="trace-line"><span class="mono red">tool</span><span>inpaint_image</span><span>6.8s</span></div><div class="trace-line"><span class="mono red">tool</span><span>upload_mask</span><span>0.4s</span></div></div>
+            <div class="task-row"><div style="display:flex;align-items:center;gap:8px;"><b class="mono">task_chat_01HZ8N5M</b><span class="chip green">completed</span><span class="chip">conversation #51</span></div><p class="soft">完整成稿、标题候选、标签推荐、封面 prompt 均完成。</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cell">
+    <div class="frame-label"><span class="num">09</span><span class="title">Settings · 工作室配置</span><span class="desc">模型池、图片模型、用户与 MCP 工具</span><span class="role">Config</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>settings</b></span></div>
+      <div class="viewport">
+        <aside class="sidebar"><div class="brand"><div class="brand-mark">设</div><div><div class="brand-name">配置室</div><div class="brand-sub">Settings</div></div></div><div class="nav-section">Sections</div><div class="nav-item active"><i></i><span>模型队列</span></div><div class="nav-item"><i></i><span>图片设置</span></div><div class="nav-item"><i></i><span>用户管理</span></div><div class="nav-item"><i></i><span>MCP 工具</span></div></aside>
+        <div class="main">
+          <div class="topbar"><h2><span class="page-num">09</span> 工作室配置</h2><div class="top-meta">HOT RELOAD · SETTINGS.JSON</div><div class="top-actions"><button class="btn ghost">测试连接</button><button class="btn dark">保存配置</button></div></div>
+          <div class="content">
+            <div class="setting-layout">
+              <div class="panel pad"><div class="section-title"><span>I</span><b>对话模型队列</b></div>
+                <div class="model-row"><div class="input">gpt-4o</div><div class="input">https://api.openai.com/v1</div><span class="chip green">primary</span></div>
+                <div class="model-row"><div class="input">deepseek-chat</div><div class="input">compatible gateway</div><span class="chip">fallback</span></div>
+                <div class="model-row"><div class="input">qwen-plus</div><div class="input">compatible gateway</div><span class="chip">fallback</span></div>
+                <div class="section-title" style="margin-top:18px;"><span>II</span><b>图片模型</b></div>
+                <div class="model-row"><div class="input">gpt-image-1</div><div class="input">1152×1536</div><span class="chip green">high</span></div>
+                <p class="soft">支持 image_url / file_upload 兜底，质量能力按模型声明自动切换。</p>
+              </div>
+              <div class="panel pad"><div class="section-title"><span>III</span><b>个人与管理</b></div>
+                <div class="trace-line"><span class="mono red">user</span><span>editor_yuan</span><span class="chip red">admin</span></div>
+                <div class="trace-line"><span class="mono">user</span><span>creator_01</span><span class="chip">member</span></div>
+                <div class="trace-line"><span class="mono">data</span><span>~/.local/share/xhs-agent</span><span class="chip green">ok</span></div>
+                <div class="section-title" style="margin-top:18px;"><span>IV</span><b>MCP 工具</b></div>
+                <div style="display:flex;gap:7px;flex-wrap:wrap;"><span class="chip">generate_article</span><span class="chip">diagnose_article</span><span class="chip">edit_image</span><span class="chip">suggest_tags</span><span class="chip">crop_image</span><span class="chip">list_templates</span></div>
+                <div class="codebox" style="margin-top:16px;">GET /api/mcp/tools
+POST /api/mcp/call
+stdio: bash start_mcp.sh</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cell">
+    <div class="frame-label"><span class="num">10</span><span class="title">Image Lab · PS 式图片拆层</span><span class="desc">生成、局部重绘、消除、裁剪、图层解析</span><span class="role">Tool</span></div>
+    <div class="frame">
+      <div class="browser"><div class="dots"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div><span class="path">xhs-agent / <b>image-lab</b></span></div>
+      <div class="viewport">
+        <aside class="sidebar"><div class="brand"><div class="brand-mark">图</div><div><div class="brand-name">图片实验室</div><div class="brand-sub">Image Lab</div></div></div><div class="nav-section">Modes</div><div class="nav-item active"><i></i><span>局部重绘</span></div><div class="nav-item"><i></i><span>消除对象</span></div><div class="nav-item"><i></i><span>画布裁剪</span></div><div class="nav-item"><i></i><span>图层分析</span></div></aside>
+        <div class="main">
+          <div class="topbar"><h2><span class="page-num">10</span> PS 式图片拆层</h2><div class="top-meta">IMAGE EDIT · MASK / RGBA PNG</div><div class="top-actions"><button class="btn ghost">上传图片</button><button class="btn red">生成变体</button></div></div>
+          <div class="content">
+            <div class="image-lab">
+              <div class="panel pad"><div class="section-title"><span>I</span><b>提示词</b></div><label class="field-label">Generate Prompt</label><div class="textarea" style="height:166px;">小红书爆款封面海报，主题是威海海景民宿，奶油蓝+米白色调，落地窗看海上日出，图文排版精致。</div><label class="field-label" style="margin-top:14px;">Edit Prompt</label><div class="textarea" style="height:116px;">把选区改成更精致的小红书风格装饰卡片。</div><button class="btn dark" style="margin-top:14px;width:100%;">提交编辑</button></div>
+              <div><div class="canvas-box"><div class="poster"><span class="chip red">威海民宿</span><h3>住进海上日出</h3><p class="soft">落地窗 / 奶油蓝 / 周末可订</p><div style="height:136px;background:linear-gradient(135deg,#CFE3EA,#F4D7C6);border:1px solid var(--rule);"></div><div class="selection" style="left:142px;top:214px;width:190px;height:84px;"></div></div></div><div style="display:flex;gap:8px;margin-top:12px;"><span class="chip red">selection x=142 y=214 190×84</span><span class="chip">1152×1536</span><span class="chip green">mask ready</span></div></div>
+              <div class="panel pad"><div class="section-title"><span>II</span><b>图层</b></div>
+                <div class="layer-row"><span class="mono red">01</span><span>标题文字 · 住进海上日出</span><span class="chip">text</span></div>
+                <div class="layer-row"><span class="mono red">02</span><span>装饰卡片 · 价格标签</span><span class="chip red">selected</span></div>
+                <div class="layer-row"><span class="mono red">03</span><span>背景 · 海景民宿</span><span class="chip">image</span></div>
+                <div class="layer-row"><span class="mono red">04</span><span>贴纸 · 收藏提示</span><span class="chip">decoration</span></div>
+                <div class="section-title" style="margin-top:18px;"><span>III</span><b>操作日志</b></div>
+                <div class="trace-line"><span class="mono red">14:31</span><span>extract_pixel_layers</span><span>2.4s</span></div>
+                <div class="trace-line"><span class="mono red">14:32</span><span>upload_mask</span><span>0.2s</span></div>
+                <div class="trace-line"><span class="mono red">14:33</span><span>images.edit</span><span>running</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div>
+    <h2>Design Note</h2>
+    <p>这版保留历史原型的编辑室叙事，但把字型升级为更高级杂志版：Newsreader 负责标题的出版物气质，IBM Plex Sans 负责工具可用性，JetBrains Mono 负责 Agent 系统纹理。</p>
+    <p>完整系统以 overview 平铺交付，便于同时检查页面密度、标题节奏、导航一致性和高频工作流。</p>
+  </div>
+  <div class="mono muted">XHS-AGENT / EDITORIAL MAGAZINE STUDIO<br>FULL OVERVIEW · 1440×900 × 10</div>
+</footer>
+</body>
+</html>

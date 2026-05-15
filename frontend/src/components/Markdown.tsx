@@ -36,7 +36,7 @@ export default function Markdown({
               sx={{
                 maxWidth: 320,
                 maxHeight: 400,
-                borderRadius: 2,
+                borderRadius: 0,
                 border: '1px solid', borderColor: 'divider',
                 objectFit: 'contain',
                 cursor: onImageClick ? 'pointer' : 'default',
@@ -61,7 +61,7 @@ export default function Markdown({
               sx={{
                 maxWidth: 280,
                 maxHeight: 360,
-                borderRadius: 2,
+                borderRadius: 0,
                 border: '1px solid', borderColor: 'divider',
                 objectFit: 'contain',
                 cursor: 'pointer',

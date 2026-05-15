@@ -111,7 +111,7 @@ export default function CommandPalette() {
       fullWidth
       PaperProps={{
         sx: {
-          borderRadius: 3,
+          borderRadius: 0,
           overflow: 'hidden',
           mt: '15vh',
           alignSelf: 'flex-start',

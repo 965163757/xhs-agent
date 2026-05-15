@@ -22,11 +22,11 @@ function StatCard({ value, label, color }: { value: string | number; label: stri
         textAlign: 'center',
         position: 'relative',
         overflow: 'hidden',
-        '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' },
-        transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
+        '&:hover': { transform: 'translateY(-1px)', borderColor: 'primary.main' },
+        transition: 'all 0.18s cubic-bezier(0.16,1,0.3,1)',
       }}
     >
-      <Typography sx={{ fontSize: 32, fontWeight: 800, color: color || 'text.primary', letterSpacing: -1 }}>
+      <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 34, fontWeight: 800, color: color || 'text.primary', letterSpacing: -1 }}>
         {value}
       </Typography>
       <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mt: 0.3, fontWeight: 500 }}>
@@ -49,13 +49,13 @@ function TagBarChart({ items }: { items: Array<{ tag: string; count: number }> }
             <Typography sx={{ width: 70, fontSize: 11, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {item.tag}
             </Typography>
-            <Box sx={{ flex: 1, height: 9, borderRadius: 999, bgcolor: 'rgba(255,36,66,0.08)', overflow: 'hidden' }}>
+            <Box sx={{ flex: 1, height: 9, borderRadius: 0, bgcolor: 'var(--paper-soft)', overflow: 'hidden' }}>
               <Box
                 sx={{
                   width: `${Math.max(6, (item.count / max) * 100)}%`,
                   height: '100%',
-                  borderRadius: 999,
-                  background: 'linear-gradient(90deg,#FF2442,#FF7A00)',
+                  borderRadius: 0,
+                  bgcolor: 'text.primary',
                 }}
               />
             </Box>
@@ -76,7 +76,7 @@ function StatusDonutChart({
   data: Record<string, number>
   labels: Record<string, string>
 }) {
-  const colors = ['#FF2442', '#16A34A', '#FFB800', '#8C8C8C']
+  const colors = ['#C8302E', '#3E6B4E', '#A87029', '#8C8578']
   const entries = Object.entries(data).filter(([, v]) => v > 0)
   const total = entries.reduce((sum, [, v]) => sum + v, 0)
   let offset = 25
@@ -168,9 +168,9 @@ export default function AnalyticsPage() {
       {/* Stats cards */}
       {stats && (
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2, mb: 4 }}>
-          <StatCard value={stats.total} label="总笔记数" color="#FF2442" />
+          <StatCard value={stats.total} label="总笔记数" color="#C8302E" />
           <StatCard value={stats.by_status['published'] || 0} label="已发布" color="#16A34A" />
-          <StatCard value={stats.by_status['draft'] || 0} label="草稿" color="#D97706" />
+          <StatCard value={stats.by_status['draft'] || 0} label="草稿" color="#A87029" />
           <StatCard value={stats.avg_score ?? '—'} label="平均评分" />
         </Box>
       )}
@@ -219,10 +219,10 @@ export default function AnalyticsPage() {
                   minHeight: { xs: 40, md: 64 },
                   border: '1px solid',
                   borderColor: isToday ? 'primary.main' : 'divider',
-                  borderRadius: 2,
+                  borderRadius: 0,
                   p: 0.5,
                   cursor: articles.length ? 'pointer' : 'default',
-                  bgcolor: isToday ? 'rgba(255,36,66,0.03)' : 'transparent',
+                  bgcolor: isToday ? 'var(--accent-soft)' : 'transparent',
                   transition: 'all 0.15s ease',
                   '&:hover': articles.length ? { bgcolor: 'rgba(0,0,0,0.02)', borderColor: 'text.secondary' } : {},
                 }}

@@ -48,13 +48,13 @@ export default function PhonePreview({
           height: 660,
           transform: `scale(${safeScale})`,
           transformOrigin: 'top left',
-          border: '2px solid #E5E5E5',
+          border: '2px solid var(--ink)',
           borderRadius: '38px',
           overflow: 'hidden',
-          bgcolor: '#fff',
+          bgcolor: '#FDFBF6',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
+          boxShadow: 'none',
         }}
       >
         {/* Status bar */}
@@ -68,10 +68,10 @@ export default function PhonePreview({
             flexShrink: 0,
           }}
         >
-          <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#1F1F1F' }}>9:41</Typography>
+          <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'var(--ink)', fontFamily: 'var(--mono)' }}>9:41</Typography>
           <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-            <Box sx={{ width: 16, height: 10, border: '1px solid #1F1F1F', borderRadius: 0.5, position: 'relative' }}>
-              <Box sx={{ position: 'absolute', inset: '1.5px', bgcolor: '#1F1F1F', borderRadius: 0.3 }} />
+            <Box sx={{ width: 16, height: 10, border: '1px solid var(--ink)', borderRadius: 0, position: 'relative' }}>
+              <Box sx={{ position: 'absolute', inset: '1.5px', bgcolor: 'var(--ink)', borderRadius: 0 }} />
             </Box>
           </Box>
         </Box>
@@ -79,7 +79,7 @@ export default function PhonePreview({
         {/* Scrollable content */}
         <Box sx={{ flex: 1, overflow: 'auto', '&::-webkit-scrollbar': { display: 'none' } }}>
           {/* Image carousel */}
-          <Box sx={{ position: 'relative', width: '100%', aspectRatio: '3 / 4', bgcolor: '#F5F5F5' }}>
+          <Box sx={{ position: 'relative', width: '100%', aspectRatio: '3 / 4', bgcolor: 'var(--paper-soft)', borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)' }}>
           {allImages.length > 0 ? (
             <>
               <Box
@@ -94,8 +94,8 @@ export default function PhonePreview({
                     onClick={() => setSlideIdx(i => (i - 1 + allImages.length) % allImages.length)}
                     sx={{
                       position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)',
-                      bgcolor: 'rgba(0,0,0,0.35)', color: '#fff', width: 28, height: 28,
-                      '&:hover': { bgcolor: 'rgba(0,0,0,0.55)' },
+                      bgcolor: 'rgba(26,24,20,0.72)', color: '#fff', width: 28, height: 28, borderRadius: 0,
+                      '&:hover': { bgcolor: 'rgba(26,24,20,0.9)' },
                     }}
                   >
                     <ChevronLeftIcon sx={{ fontSize: 18 }} />
@@ -105,8 +105,8 @@ export default function PhonePreview({
                     onClick={() => setSlideIdx(i => (i + 1) % allImages.length)}
                     sx={{
                       position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
-                      bgcolor: 'rgba(0,0,0,0.35)', color: '#fff', width: 28, height: 28,
-                      '&:hover': { bgcolor: 'rgba(0,0,0,0.55)' },
+                      bgcolor: 'rgba(26,24,20,0.72)', color: '#fff', width: 28, height: 28, borderRadius: 0,
+                      '&:hover': { bgcolor: 'rgba(26,24,20,0.9)' },
                     }}
                   >
                     <ChevronRightIcon sx={{ fontSize: 18 }} />
@@ -123,8 +123,8 @@ export default function PhonePreview({
                         sx={{
                           width: i === safeIdx ? 16 : 6,
                           height: 6,
-                          borderRadius: 3,
-                          bgcolor: i === safeIdx ? '#fff' : 'rgba(255,255,255,0.5)',
+                          borderRadius: 0,
+                          bgcolor: i === safeIdx ? 'var(--accent)' : 'rgba(244,241,234,0.72)',
                           transition: 'all .2s',
                         }}
                       />
@@ -134,8 +134,8 @@ export default function PhonePreview({
                   <Box
                     sx={{
                       position: 'absolute', top: 10, right: 10,
-                      bgcolor: 'rgba(0,0,0,0.45)', color: '#fff',
-                      fontSize: 11, px: 0.8, py: 0.2, borderRadius: 1,
+                      bgcolor: 'rgba(26,24,20,0.78)', color: '#fff',
+                      fontSize: 11, px: 0.8, py: 0.2, borderRadius: 0, fontFamily: 'var(--mono)', fontWeight: 800,
                     }}
                   >
                     {safeIdx + 1}/{allImages.length}
@@ -150,8 +150,9 @@ export default function PhonePreview({
                 height: '100%',
                 display: 'grid',
                 placeItems: 'center',
-                color: '#BFBFBF',
+                color: 'var(--ink-mute)',
                 fontSize: 13,
+                fontFamily: 'var(--serif)',
               }}
             >
               暂无封面
@@ -167,31 +168,33 @@ export default function PhonePreview({
               sx={{
                 width: 32,
                 height: 32,
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, #FF6B6B, #FF2741)',
+                borderRadius: 0,
+                background: 'var(--ink)',
                 display: 'grid',
                 placeItems: 'center',
-                color: '#fff',
+                color: 'var(--paper)',
                 fontSize: 12,
-                fontWeight: 700,
+                fontWeight: 800,
+                fontFamily: 'var(--serif)',
               }}
             >
               我
             </Box>
             <Box>
-              <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#333', lineHeight: 1.2 }}>
+              <Typography sx={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', lineHeight: 1.2, fontFamily: 'var(--serif)' }}>
                 小红书创作者
               </Typography>
-              <Typography sx={{ fontSize: 10, color: '#999' }}>刚刚</Typography>
+              <Typography sx={{ fontSize: 10, color: 'var(--ink-mute)', fontFamily: 'var(--mono)' }}>刚刚</Typography>
             </Box>
           </Stack>
 
           {/* Title */}
           <Typography
             sx={{
-              fontSize: 16,
+              fontSize: 17,
               fontWeight: 700,
-              color: '#333',
+              color: 'var(--ink)',
+              fontFamily: 'var(--serif)',
               lineHeight: 1.4,
               mb: 1,
               wordBreak: 'break-word',
@@ -204,7 +207,7 @@ export default function PhonePreview({
           <Typography
             sx={{
               fontSize: 14,
-              color: '#333',
+              color: 'var(--ink)',
               lineHeight: 1.8,
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
@@ -216,7 +219,7 @@ export default function PhonePreview({
 
           {/* Tags */}
           {normalizedTags.length > 0 && (
-            <Typography sx={{ fontSize: 13, color: '#FF2741', lineHeight: 1.8, mb: 1 }}>
+            <Typography sx={{ fontSize: 13, color: 'var(--accent)', lineHeight: 1.8, mb: 1, fontFamily: 'var(--serif)', fontWeight: 700 }}>
               {normalizedTags.map(t => `#${t}`).join(' ')}
             </Typography>
           )}
@@ -227,7 +230,7 @@ export default function PhonePreview({
         <Box
           sx={{
             height: 50,
-            borderTop: '1px solid #F0F0F0',
+            borderTop: '1px solid var(--rule)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-around',
@@ -236,18 +239,18 @@ export default function PhonePreview({
           }}
         >
           <Stack direction="row" spacing={0.3} alignItems="center">
-            <FavoriteBorderIcon sx={{ fontSize: 20, color: '#666' }} />
-            <Typography sx={{ fontSize: 11, color: '#666' }}>128</Typography>
+            <FavoriteBorderIcon sx={{ fontSize: 20, color: 'var(--ink-soft)' }} />
+            <Typography sx={{ fontSize: 11, color: 'var(--ink-soft)', fontFamily: 'var(--mono)' }}>128</Typography>
           </Stack>
           <Stack direction="row" spacing={0.3} alignItems="center">
-            <StarBorderIcon sx={{ fontSize: 20, color: '#666' }} />
-            <Typography sx={{ fontSize: 11, color: '#666' }}>56</Typography>
+            <StarBorderIcon sx={{ fontSize: 20, color: 'var(--ink-soft)' }} />
+            <Typography sx={{ fontSize: 11, color: 'var(--ink-soft)', fontFamily: 'var(--mono)' }}>56</Typography>
           </Stack>
           <Stack direction="row" spacing={0.3} alignItems="center">
-            <ChatBubbleOutlineIcon sx={{ fontSize: 18, color: '#666' }} />
-            <Typography sx={{ fontSize: 11, color: '#666' }}>23</Typography>
+            <ChatBubbleOutlineIcon sx={{ fontSize: 18, color: 'var(--ink-soft)' }} />
+            <Typography sx={{ fontSize: 11, color: 'var(--ink-soft)', fontFamily: 'var(--mono)' }}>23</Typography>
           </Stack>
-          <ShareOutlinedIcon sx={{ fontSize: 20, color: '#666' }} />
+          <ShareOutlinedIcon sx={{ fontSize: 20, color: 'var(--ink-soft)' }} />
         </Box>
       </Box>
     </Box>

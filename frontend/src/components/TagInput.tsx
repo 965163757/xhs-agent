@@ -3,10 +3,10 @@ import { Box, Chip, Paper, Stack, TextField, Typography } from '@mui/material'
 import { HotTag, suggestHotTags } from '../api/client'
 
 const HEAT_COLORS: Record<string, string> = {
-  S: '#FF2442',
-  A: '#FF6B35',
-  B: '#FFB800',
-  C: '#8A8A8F',
+  S: '#C8302E',
+  A: '#A87029',
+  B: '#D3A257',
+  C: '#8C8578',
 }
 
 export default function TagInput({
@@ -94,27 +94,31 @@ export default function TagInput({
   }
 
   return (
-    <Box ref={containerRef} sx={{ position: 'relative' }}>
+    <Box ref={containerRef} sx={{ position: 'relative', zIndex: showSuggestions ? 30 : 1, overflow: 'visible' }}>
       {showLabel && (
-        <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.5, fontWeight: 600 }}>
-          标签
+        <Typography sx={{ fontSize: 11, color: 'text.secondary', mb: 0.5, fontWeight: 800, fontFamily: 'var(--mono)', textTransform: 'uppercase', letterSpacing: 0 }}>
+          TAGS
         </Typography>
       )}
       <Box
         sx={{
           display: 'flex',
           flexWrap: 'wrap',
-          gap: 0.6,
-          alignItems: 'center',
+          columnGap: 0.65,
+          rowGap: 0.65,
+          alignItems: 'flex-start',
           border: '1px solid',
           borderColor: 'divider',
-          borderRadius: 3,
+          borderRadius: 0,
           px: 1.2,
-          py: 0.8,
-          minHeight: 42,
+          py: 1,
+          minHeight: 48,
           bgcolor: 'background.paper',
-          '&:focus-within': { borderColor: 'text.primary' },
-          transition: 'border-color .15s',
+          '&:focus-within': {
+            borderColor: 'primary.main',
+            bgcolor: 'var(--accent-soft)',
+          },
+          transition: 'border-color .15s, background-color .15s',
         }}
       >
         {normalizedTags.map((t, i) => (
@@ -123,7 +127,30 @@ export default function TagInput({
             label={`#${t}`}
             size="small"
             onDelete={() => onChange(normalizedTags.filter((_, idx) => idx !== i))}
-            sx={{ fontSize: 12, height: 26 }}
+            sx={{
+              fontSize: 12,
+              minHeight: 26,
+              height: 'auto',
+              borderRadius: 0,
+              bgcolor: 'var(--paper-soft)',
+              border: '1px solid',
+              borderColor: 'var(--rule)',
+              color: 'text.primary',
+              maxWidth: '100%',
+              '& .MuiChip-label': {
+                px: 0.8,
+                py: 0.25,
+                lineHeight: 1.35,
+                whiteSpace: 'normal',
+                overflowWrap: 'anywhere',
+              },
+              '& .MuiChip-deleteIcon': {
+                color: 'text.secondary',
+                fontSize: 15,
+                mr: 0.4,
+                '&:hover': { color: 'primary.main' },
+              },
+            }}
           />
         ))}
         <TextField
@@ -134,8 +161,8 @@ export default function TagInput({
           onKeyDown={handleKeyDown}
           onFocus={() => { if (suggestions.length || !input) { suggestHotTags(input.replace(/^[#＃]+/, ''), category || '', 12).then(items => { setSuggestions(items.filter(t => !normalizedTags.includes(normalizeTag(t.tag)))); setShowSuggestions(true) }).catch(() => {}) } }}
           onBlur={() => { setTimeout(() => { if (input.trim() && !showSuggestions) addTag(input) }, 150) }}
-          InputProps={{ disableUnderline: true, sx: { fontSize: 13, py: 0 } }}
-          sx={{ flex: 1, minWidth: 80 }}
+          InputProps={{ disableUnderline: true, sx: { fontSize: 13, py: 0.2, lineHeight: 1.6 } }}
+          sx={{ flex: '1 1 140px', minWidth: 120 }}
         />
       </Box>
 
@@ -147,11 +174,15 @@ export default function TagInput({
             top: '100%',
             left: 0,
             right: 0,
-            mt: 0.5,
-            zIndex: 1200,
+            mt: 0.75,
+            zIndex: theme => theme.zIndex.modal + 10,
             maxHeight: 240,
             overflow: 'auto',
-            borderRadius: 2,
+            borderRadius: 0,
+            border: '1px solid',
+            borderColor: 'divider',
+            boxShadow: 'none',
+            bgcolor: 'background.paper',
           }}
         >
           {suggestions.map((s, idx) => (
@@ -165,21 +196,23 @@ export default function TagInput({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                bgcolor: idx === activeIdx ? 'action.hover' : 'transparent',
-                '&:hover': { bgcolor: 'action.hover' },
+                borderBottom: idx === suggestions.length - 1 ? 0 : '1px solid',
+                borderColor: 'divider',
+                bgcolor: idx === activeIdx ? 'background.default' : 'background.paper',
+                '&:hover': { bgcolor: 'background.default' },
               }}
             >
-              <Typography sx={{ fontSize: 13 }}>#{normalizeTag(s.tag)}</Typography>
+              <Typography sx={{ fontSize: 13, fontFamily: 'var(--serif)', fontWeight: 700 }}>#{normalizeTag(s.tag)}</Typography>
               <Stack direction="row" spacing={0.5} alignItems="center">
                 <Box
                   sx={{
                     width: 8,
                     height: 8,
-                    borderRadius: '50%',
+                    borderRadius: 0,
                     bgcolor: HEAT_COLORS[s.heat] || '#ccc',
                   }}
                 />
-                <Typography sx={{ fontSize: 11, color: HEAT_COLORS[s.heat] || '#999' }}>
+                <Typography sx={{ fontSize: 11, color: HEAT_COLORS[s.heat] || '#999', fontFamily: 'var(--mono)', fontWeight: 800 }}>
                   {s.heat_label}
                 </Typography>
               </Stack>

@@ -347,7 +347,7 @@ export default function ImageEditor({
             px: 2.5,
             py: 1.5,
             borderBottom: 1, borderColor: 'divider',
-            bgcolor: '#fff',
+            bgcolor: 'background.paper',
           }}
         >
           <Typography sx={{ fontSize: 17, fontWeight: 800 }}>图片编辑</Typography>
@@ -364,11 +364,11 @@ export default function ImageEditor({
                 sx={{
                   height: 32,
                   px: 0.5,
-                  bgcolor: mode === m ? '#1F1F1F' : '#F4EFE5',
-                  color: mode === m ? '#fff' : '#1F1F1F',
-                  '& .MuiChip-icon': { color: mode === m ? '#fff' : '#1F1F1F' },
+                  bgcolor: mode === m ? 'text.primary' : 'background.default',
+                  color: mode === m ? 'background.paper' : 'text.primary',
+                  '& .MuiChip-icon': { color: mode === m ? 'var(--paper) !important' : 'var(--ink) !important' },
                   fontWeight: 600,
-                  borderRadius: 999,
+                  borderRadius: 0,
                 }}
               />
             ))}
@@ -415,9 +415,9 @@ export default function ImageEditor({
                 width: '100%',
                 height: '100%',
                 maxWidth: 1000,
-                borderRadius: 3,
+                borderRadius: 0,
                 overflow: 'hidden',
-                border: '1px solid #EEE9E1',
+                border: '1px solid var(--rule)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -470,7 +470,7 @@ export default function ImageEditor({
                         top: (cropBox.y / naturalSize.h) * displayRect.h,
                         width: (cropBox.w / naturalSize.w) * displayRect.w,
                         height: (cropBox.h / naturalSize.h) * displayRect.h,
-                        border: '2px dashed #FF2741',
+                        border: '2px dashed var(--accent)',
                         boxShadow: '0 0 0 9999px rgba(0,0,0,0.35)',
                         pointerEvents: 'none',
                       }}
@@ -485,8 +485,8 @@ export default function ImageEditor({
           <Box
             sx={{
               width: 340,
-              borderLeft: '1px solid #EEE9E1',
-              bgcolor: '#fff',
+              borderLeft: '1px solid var(--rule)',
+              bgcolor: 'background.paper',
               p: 2.5,
               display: 'flex',
               flexDirection: 'column',
@@ -503,7 +503,7 @@ export default function ImageEditor({
                   max={120}
                   onChange={(_, v) => setBrush(v as number)}
                   sx={{
-                    color: '#FF2741',
+                    color: 'primary.main',
                   }}
                 />
                 <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
@@ -551,21 +551,21 @@ export default function ImageEditor({
               <Box
                 sx={{
                   p: 1.5,
-                  bgcolor: '#FFF5F7',
-                  borderRadius: 2,
-                  border: '1px solid #FFE5E9',
+                  bgcolor: 'var(--accent-soft)',
+                  borderRadius: 0,
+                  border: '1px solid var(--rule)',
                 }}
               >
                 <Stack direction="row" spacing={1} alignItems="center">
-                  <CircularProgress size={14} sx={{ color: '#FF2741' }} />
-                  <Typography sx={{ fontSize: 13, color: '#D61030' }}>{busy}</Typography>
+                  <CircularProgress size={14} sx={{ color: 'primary.main' }} />
+                  <Typography sx={{ fontSize: 13, color: 'primary.main' }}>{busy}</Typography>
                 </Stack>
                 <LinearProgress
                   sx={{
                     mt: 1,
-                    bgcolor: '#FFE5E9',
-                    '& .MuiLinearProgress-bar': { bgcolor: '#FF2741' },
-                    borderRadius: 99,
+                    bgcolor: 'background.paper',
+                    '& .MuiLinearProgress-bar': { bgcolor: 'primary.main' },
+                    borderRadius: 0,
                     height: 3,
                   }}
                 />
@@ -580,8 +580,8 @@ export default function ImageEditor({
                   src={absUrl(resultUrl)}
                   sx={{
                     width: '100%',
-                    borderRadius: 2,
-                    border: '1px solid #EEE9E1',
+                    borderRadius: 0,
+                    border: '1px solid var(--rule)',
                   }}
                 />
               </Box>
@@ -599,7 +599,7 @@ export default function ImageEditor({
                   sx={{
                     bgcolor: 'text.primary',
                     '&:hover': { bgcolor: '#000' },
-                    borderRadius: 999,
+                    borderRadius: 0,
                   }}
                 >
                   应用裁剪
@@ -613,9 +613,9 @@ export default function ImageEditor({
                   onClick={doInpaint}
                   startIcon={<AutoFixHighIcon />}
                   sx={{
-                    bgcolor: '#FF2741',
-                    '&:hover': { bgcolor: '#D61030' },
-                    borderRadius: 999,
+                    bgcolor: 'primary.main',
+                    '&:hover': { bgcolor: 'primary.dark' },
+                    borderRadius: 0,
                   }}
                 >
                   局部重绘
@@ -629,9 +629,9 @@ export default function ImageEditor({
                   onClick={doErase}
                   startIcon={<ContentEraserIcon />}
                   sx={{
-                    bgcolor: '#FF2741',
-                    '&:hover': { bgcolor: '#D61030' },
-                    borderRadius: 999,
+                    bgcolor: 'primary.main',
+                    '&:hover': { bgcolor: 'primary.dark' },
+                    borderRadius: 0,
                   }}
                 >
                   消除
@@ -647,7 +647,7 @@ export default function ImageEditor({
                   sx={{
                     bgcolor: 'text.primary',
                     '&:hover': { bgcolor: '#000' },
-                    borderRadius: 999,
+                    borderRadius: 0,
                   }}
                 >
                   整体编辑
@@ -661,9 +661,9 @@ export default function ImageEditor({
                 startIcon={<CheckIcon />}
                 onClick={applyAndClose}
                 sx={{
-                  bgcolor: '#16A34A',
-                  '&:hover': { bgcolor: '#0F8C3D' },
-                  borderRadius: 999,
+                  bgcolor: 'success.main',
+                  '&:hover': { bgcolor: 'success.dark' },
+                  borderRadius: 0,
                 }}
               >
                 用这张替换原图

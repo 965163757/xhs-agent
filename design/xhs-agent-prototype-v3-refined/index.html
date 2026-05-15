@@ -1,0 +1,1585 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小红书创作 Agent · Prototype v3 Refined · Editorial Command Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,700;0,8..60,800;1,8..60,400;1,8..60,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Serif+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #F4F1EA;
+  --paper-soft: #EDE8DD;
+  --paper-deep: #E5DECF;
+  --ink: #1A1814;
+  --ink-soft: #5C564C;
+  --ink-mute: #8C8578;
+  --rule: #D4CCBC;
+  --rule-soft: #E5DECF;
+  --accent: #C8302E;
+  --accent-soft: #F5DEDC;
+  --ok: #3E6B4E;
+  --warn: #A87029;
+  --hazard: #8B2520;
+  --serif: "Source Serif 4", "Noto Serif SC", "Songti SC", Georgia, serif;
+  --sans: "Inter", "PingFang SC", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--sans);
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 14px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ======= Cover ======= */
+.cover { max-width: 1440px; margin: 0 auto; padding: 96px 96px 72px; border-bottom: 1px solid var(--rule); }
+.cover-rule { height: 1px; background: var(--ink); width: 56px; margin-bottom: 24px; }
+.cover-meta { font: 500 11px var(--mono); letter-spacing: 0.2em; color: var(--ink-mute); text-transform: uppercase; }
+.cover-meta span + span::before { content: ' / '; color: var(--rule); margin: 0 12px; }
+.cover-title { font: 800 132px/0.92 var(--serif); letter-spacing: -0.04em; margin: 32px 0 0; color: var(--ink); }
+.cover-title em { font-style: italic; color: var(--accent); font-weight: 500; }
+.cover-tagline { font: italic 26px/1.45 var(--serif); color: var(--ink-soft); max-width: 720px; margin: 28px 0 0; }
+.cover-bottom { display: grid; grid-template-columns: 360px 1fr; gap: 80px; margin-top: 72px; padding-top: 36px; border-top: 1px solid var(--rule); }
+.cover-philosophy strong { color: var(--ink); display: block; margin-bottom: 12px; font: 500 11px var(--mono); letter-spacing: 0.2em; text-transform: uppercase; }
+.cover-philosophy p { font-size: 13.5px; color: var(--ink-soft); line-height: 1.8; margin: 0 0 12px; }
+.cover-philosophy p em { font-family: var(--serif); font-style: italic; color: var(--ink); }
+.cover-toc { display: grid; grid-template-columns: 1fr 1fr; gap: 0 64px; margin: 0; padding: 0; }
+.cover-toc li { list-style: none; padding: 11px 0; border-bottom: 1px solid var(--rule); display: grid; grid-template-columns: 32px 1fr auto; align-items: baseline; gap: 14px; font: italic 17px/1.3 var(--serif); }
+.cover-toc .num { font: 500 11px var(--mono); color: var(--accent); letter-spacing: 0.18em; font-style: normal; }
+.cover-toc .role { font: 500 10px var(--mono); color: var(--ink-mute); letter-spacing: 0.18em; font-style: normal; text-transform: uppercase; }
+.cover-toc .role.hero { color: var(--accent); }
+
+/* ======= Deck Grid ======= */
+.deck { max-width: 3100px; margin: 0 auto; padding: 96px 48px 96px; display: flex; flex-wrap: wrap; gap: 96px 64px; justify-content: center; }
+.cell { flex: 0 0 1440px; display: flex; flex-direction: column; gap: 16px; }
+.cell-label { font: italic 18px/1.4 var(--serif); color: var(--ink); display: flex; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--rule); padding-bottom: 12px; }
+.cell-label .num { font: 600 11px var(--mono); color: var(--accent); letter-spacing: 0.2em; font-style: normal; }
+.cell-label .desc { font: 13px var(--sans); color: var(--ink-mute); font-style: normal; margin-left: 4px; }
+.cell-label .role { font: 500 10px var(--mono); letter-spacing: 0.2em; color: var(--ink-mute); margin-left: auto; text-transform: uppercase; font-style: normal; }
+.cell-label .role.hero { color: var(--accent); }
+
+.frame { width: 1440px; height: 900px; background: var(--paper); border: 1px solid var(--rule); display: flex; flex-direction: column; overflow: hidden; }
+.chrome { height: 36px; flex-shrink: 0; background: var(--paper-soft); border-bottom: 1px solid var(--rule); display: flex; align-items: center; padding: 0 16px; gap: 14px; }
+.chrome-dots { display: flex; gap: 6px; }
+.chrome-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rule); }
+.chrome-path { font: 11px/1 var(--mono); color: var(--ink-mute); letter-spacing: 0.06em; }
+.chrome-path b { color: var(--ink-soft); font-weight: 600; }
+.chrome-meta { margin-left: auto; font: 10px/1 var(--mono); color: var(--ink-mute); letter-spacing: 0.12em; text-transform: uppercase; }
+.body { flex: 1; overflow: hidden; display: flex; min-height: 0; }
+
+/* ======= App Shell ======= */
+.shell { display: flex; width: 100%; height: 100%; min-height: 0; }
+.side { width: 220px; flex-shrink: 0; border-right: 1px solid var(--rule); padding: 20px 0; display: flex; flex-direction: column; background: var(--paper); }
+.side-brand { font: 700 16px var(--serif); letter-spacing: -0.01em; margin: 4px 16px 24px; display: flex; align-items: center; gap: 10px; }
+.side-brand-mark { width: 28px; height: 28px; border: 1.5px solid var(--ink); display: grid; place-items: center; font: 700 11px var(--mono); }
+.side-brand-mark span { color: var(--accent); }
+.side-section { font: 500 10px var(--mono); letter-spacing: 0.2em; color: var(--ink-mute); margin: 16px 16px 6px; text-transform: uppercase; }
+.nav { display: flex; flex-direction: column; }
+.nav a { display: flex; align-items: center; gap: 12px; padding: 7px 14px 7px 16px; font-size: 13px; color: var(--ink-soft); text-decoration: none; border-left: 2px solid transparent; }
+.nav a .ico { width: 12px; height: 12px; border: 1px solid var(--rule-soft); flex-shrink: 0; }
+.nav a.active { color: var(--ink); background: var(--paper-soft); border-left-color: var(--accent); font-weight: 500; }
+.nav a.active .ico { background: var(--ink); border-color: var(--ink); }
+.nav a .badge { margin-left: auto; font: 500 10px var(--mono); color: var(--ink-mute); letter-spacing: 0.05em; }
+.nav a.active .badge { color: var(--accent); }
+.side-foot { margin-top: auto; border-top: 1px solid var(--rule); padding: 12px 16px; display: flex; align-items: center; gap: 10px; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--paper); display: grid; place-items: center; font: 600 12px var(--serif); flex-shrink: 0; }
+.avatar.sm { width: 24px; height: 24px; font-size: 10px; }
+.avatar.lg { width: 48px; height: 48px; font-size: 16px; }
+.avatar.outlined { background: var(--paper); color: var(--ink); border: 1px solid var(--ink); }
+.side-user { font-size: 12px; line-height: 1.3; flex: 1; min-width: 0; }
+.side-user .name { color: var(--ink); font-weight: 500; }
+.side-user .role { color: var(--ink-mute); font-size: 10.5px; font-family: var(--mono); letter-spacing: 0.06em; }
+
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.topbar { height: 56px; flex-shrink: 0; padding: 0 32px; border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 16px; }
+.topbar h2 { font: italic 22px/1.2 var(--serif); color: var(--ink); margin: 0; }
+.topbar h2 .num { font-style: normal; font: 500 10px var(--mono); color: var(--accent); letter-spacing: 0.2em; margin-right: 10px; vertical-align: 4px; }
+.topbar-meta { font: 11px var(--mono); color: var(--ink-mute); letter-spacing: 0.05em; padding-left: 16px; border-left: 1px solid var(--rule); margin-left: 4px; }
+.topbar-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.content { flex: 1; padding: 24px 32px; overflow: hidden; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+
+/* ======= Buttons ======= */
+.btn { font: 500 13px var(--sans); padding: 7px 14px; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; letter-spacing: 0.005em; border-radius: 0; }
+.btn-primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.btn-accent { background: var(--accent); color: white; border-color: var(--accent); }
+.btn-ghost { background: transparent; border-color: var(--rule); color: var(--ink-soft); }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-arrow::after { content: ' →'; }
+
+/* ======= Chip ======= */
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; font: 500 11px var(--mono); letter-spacing: 0.05em; border: 1px solid var(--rule); background: var(--paper); color: var(--ink-soft); }
+.chip.draft { color: var(--warn); border-color: var(--warn); }
+.chip.published { color: var(--ok); border-color: var(--ok); }
+.chip.alert { color: var(--hazard); border-color: var(--hazard); background: rgba(139,37,32,0.04); }
+.chip.accent { color: var(--accent); border-color: var(--accent); }
+.chip-soft { background: var(--paper-soft); border-color: var(--rule-soft); color: var(--ink-mute); }
+.chip-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ======= Section ======= */
+.section-head { display: flex; align-items: baseline; border-bottom: 1px solid var(--rule); padding-bottom: 7px; margin-bottom: 12px; gap: 12px; }
+.section-head .num { font: 600 10px var(--mono); color: var(--accent); letter-spacing: 0.2em; }
+.section-head .title { font: 500 13px var(--sans); color: var(--ink); }
+.section-head .desc { font: italic 12px var(--serif); color: var(--ink-mute); }
+.section-head .meta { margin-left: auto; font: 11px var(--mono); color: var(--ink-mute); }
+
+/* ======= Card ======= */
+.card { border: 1px solid var(--rule); background: var(--paper); padding: 16px; }
+.card-soft { background: var(--paper-soft); }
+.suggestion-card { border: 1px solid var(--rule); background: var(--paper); padding: 12px; cursor: pointer; min-height: 84px; display: grid; grid-template-rows: auto 1fr; gap: 6px; }
+.suggestion-card .mark { font: 600 10px var(--mono); letter-spacing: 0.18em; color: var(--accent); }
+.suggestion-card .title { font-size: 13px; font-weight: 600; }
+.suggestion-card .copy { font-size: 11px; color: var(--ink-mute); line-height: 1.45; }
+.proof-note { border: 1px solid var(--rule); background: var(--paper-soft); padding: 10px 12px; font-size: 12px; line-height: 1.55; position: relative; }
+.proof-note::before { content: attr(data-mark); position: absolute; top: -8px; left: 10px; background: var(--paper-soft); padding: 0 5px; font: 600 9px var(--mono); letter-spacing: 0.12em; color: var(--accent); }
+.audit-strip { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--rule); background: var(--paper-soft); }
+.audit-strip div { padding: 9px 10px; border-right: 1px solid var(--rule); min-width: 0; }
+.audit-strip div:last-child { border-right: 0; }
+.audit-strip b { display: block; font: 700 15px var(--serif); color: var(--ink); line-height: 1; margin-bottom: 4px; }
+.audit-strip span { display: block; font: 600 9px var(--mono); color: var(--ink-mute); letter-spacing: 0.13em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tool-ledger { border: 1px solid var(--rule-soft); background: var(--paper-soft); }
+.tool-ledger .row { display: grid; grid-template-columns: 54px 1fr 62px 54px; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--rule-soft); font: 11px var(--mono); color: var(--ink-soft); }
+.tool-ledger .row:last-child { border-bottom: 0; }
+.tool-ledger .time { color: var(--accent); }
+.tool-ledger .ok { color: var(--ok); }
+.tool-ledger .warn { color: var(--warn); }
+.margin-ledger { display: grid; grid-template-columns: 88px 1fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--rule-soft); font-size: 11.5px; }
+.margin-ledger .k { font: 600 10px var(--mono); letter-spacing: 0.08em; color: var(--accent); }
+.diff-box { border: 1px solid var(--rule); background: var(--paper-soft); padding: 10px 12px; font: 11px/1.65 var(--mono); color: var(--ink-soft); }
+.diff-box ins { color: var(--ok); text-decoration: none; }
+.diff-box del { color: var(--hazard); text-decoration: line-through; }
+.cover-thumb { position: relative; overflow: hidden; background: var(--paper-deep); }
+.cover-thumb::after { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, transparent 0 48%, rgba(200,48,46,0.22) 48% 52%, transparent 52%); opacity: .55; pointer-events: none; }
+.cover-thumb .tag { position: absolute; left: 6px; top: 6px; font: 700 8px var(--mono); color: var(--accent); letter-spacing: 0.12em; background: var(--paper); border: 1px solid var(--rule); padding: 2px 4px; }
+.meeting-minutes { border: 1px solid var(--rule); background: var(--paper); display: grid; grid-template-columns: 34px 1fr 86px; gap: 10px; align-items: start; padding: 10px; }
+.meeting-minutes + .meeting-minutes { border-top: 0; }
+.meeting-minutes .speaker { width: 28px; height: 28px; border: 1px solid var(--ink); border-radius: 50%; display: grid; place-items: center; font: 700 10px var(--mono); color: var(--ink); }
+.meeting-minutes .role { font: 600 10px var(--mono); letter-spacing: 0.1em; color: var(--ink-mute); text-transform: uppercase; margin-bottom: 3px; }
+.meeting-minutes .score { font: 700 12px var(--mono); color: var(--accent); text-align: right; }
+.event-feed { border: 1px solid var(--rule); background: var(--paper-soft); padding: 10px 12px; display: grid; gap: 6px; }
+.event-feed div { display: grid; grid-template-columns: 54px 1fr auto; gap: 8px; font: 11px var(--mono); color: var(--ink-soft); }
+.health-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 6px; background: var(--ok); }
+.health-dot.warn { background: var(--warn); }
+.health-dot.bad { background: var(--hazard); }
+.selection-handle { position: absolute; width: 8px; height: 8px; border: 1px solid var(--accent); background: var(--paper); }
+
+/* ======= Editorial Motion System ======= */
+:root {
+  --motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-snap: cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes editorial-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes rule-draw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes progress-sweep {
+  0% { transform: translateX(-120%); opacity: 0; }
+  12% { opacity: .9; }
+  72% { opacity: .9; }
+  100% { transform: translateX(320%); opacity: 0; }
+}
+@keyframes ink-pulse {
+  0%, 100% { opacity: .45; box-shadow: 0 0 0 0 rgba(200,48,46,0); }
+  48% { opacity: 1; box-shadow: 0 0 0 5px rgba(200,48,46,.12); }
+}
+@keyframes ledger-scan {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(110%); }
+}
+@keyframes caret-blink {
+  0%, 46% { opacity: 1; }
+  47%, 100% { opacity: 0; }
+}
+@keyframes card-paper-lift {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes radar-draw {
+  from { stroke-dashoffset: 320; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes radar-breathe {
+  0%, 100% { opacity: .82; transform: scale(.985); }
+  50% { opacity: 1; transform: scale(1.015); }
+}
+@keyframes node-pop {
+  from { opacity: 0; transform: scale(.55); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes bar-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes calendar-pop {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes task-progress {
+  0% { transform: translateX(-70%); width: 36%; }
+  55% { width: 58%; }
+  100% { transform: translateX(260%); width: 36%; }
+}
+@keyframes selection-breathe {
+  0%, 100% { opacity: .52; outline-offset: 0; }
+  50% { opacity: .95; outline-offset: 5px; }
+}
+
+.cover-rule, .cell-label, .section-head { transform-origin: left center; }
+.cover-rule { animation: rule-draw 780ms var(--motion-ease) both; }
+.cover-meta, .cover-title, .cover-tagline, .cover-bottom { animation: editorial-rise 760ms var(--motion-ease) both; }
+.cover-title { animation-delay: 90ms; }
+.cover-tagline { animation-delay: 160ms; }
+.cover-bottom { animation-delay: 240ms; }
+.deck .cell { animation: editorial-rise 720ms var(--motion-ease) both; }
+.deck .cell:nth-child(1) { animation-delay: 70ms; }
+.deck .cell:nth-child(2) { animation-delay: 110ms; }
+.deck .cell:nth-child(3) { animation-delay: 150ms; }
+.deck .cell:nth-child(4) { animation-delay: 190ms; }
+.deck .cell:nth-child(5) { animation-delay: 230ms; }
+.deck .cell:nth-child(6) { animation-delay: 270ms; }
+.deck .cell:nth-child(7) { animation-delay: 310ms; }
+.deck .cell:nth-child(8) { animation-delay: 350ms; }
+.deck .cell:nth-child(9) { animation-delay: 390ms; }
+.deck .cell:nth-child(10) { animation-delay: 430ms; }
+
+.chrome { position: relative; overflow: hidden; }
+.chrome.live::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 1px;
+  width: 34%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: progress-sweep 3.2s var(--motion-snap) infinite;
+}
+.chrome.live .chrome-dot:nth-child(2),
+.nav a.active .badge,
+.chip.accent .chip-dot,
+.health-dot {
+  animation: ink-pulse 2.2s ease-in-out infinite;
+}
+
+.suggestion-card,
+.btn,
+.card {
+  transition: transform 180ms var(--motion-ease), background-color 180ms ease, border-color 180ms ease;
+}
+.suggestion-card { position: relative; overflow: hidden; }
+.suggestion-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 10%, rgba(200,48,46,.08) 45%, transparent 70%);
+  transform: translateX(-120%);
+  animation: ledger-scan 4.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.suggestion-card:nth-child(2)::after { animation-delay: .45s; }
+.suggestion-card:nth-child(3)::after { animation-delay: .9s; }
+.suggestion-card:nth-child(4)::after { animation-delay: 1.35s; }
+.suggestion-card:hover,
+.btn:hover { transform: translateY(-1px); }
+.card.motion-float,
+.cover-thumb { animation: card-paper-lift 4.8s ease-in-out infinite; }
+.cover-thumb:nth-child(2) { animation-delay: .4s; }
+.cover-thumb:nth-child(3) { animation-delay: .8s; }
+
+.typing-caret::after {
+  content: '';
+  display: inline-block;
+  width: 1px;
+  height: 1em;
+  margin-left: 4px;
+  vertical-align: -2px;
+  background: var(--accent);
+  animation: caret-blink .9s steps(1) infinite;
+}
+.tool-ledger .row,
+.event-feed div {
+  position: relative;
+  overflow: hidden;
+}
+.tool-ledger .row::before,
+.event-feed div::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.38), transparent);
+  transform: translateX(-115%);
+  animation: ledger-scan 3.9s ease-in-out infinite;
+  pointer-events: none;
+}
+.tool-ledger .row:nth-child(2)::before,
+.event-feed div:nth-child(2)::before { animation-delay: .42s; }
+.tool-ledger .row:nth-child(3)::before,
+.event-feed div:nth-child(3)::before { animation-delay: .84s; }
+.tool-ledger .row:nth-child(4)::before { animation-delay: 1.26s; }
+.tool-ledger .warn,
+.event-feed div span:last-child { animation: ink-pulse 2.4s ease-in-out infinite; }
+
+.audit-strip b { transition: color 160ms ease; }
+.audit-strip:hover b { color: var(--accent); }
+.diff-box ins {
+  display: inline-block;
+  background: linear-gradient(transparent 62%, rgba(62,107,78,.18) 0);
+  animation: rule-draw 900ms var(--motion-ease) both;
+  transform-origin: left center;
+}
+
+.radar-motion polygon:nth-of-type(4) {
+  stroke-dasharray: 320;
+  stroke-dashoffset: 320;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: radar-draw 1.45s var(--motion-ease) both, radar-breathe 4.2s ease-in-out 1.45s infinite;
+}
+.radar-motion circle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: node-pop 440ms var(--motion-ease) both;
+}
+.radar-motion circle:nth-of-type(2) { animation-delay: .12s; }
+.radar-motion circle:nth-of-type(3) { animation-delay: .24s; }
+.radar-motion circle:nth-of-type(4) { animation-delay: .36s; }
+.radar-motion circle:nth-of-type(5) { animation-delay: .48s; }
+
+.bar-chart div[style*="background:var(--ink)"] {
+  transform-origin: left center;
+  animation: bar-grow 920ms var(--motion-ease) both;
+}
+.bar-chart div[style*="background:var(--ink)"]:nth-child(2n) { animation-delay: .12s; }
+.calendar-motion span[style*="background:var(--accent-soft)"],
+.calendar-motion span[style*="background:var(--ink)"] {
+  animation: calendar-pop 3.2s ease-in-out infinite;
+}
+
+.task-running {
+  position: relative;
+  overflow: hidden;
+}
+.task-running::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: task-progress 2.7s var(--motion-snap) infinite;
+}
+.selection-box {
+  outline: 1px solid rgba(200,48,46,.24);
+  animation: selection-breathe 2.6s ease-in-out infinite;
+}
+.selection-handle { animation: ink-pulse 2.4s ease-in-out infinite; }
+.selection-handle:nth-of-type(2) { animation-delay: .16s; }
+.selection-handle:nth-of-type(3) { animation-delay: .32s; }
+.selection-handle:nth-of-type(4) { animation-delay: .48s; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .001ms !important;
+  }
+}
+
+/* ======= Stat ======= */
+.stat-num { font: 800 36px/1 var(--serif); letter-spacing: -0.02em; }
+.stat-label { font: 500 10px var(--mono); color: var(--ink-mute); letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 10px; }
+.stat-meta { font: 11px var(--mono); color: var(--ink-soft); margin-top: 8px; letter-spacing: 0.05em; }
+.stat-meta .up { color: var(--ok); }
+.stat-meta .down { color: var(--hazard); }
+
+/* ======= Footer ======= */
+.colophon { padding: 64px 96px 96px; border-top: 1px solid var(--rule); max-width: 1440px; margin: 0 auto; display: grid; grid-template-columns: 2fr 1fr; gap: 48px; }
+.colophon h3 { font: 500 11px var(--mono); letter-spacing: 0.2em; color: var(--ink-mute); text-transform: uppercase; margin: 0 0 16px; }
+.colophon p { font-size: 13px; color: var(--ink-soft); line-height: 1.7; margin: 0 0 8px; max-width: 480px; }
+.colophon p em { font-family: var(--serif); font-style: italic; color: var(--ink); }
+.colophon .credit { text-align: right; font: italic 14px var(--serif); color: var(--ink-mute); letter-spacing: 0.02em; }
+.colophon .credit small { display: block; font: 500 10px var(--mono); color: var(--ink-mute); letter-spacing: 0.2em; margin-top: 8px; font-style: normal; }
+</style>
+</head>
+<body>
+
+<!-- ========== COVER ========== -->
+<header class="cover">
+  <div class="cover-rule"></div>
+  <div class="cover-meta">
+    <span>XHS-Agent</span><span>Prototype v3 Refined</span><span>2026 / 05 / 15</span><span>Editorial Command Studio</span>
+  </div>
+  <h1 class="cover-title">小红书<br><em>创作工作室</em></h1>
+  <p class="cover-tagline">把每篇笔记当成一份稿件。<br>AI 是 staff writer，你是 editor-in-chief。</p>
+
+  <div class="cover-bottom">
+    <div class="cover-philosophy">
+      <strong>Design Note</strong>
+      <p>市面上 99% 的 AI 创作工具都长成<em>"又一个紫色 SaaS Dashboard"</em>。这不是。</p>
+      <p>这一版把产品当成<em>编辑工作室</em>来组织：每篇笔记是一份稿件、每次诊断是一次审稿会、每个工具调用是一次编辑动作。</p>
+      <p>米白纸张、墨色文字、衬线 display、单点小红书红 accent——克制而不冷淡，密集而不嘈杂。</p>
+      <p><em>Refined pass</em> 增强真实工作状态：工具调用 ledger、稿件批注、封面质检、诊断会议纪要、任务事件流。</p>
+    </div>
+    <ul class="cover-toc">
+      <li><span class="num">01</span> Login · <em>进入工作室</em><span class="role">Entry</span></li>
+      <li><span class="num">02</span> Chat · <em>创作对话现场</em><span class="role hero">Hero</span></li>
+      <li><span class="num">03</span> Article · <em>三栏写作工作台</em><span class="role hero">Hero</span></li>
+      <li><span class="num">04</span> Diagnose · <em>发布前审稿会</em><span class="role hero">Hero</span></li>
+      <li><span class="num">05</span> Analytics · <em>编辑部数据看板</em><span class="role hero">Hero</span></li>
+      <li><span class="num">06</span> Articles · <em>稿件库</em><span class="role">List</span></li>
+      <li><span class="num">07</span> Templates · <em>结构骨架库</em><span class="role">Library</span></li>
+      <li><span class="num">08</span> Tasks · <em>后台任务监控</em><span class="role">Trace</span></li>
+      <li><span class="num">09</span> Settings · <em>工作室配置</em><span class="role">Config</span></li>
+      <li><span class="num">10</span> Image Lab · <em>PS 式图片拆层</em><span class="role">Tool</span></li>
+    </ul>
+  </div>
+</header>
+
+<main class="deck">
+
+<!-- ===== 01 LOGIN ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">01</span>Login · 进入工作室<span class="desc">身份验证入口</span><span class="role">Entry</span></div>
+  <div class="frame">
+    <div class="chrome"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / <b>login</b></span><span class="chrome-meta">1440 × 900</span></div>
+    <div class="body" style="background:var(--paper);display:grid;place-items:center;">
+      <div style="width:380px;text-align:center;">
+        <div style="margin-bottom:40px;">
+          <div style="width:56px;height:56px;border:2px solid var(--ink);margin:0 auto 20px;display:grid;place-items:center;font:700 18px var(--mono);"><span style="color:var(--accent);">书</span></div>
+          <h1 style="font:800 32px/1.1 var(--serif);letter-spacing:-0.02em;margin:0 0 8px;">小红书创作助手</h1>
+          <p style="font:italic 15px var(--serif);color:var(--ink-soft);margin:0;">AI 驱动的内容创作平台</p>
+        </div>
+        <div style="border:1px solid var(--rule);padding:32px;text-align:left;">
+          <div style="display:flex;border-bottom:1px solid var(--rule);margin-bottom:24px;">
+            <span style="font:600 13px var(--sans);padding:8px 16px;border-bottom:2px solid var(--ink);">登录</span>
+            <span style="font:500 13px var(--sans);padding:8px 16px;color:var(--ink-mute);">注册</span>
+          </div>
+          <label style="font:500 11px var(--mono);letter-spacing:0.15em;color:var(--ink-mute);text-transform:uppercase;display:block;margin-bottom:6px;">用户名</label>
+          <div style="border:1px solid var(--rule);padding:10px 12px;margin-bottom:16px;font-size:14px;color:var(--ink-soft);">editor_yuan</div>
+          <label style="font:500 11px var(--mono);letter-spacing:0.15em;color:var(--ink-mute);text-transform:uppercase;display:block;margin-bottom:6px;">密码</label>
+          <div style="border:1px solid var(--rule);padding:10px 12px;margin-bottom:24px;font-size:14px;color:var(--ink-mute);">••••••••</div>
+          <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;">进入工作室 →</button>
+        </div>
+        <p style="font:11px var(--mono);color:var(--ink-mute);margin-top:20px;letter-spacing:0.08em;">密码至少 6 位 · 首次注册即创建账号</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 02 CHAT · HERO ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">02</span>Chat · 创作对话现场<span class="desc">Agent 与用户的交互中心</span><span class="role hero">Hero</span></div>
+  <div class="frame">
+    <div class="chrome live"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / <b>chat</b></span><span class="chrome-meta">Hero · 1440 × 900</span></div>
+    <div class="body">
+      <div class="shell">
+        <!-- Sidebar -->
+        <div class="side">
+          <div class="side-brand"><div class="side-brand-mark"><span>书</span></div>创作工作室</div>
+          <div class="side-section">导航</div>
+          <nav class="nav">
+            <a class="active"><span class="ico"></span>创作对话<span class="badge">●</span></a>
+            <a><span class="ico"></span>笔记库<span class="badge">12</span></a>
+            <a><span class="ico"></span>模板库</a>
+            <a><span class="ico"></span>数据</a>
+            <a><span class="ico"></span>诊断</a>
+            <a><span class="ico"></span>任务中心<span class="badge">2</span></a>
+            <a><span class="ico"></span>AI 图片</a>
+            <a><span class="ico"></span>设置</a>
+          </nav>
+          <div class="side-foot">
+            <div class="avatar">Y</div>
+            <div class="side-user"><div class="name">editor_yuan</div><div class="role">admin</div></div>
+          </div>
+        </div>
+        <!-- Main -->
+        <div class="main">
+          <div class="topbar">
+            <h2><span class="num">02</span>创作对话</h2>
+            <span class="topbar-meta">笔记 #7 · 秋冬穿搭</span>
+            <div class="topbar-actions">
+              <button class="btn btn-ghost btn-sm">清除上下文</button>
+              <button class="btn btn-sm">新对话</button>
+            </div>
+          </div>
+          <div class="content" style="display:grid;grid-template-columns:200px 1fr;gap:0;">
+            <!-- History sidebar -->
+            <div style="border-right:1px solid var(--rule);padding:16px 12px;overflow:hidden;">
+              <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:12px;">历史对话</div>
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <div style="padding:7px 10px;background:var(--accent-soft);border-left:2px solid var(--accent);font-size:12px;font-weight:500;">秋冬穿搭 · 笔记 #7</div>
+                <div style="padding:7px 10px;font-size:12px;color:var(--ink-soft);">早C晚A护肤</div>
+                <div style="padding:7px 10px;font-size:12px;color:var(--ink-soft);">选题灵感 · 美妆</div>
+                <div style="padding:7px 10px;font-size:12px;color:var(--ink-soft);">封面图生成</div>
+                <div style="padding:7px 10px;font-size:12px;color:var(--ink-soft);">诊断笔记 #3</div>
+              </div>
+            </div>
+            <!-- Chat area -->
+            <div style="display:flex;flex-direction:column;padding:20px 28px;gap:16px;overflow:hidden;">
+              <!-- Suggestions -->
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;">
+                <div class="suggestion-card"><div class="mark">A01</div><div class="title">一键完整成稿</div><div class="copy">标题候选、标签、封面方向和发布前自检</div></div>
+                <div class="suggestion-card"><div class="mark">A02</div><div class="title">选题灵感</div><div class="copy">5 个有爆款潜力的垂类选题方向</div></div>
+                <div class="suggestion-card"><div class="mark">A03</div><div class="title">生成封面图</div><div class="copy">小红书 3:4 首图，带标题区和收藏理由</div></div>
+                <div class="suggestion-card"><div class="mark">A04</div><div class="title">发布前审稿</div><div class="copy">违禁词、钩子、CTA、标签缺失检查</div></div>
+              </div>
+              <div class="audit-strip" style="margin-bottom:8px;">
+                <div><b>14</b><span>messages</span></div>
+                <div><b>07</b><span>tool calls</span></div>
+                <div><b>#7</b><span>article context</span></div>
+                <div><b>live</b><span>task recoverable</span></div>
+              </div>
+              <!-- Messages -->
+              <div style="flex:1;display:flex;flex-direction:column;gap:14px;overflow:hidden;">
+                <!-- User -->
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                  <div class="avatar sm">Y</div>
+                  <div style="background:var(--paper-soft);border:1px solid var(--rule);padding:10px 14px;max-width:520px;font-size:13.5px;line-height:1.6;">帮我完整做一篇关于「秋冬穿搭」的小红书笔记，目标受众是 20-25 岁学生党</div>
+                </div>
+                <!-- Assistant with tool call -->
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                  <div class="avatar sm outlined">A</div>
+                  <div style="max-width:600px;display:flex;flex-direction:column;gap:8px;">
+                    <div style="font:11px var(--mono);color:var(--ink-mute);letter-spacing:0.08em;display:flex;align-items:center;gap:8px;">
+                      <span class="chip accent" style="font-size:10px;">tool_call</span> generate_article
+                    </div>
+                    <div class="typing-caret" style="border:1px solid var(--rule);padding:10px 14px;font-size:13.5px;line-height:1.6;">
+                      好的，我来为你创作一篇秋冬穿搭笔记。先生成大纲，再填充正文、标签和封面方向。
+                    </div>
+                    <div class="tool-ledger">
+                      <div class="row"><span class="time">00:01</span><span>suggest_titles</span><span class="ok">done</span><span>320ms</span></div>
+                      <div class="row"><span class="time">00:03</span><span>generate_article</span><span class="ok">done</span><span>2.1s</span></div>
+                      <div class="row"><span class="time">00:06</span><span>cover_prompt</span><span class="ok">done</span><span>780ms</span></div>
+                      <div class="row"><span class="time">00:08</span><span>suggest_tags</span><span class="warn">running</span><span>...</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Input -->
+              <div style="border:1px solid var(--rule);padding:12px 16px;display:flex;align-items:center;gap:12px;background:var(--paper);">
+                <span style="font-size:13px;color:var(--ink-mute);flex:1;">继续对话...</span>
+                <button class="btn btn-primary btn-sm">发送</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 03 ARTICLE DETAIL · HERO ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">03</span>Article Detail · 三栏写作工作台<span class="desc">笔记编辑 + AI 侧栏 + 手机预览</span><span class="role hero">Hero</span></div>
+  <div class="frame">
+    <div class="chrome live"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / articles / <b>#7</b></span><span class="chrome-meta">Hero · 1440 × 900</span></div>
+    <div class="body">
+      <div class="shell">
+        <!-- Left: AI Chat Panel -->
+        <div style="width:320px;flex-shrink:0;border-right:1px solid var(--rule);display:flex;flex-direction:column;overflow:hidden;">
+          <div style="padding:14px 16px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:8px;">
+            <span style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--accent);text-transform:uppercase;">AI 侧栏</span>
+            <span style="font:11px var(--mono);color:var(--ink-mute);">· 笔记 #7 上下文</span>
+          </div>
+          <div style="flex:1;padding:14px;display:flex;flex-direction:column;gap:10px;overflow:hidden;">
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+              <div class="avatar sm">Y</div>
+              <div style="background:var(--paper-soft);border:1px solid var(--rule-soft);padding:8px 11px;font-size:12.5px;line-height:1.5;">帮我优化第二段，语气再活泼一点</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+              <div class="avatar sm outlined">A</div>
+              <div style="border:1px solid var(--rule);padding:8px 11px;font-size:12.5px;line-height:1.5;max-width:240px;">
+                已优化第二段。把「需要注意」改成「划重点」，加了口语化转折词。
+                <div style="margin-top:6px;font:11px var(--mono);color:var(--ok);">✓ optimize_article · 1.2s</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+              <div class="avatar sm">Y</div>
+              <div style="background:var(--paper-soft);border:1px solid var(--rule-soft);padding:8px 11px;font-size:12.5px;line-height:1.5;">再推荐 5 个高流量标签</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+              <div class="avatar sm outlined">A</div>
+              <div style="border:1px solid var(--rule);padding:8px 11px;font-size:12.5px;line-height:1.5;max-width:240px;">
+                <div style="font:11px var(--mono);color:var(--ink-mute);margin-bottom:4px;">suggest_tags →</div>
+                #秋冬穿搭 #学生党穿搭 #平价好物 #显瘦神器 #冬日氛围感
+              </div>
+            </div>
+          </div>
+          <div style="border-top:1px solid var(--rule);padding:10px 14px;display:flex;gap:8px;">
+            <div style="flex:1;border:1px solid var(--rule);padding:7px 10px;font-size:12px;color:var(--ink-mute);">对话...</div>
+            <button class="btn btn-sm btn-primary">发送</button>
+          </div>
+        </div>
+        <!-- Center: Editor -->
+        <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;">
+          <div style="padding:12px 24px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:12px;">
+            <span style="font:italic 18px var(--serif);">笔记 #7</span>
+            <span class="chip draft"><span class="chip-dot"></span>草稿</span>
+            <span style="font:11px var(--mono);color:var(--ink-mute);">v3 · 2 min ago</span>
+            <div style="margin-left:auto;display:flex;gap:6px;">
+              <button class="btn btn-ghost btn-sm">版本</button>
+              <button class="btn btn-ghost btn-sm">违禁词</button>
+              <button class="btn btn-sm">诊断</button>
+              <button class="btn btn-accent btn-sm">发布</button>
+            </div>
+          </div>
+          <div style="flex:1;padding:24px;overflow:hidden;display:flex;flex-direction:column;gap:16px;">
+            <!-- Title -->
+            <div>
+              <label style="font:500 10px var(--mono);letter-spacing:0.18em;color:var(--ink-mute);text-transform:uppercase;display:block;margin-bottom:6px;">标题</label>
+              <div style="font:700 22px/1.3 var(--serif);letter-spacing:-0.01em;padding:8px 0;border-bottom:1px solid var(--rule);">学生党秋冬穿搭｜这 5 套照着穿绝不出错</div>
+            </div>
+            <div class="audit-strip">
+              <div><b>v5</b><span>current draft</span></div>
+              <div><b>7.9</b><span>pre score</span></div>
+              <div><b>1</b><span>banned risk</span></div>
+              <div><b>3/4</b><span>cover ready</span></div>
+            </div>
+            <!-- Body -->
+            <div style="flex:1;overflow:hidden;">
+              <label style="font:500 10px var(--mono);letter-spacing:0.18em;color:var(--ink-mute);text-transform:uppercase;display:block;margin-bottom:6px;">正文</label>
+              <div style="font-size:14px;line-height:1.8;color:var(--ink);max-height:240px;overflow:hidden;">
+                <p style="margin:0 0 12px;">姐妹们！！秋冬穿搭真的不用花大价钱也能穿出高级感 ✨</p>
+                <p style="margin:0 0 12px;">划重点：今年最火的「奶茶色系」叠穿法，学生党预算 500 以内就能搞定全套 look 👇</p>
+                <p style="margin:0 0 12px;"><strong>Look 1：针织马甲 + 衬衫 + 阔腿裤</strong><br>温柔知性风，图书馆自习也能被搭讪的那种 📚</p>
+                <p style="margin:0 0 12px;"><strong>Look 2：oversized 卫衣 + 百褶裙 + 马丁靴</strong><br>甜酷混搭，下课直接去约会不用换 💃</p>
+                <p style="margin:0;color:var(--ink-mute);font-style:italic;">...（共 5 套 look）</p>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div class="proof-note" data-mark="EDITOR NOTE">第二段已经从说明口吻改为口语化提醒，但还缺一个「预算锚点」。建议补「500 内全套」强化学生党场景。</div>
+              <div class="diff-box"><del>这 5 套照着穿绝不出错</del><br><ins>500 元以内，这 5 套秋冬穿搭照着穿</ins></div>
+            </div>
+            <!-- Tags + Images row -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div>
+                <label style="font:500 10px var(--mono);letter-spacing:0.18em;color:var(--ink-mute);text-transform:uppercase;display:block;margin-bottom:6px;">标签</label>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                  <span class="chip">#秋冬穿搭</span><span class="chip">#学生党穿搭</span><span class="chip">#平价好物</span><span class="chip">#显瘦神器</span><span class="chip">#冬日氛围感</span>
+                </div>
+              </div>
+              <div>
+                <label style="font:500 10px var(--mono);letter-spacing:0.18em;color:var(--ink-mute);text-transform:uppercase;display:block;margin-bottom:6px;">图片队列 · 首图即封面</label>
+                <div style="display:flex;gap:8px;">
+                  <div class="cover-thumb" style="width:56px;height:72px;border:1px solid var(--rule);display:grid;place-items:center;font:10px var(--mono);color:var(--ink-mute);"><span class="tag">COVER</span></div>
+                  <div class="cover-thumb" style="width:56px;height:72px;border:1px solid var(--rule-soft);display:grid;place-items:center;font:10px var(--mono);color:var(--ink-mute);"><span class="tag">02</span></div>
+                  <div class="cover-thumb" style="width:56px;height:72px;border:1px solid var(--rule-soft);display:grid;place-items:center;font:10px var(--mono);color:var(--ink-mute);"><span class="tag">03</span></div>
+                  <div style="width:56px;height:72px;border:1px dashed var(--rule);display:grid;place-items:center;font:10px var(--mono);color:var(--ink-mute);">+</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Right: Phone Preview -->
+        <div style="width:300px;flex-shrink:0;border-left:1px solid var(--rule);background:var(--paper-soft);display:flex;flex-direction:column;align-items:center;padding:20px 16px;overflow:hidden;">
+          <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:12px;">手机预览</div>
+          <div style="width:220px;height:440px;border:2px solid var(--ink);border-radius:24px;overflow:hidden;display:flex;flex-direction:column;background:white;">
+            <div style="height:28px;background:var(--ink);display:flex;align-items:center;justify-content:center;">
+              <div style="width:60px;height:14px;background:#333;border-radius:8px;"></div>
+            </div>
+            <div style="flex:1;padding:12px;overflow:hidden;">
+              <div style="width:100%;height:120px;background:var(--paper-deep);margin-bottom:8px;display:grid;place-items:center;font:10px var(--mono);color:var(--ink-mute);">封面 3:4</div>
+              <div style="font:600 13px/1.3 var(--sans);margin-bottom:6px;">学生党秋冬穿搭｜这 5 套照着穿绝不出错</div>
+              <div style="font-size:11px;line-height:1.5;color:var(--ink-soft);">姐妹们！！秋冬穿搭真的不用花大价钱也能穿出高级感 ✨ 划重点：今年最火的...</div>
+              <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;">
+                <span style="font:10px var(--sans);color:var(--accent);">#秋冬穿搭</span>
+                <span style="font:10px var(--sans);color:var(--accent);">#学生党穿搭</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 04 DIAGNOSE · HERO ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">04</span>Diagnose · 发布前审稿会<span class="desc">多维度评分 + 专家辩论 + 优化方案</span><span class="role hero">Hero</span></div>
+  <div class="frame">
+    <div class="chrome live"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / diagnose / <b>#7</b></span><span class="chrome-meta">Hero · 1440 × 900</span></div>
+    <div class="body">
+      <div class="shell">
+        <div class="side">
+          <div class="side-brand"><div class="side-brand-mark"><span>书</span></div>创作工作室</div>
+          <div class="side-section">导航</div>
+          <nav class="nav">
+            <a><span class="ico"></span>创作对话</a>
+            <a><span class="ico"></span>笔记库</a>
+            <a><span class="ico"></span>模板库</a>
+            <a><span class="ico"></span>数据</a>
+            <a class="active"><span class="ico"></span>诊断<span class="badge">●</span></a>
+            <a><span class="ico"></span>任务中心</a>
+            <a><span class="ico"></span>AI 图片</a>
+            <a><span class="ico"></span>设置</a>
+          </nav>
+          <div class="side-foot"><div class="avatar">Y</div><div class="side-user"><div class="name">editor_yuan</div><div class="role">admin</div></div></div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <h2><span class="num">04</span>发布前诊断</h2>
+            <span class="topbar-meta">笔记 #7 · 秋冬穿搭</span>
+            <div class="topbar-actions">
+              <button class="btn btn-ghost btn-sm">历史诊断</button>
+              <button class="btn btn-accent btn-sm">重新诊断</button>
+            </div>
+          </div>
+          <div class="content" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:20px 28px;overflow:hidden;">
+            <!-- Left column -->
+            <div style="display:flex;flex-direction:column;gap:16px;overflow:hidden;">
+              <!-- Stepper -->
+              <div class="card" style="padding:14px 16px;">
+                <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:10px;">诊断流水线</div>
+                <div style="display:flex;gap:4px;align-items:center;">
+                  <div style="display:flex;align-items:center;gap:4px;"><span style="width:18px;height:18px;background:var(--ok);color:white;display:grid;place-items:center;font:600 9px var(--mono);">✓</span><span style="font:11px var(--mono);color:var(--ok);">品类检测</span></div>
+                  <div style="flex:1;height:1px;background:var(--rule);"></div>
+                  <div style="display:flex;align-items:center;gap:4px;"><span style="width:18px;height:18px;background:var(--ok);color:white;display:grid;place-items:center;font:600 9px var(--mono);">✓</span><span style="font:11px var(--mono);color:var(--ok);">预评分</span></div>
+                  <div style="flex:1;height:1px;background:var(--rule);"></div>
+                  <div style="display:flex;align-items:center;gap:4px;"><span style="width:18px;height:18px;background:var(--ok);color:white;display:grid;place-items:center;font:600 9px var(--mono);">✓</span><span style="font:11px var(--mono);color:var(--ok);">文本分析</span></div>
+                  <div style="flex:1;height:1px;background:var(--rule);"></div>
+                  <div style="display:flex;align-items:center;gap:4px;"><span style="width:18px;height:18px;background:var(--ok);color:white;display:grid;place-items:center;font:600 9px var(--mono);">✓</span><span style="font:11px var(--mono);color:var(--ok);">专家诊断</span></div>
+                  <div style="flex:1;height:1px;background:var(--rule);"></div>
+                  <div style="display:flex;align-items:center;gap:4px;"><span style="width:18px;height:18px;background:var(--accent);color:white;display:grid;place-items:center;font:600 9px var(--mono);">5</span><span style="font:11px var(--mono);color:var(--accent);">辩论</span></div>
+                  <div style="flex:1;height:1px;background:var(--rule);"></div>
+                  <div style="display:flex;align-items:center;gap:4px;"><span style="width:18px;height:18px;border:1px solid var(--rule);display:grid;place-items:center;font:600 9px var(--mono);color:var(--ink-mute);">6</span><span style="font:11px var(--mono);color:var(--ink-mute);">裁判</span></div>
+                </div>
+              </div>
+              <!-- Radar Score -->
+              <div class="card" style="padding:16px;">
+                <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:12px;">五维评分</div>
+                <div style="display:grid;grid-template-columns:140px 1fr;gap:16px;align-items:center;">
+                  <!-- SVG Radar -->
+                  <svg class="radar-motion" viewBox="0 0 140 140" style="width:140px;height:140px;">
+                    <polygon points="70,15 125,50 110,115 30,115 15,50" fill="none" stroke="var(--rule)" stroke-width="0.5"/>
+                    <polygon points="70,35 105,58 95,100 45,100 35,58" fill="none" stroke="var(--rule-soft)" stroke-width="0.5"/>
+                    <polygon points="70,55 85,66 80,85 60,85 55,66" fill="none" stroke="var(--rule-soft)" stroke-width="0.5"/>
+                    <polygon points="70,22 118,52 100,108 40,108 22,52" fill="rgba(200,48,46,0.08)" stroke="var(--accent)" stroke-width="1.5"/>
+                    <circle cx="70" cy="22" r="3" fill="var(--accent)"/>
+                    <circle cx="118" cy="52" r="3" fill="var(--accent)"/>
+                    <circle cx="100" cy="108" r="3" fill="var(--accent)"/>
+                    <circle cx="40" cy="108" r="3" fill="var(--accent)"/>
+                    <circle cx="22" cy="52" r="3" fill="var(--accent)"/>
+                    <text x="70" y="8" text-anchor="middle" style="font:9px var(--mono);fill:var(--ink-soft);">内容</text>
+                    <text x="132" y="52" text-anchor="start" style="font:9px var(--mono);fill:var(--ink-soft);">视觉</text>
+                    <text x="112" y="120" text-anchor="start" style="font:9px var(--mono);fill:var(--ink-soft);">增长</text>
+                    <text x="28" y="120" text-anchor="end" style="font:9px var(--mono);fill:var(--ink-soft);">互动</text>
+                    <text x="8" y="52" text-anchor="end" style="font:9px var(--mono);fill:var(--ink-soft);">综合</text>
+                  </svg>
+                  <!-- Scores -->
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font:12px var(--sans);color:var(--ink-soft);">内容质量</span><span style="font:600 16px var(--serif);color:var(--ink);">8.5</span></div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font:12px var(--sans);color:var(--ink-soft);">视觉吸引</span><span style="font:600 16px var(--serif);color:var(--ink);">7.2</span></div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font:12px var(--sans);color:var(--ink-soft);">增长潜力</span><span style="font:600 16px var(--serif);color:var(--ink);">8.0</span></div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font:12px var(--sans);color:var(--ink-soft);">互动设计</span><span style="font:600 16px var(--serif);color:var(--ink);">7.8</span></div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--rule);padding-top:6px;margin-top:4px;"><span style="font:600 12px var(--sans);color:var(--ink);">综合</span><span style="font:800 20px var(--serif);color:var(--accent);">7.9</span></div>
+                  </div>
+                </div>
+              </div>
+              <!-- Issues -->
+              <div class="card" style="padding:16px;flex:1;overflow:hidden;">
+                <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:10px;">问题诊断</div>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--rule);"><span class="chip alert" style="font-size:9px;">P1</span><span style="font-size:12.5px;flex:1;">封面缺少人物/场景，纯文字封面点击率低 40%</span><span style="font:10px var(--mono);color:var(--ink-mute);">视觉</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--rule);"><span class="chip draft" style="font-size:9px;">P2</span><span style="font-size:12.5px;flex:1;">正文缺少 CTA（引导关注/收藏/评论）</span><span style="font:10px var(--mono);color:var(--ink-mute);">互动</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--rule);"><span class="chip draft" style="font-size:9px;">P2</span><span style="font-size:12.5px;flex:1;">标签数量偏少，建议 8-12 个覆盖长尾</span><span style="font:10px var(--mono);color:var(--ink-mute);">增长</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--rule);"><span class="chip" style="font-size:9px;">P3</span><span style="font-size:12.5px;flex:1;">第三段「马丁靴」可补充具体店铺/价格</span><span style="font:10px var(--mono);color:var(--ink-mute);">内容</span></div>
+                </div>
+              </div>
+            </div>
+            <!-- Right column: Expert Debate -->
+            <div style="display:flex;flex-direction:column;gap:16px;overflow:hidden;">
+              <div class="card" style="padding:16px;flex:1;display:flex;flex-direction:column;overflow:hidden;">
+                <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:12px;">专家辩论 · 会议纪要</div>
+                <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+                  <div class="meeting-minutes"><div class="speaker">A</div><div><div class="role">内容专家</div><div style="font-size:12.5px;line-height:1.55;">结构完整，5 套 look 递进清晰。但第 4 套缺少价格锚点，学生党最在意性价比。</div></div><div class="score">8.5 / 10</div></div>
+                  <div class="meeting-minutes"><div class="speaker">B</div><div><div class="role">增长专家</div><div style="font-size:12.5px;line-height:1.55;">「绝不出错」是安全牌。建议改为「5 套 500 元以内秋冬穿搭」——数字 + 价格双钩子。</div></div><div class="score">8.0 / 10</div></div>
+                  <div class="meeting-minutes"><div class="speaker">C</div><div><div class="role">视觉专家</div><div style="font-size:12.5px;line-height:1.55;">纯文字封面在穿搭赛道竞争力不足。建议真人出镜或平铺图，并保留标题安全区。</div></div><div class="score">7.2 / 10</div></div>
+                  <div class="event-feed" style="margin-top:10px;">
+                    <div><span class="red">14:27</span><span>model_a_score 已写入诊断报告</span><span>ok</span></div>
+                    <div><span class="red">14:28</span><span>专家辩论给出 3 条可应用修改</span><span>live</span></div>
+                    <div><span class="red">14:29</span><span>等待用户确认是否应用 title/body/tags</span><span>hold</span></div>
+                  </div>
+                  <!-- Verdict -->
+                  <div style="border-top:1px solid var(--rule);padding-top:10px;margin-top:auto;">
+                    <div style="font:500 10px var(--mono);letter-spacing:0.15em;color:var(--accent);text-transform:uppercase;margin-bottom:6px;">综合裁判结论</div>
+                    <div style="font:italic 13px/1.6 var(--serif);color:var(--ink);">可发布，但建议先补封面图 + 价格锚点再发。预估优化后互动率提升 25-35%。</div>
+                  </div>
+                </div>
+              </div>
+              <!-- Action -->
+              <div class="card" style="padding:14px 16px;display:flex;align-items:center;gap:12px;">
+                <span style="font:italic 14px var(--serif);color:var(--ink);flex:1;">应用优化方案？</span>
+                <button class="btn btn-ghost btn-sm">查看 diff</button>
+                <button class="btn btn-accent btn-sm btn-arrow">一键应用</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 05 ANALYTICS · HERO ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">05</span>Analytics · 编辑部数据看板<span class="desc">KPI 仪表板 + 标签分布 + 内容日历</span><span class="role hero">Hero</span></div>
+  <div class="frame">
+    <div class="chrome live"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / <b>analytics</b></span><span class="chrome-meta">Hero · 1440 × 900</span></div>
+    <div class="body">
+      <div class="shell">
+        <div class="side">
+          <div class="side-brand"><div class="side-brand-mark"><span>书</span></div>创作工作室</div>
+          <div class="side-section">导航</div>
+          <nav class="nav">
+            <a><span class="ico"></span>创作对话</a>
+            <a><span class="ico"></span>笔记库<span class="badge">12</span></a>
+            <a><span class="ico"></span>模板库</a>
+            <a class="active"><span class="ico"></span>数据<span class="badge">●</span></a>
+            <a><span class="ico"></span>诊断</a>
+            <a><span class="ico"></span>任务中心</a>
+            <a><span class="ico"></span>AI 图片</a>
+            <a><span class="ico"></span>设置</a>
+          </nav>
+          <div class="side-foot"><div class="avatar">Y</div><div class="side-user"><div class="name">editor_yuan</div><div class="role">admin</div></div></div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <h2><span class="num">05</span>数据概览</h2>
+            <span class="topbar-meta">2026 年 5 月</span>
+          </div>
+          <div class="content" style="padding:20px 28px;display:flex;flex-direction:column;gap:20px;overflow:hidden;">
+            <!-- Stat cards -->
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">
+              <div class="card" style="padding:16px;">
+                <div class="stat-label">总笔记数</div>
+                <div class="stat-num">47</div>
+                <div class="stat-meta"><span class="up">↑ 8</span> 本月新增</div>
+              </div>
+              <div class="card" style="padding:16px;">
+                <div class="stat-label">已发布</div>
+                <div class="stat-num">31</div>
+                <div class="stat-meta">发布率 66%</div>
+              </div>
+              <div class="card" style="padding:16px;">
+                <div class="stat-label">草稿</div>
+                <div class="stat-num">16</div>
+                <div class="stat-meta"><span class="down">5 篇</span> 超 7 天未更新</div>
+              </div>
+              <div class="card" style="padding:16px;">
+                <div class="stat-label">平均评分</div>
+                <div class="stat-num" style="color:var(--accent);">7.6</div>
+                <div class="stat-meta"><span class="up">↑ 0.3</span> vs 上月</div>
+              </div>
+            </div>
+            <!-- Charts row -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;flex:1;min-height:0;">
+              <!-- Tag distribution -->
+              <div class="card bar-chart" style="padding:16px;display:flex;flex-direction:column;overflow:hidden;">
+                <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:12px;">标签分布 Top 8</div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;justify-content:center;">
+                  <div style="display:flex;align-items:center;gap:8px;"><span style="font:11px var(--mono);color:var(--ink-soft);width:80px;text-align:right;">#穿搭</span><div style="flex:1;height:14px;background:var(--paper-soft);"><div style="width:85%;height:100%;background:var(--ink);"></div></div><span style="font:11px var(--mono);color:var(--ink-mute);width:24px;">12</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;"><span style="font:11px var(--mono);color:var(--ink-soft);width:80px;text-align:right;">#护肤</span><div style="flex:1;height:14px;background:var(--paper-soft);"><div style="width:70%;height:100%;background:var(--ink);"></div></div><span style="font:11px var(--mono);color:var(--ink-mute);width:24px;">10</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;"><span style="font:11px var(--mono);color:var(--ink-soft);width:80px;text-align:right;">#美妆</span><div style="flex:1;height:14px;background:var(--paper-soft);"><div style="width:55%;height:100%;background:var(--ink);"></div></div><span style="font:11px var(--mono);color:var(--ink-mute);width:24px;">8</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;"><span style="font:11px var(--mono);color:var(--ink-soft);width:80px;text-align:right;">#好物</span><div style="flex:1;height:14px;background:var(--paper-soft);"><div style="width:45%;height:100%;background:var(--ink);"></div></div><span style="font:11px var(--mono);color:var(--ink-mute);width:24px;">6</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;"><span style="font:11px var(--mono);color:var(--ink-soft);width:80px;text-align:right;">#减脂</span><div style="flex:1;height:14px;background:var(--paper-soft);"><div style="width:35%;height:100%;background:var(--ink);"></div></div><span style="font:11px var(--mono);color:var(--ink-mute);width:24px;">5</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;"><span style="font:11px var(--mono);color:var(--ink-soft);width:80px;text-align:right;">#学生党</span><div style="flex:1;height:14px;background:var(--paper-soft);"><div style="width:30%;height:100%;background:var(--ink);"></div></div><span style="font:11px var(--mono);color:var(--ink-mute);width:24px;">4</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;"><span style="font:11px var(--mono);color:var(--ink-soft);width:80px;text-align:right;">#探店</span><div style="flex:1;height:14px;background:var(--paper-soft);"><div style="width:20%;height:100%;background:var(--ink);"></div></div><span style="font:11px var(--mono);color:var(--ink-mute);width:24px;">3</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;"><span style="font:11px var(--mono);color:var(--ink-soft);width:80px;text-align:right;">#vlog</span><div style="flex:1;height:14px;background:var(--paper-soft);"><div style="width:15%;height:100%;background:var(--ink);"></div></div><span style="font:11px var(--mono);color:var(--ink-mute);width:24px;">2</span></div>
+                </div>
+              </div>
+              <!-- Calendar -->
+              <div class="card calendar-motion" style="padding:16px;display:flex;flex-direction:column;overflow:hidden;">
+                <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:12px;">内容日历 · 2026 年 5 月</div>
+                <div style="flex:1;display:grid;grid-template-columns:repeat(7,1fr);grid-template-rows:auto repeat(5,1fr);gap:2px;">
+                  <span style="font:500 9px var(--mono);color:var(--ink-mute);text-align:center;padding:4px 0;">一</span>
+                  <span style="font:500 9px var(--mono);color:var(--ink-mute);text-align:center;padding:4px 0;">二</span>
+                  <span style="font:500 9px var(--mono);color:var(--ink-mute);text-align:center;padding:4px 0;">三</span>
+                  <span style="font:500 9px var(--mono);color:var(--ink-mute);text-align:center;padding:4px 0;">四</span>
+                  <span style="font:500 9px var(--mono);color:var(--ink-mute);text-align:center;padding:4px 0;">五</span>
+                  <span style="font:500 9px var(--mono);color:var(--ink-mute);text-align:center;padding:4px 0;">六</span>
+                  <span style="font:500 9px var(--mono);color:var(--ink-mute);text-align:center;padding:4px 0;">日</span>
+                  <!-- Week 1 (starts Thu) -->
+                  <span></span><span></span><span></span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">1</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">2</span>
+                  <span style="background:var(--accent-soft);padding:3px;font:9px var(--mono);color:var(--accent);">3<br><span style="font-size:7px;">穿搭</span></span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">4</span>
+                  <!-- Week 2 -->
+                  <span style="background:var(--accent-soft);padding:3px;font:9px var(--mono);color:var(--accent);">5<br><span style="font-size:7px;">护肤</span></span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">6</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">7</span>
+                  <span style="background:var(--accent-soft);padding:3px;font:9px var(--mono);color:var(--accent);">8<br><span style="font-size:7px;">美妆</span></span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">9</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">10</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">11</span>
+                  <!-- Week 3 -->
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">12</span>
+                  <span style="background:var(--accent-soft);padding:3px;font:9px var(--mono);color:var(--accent);">13<br><span style="font-size:7px;">探店</span></span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">14</span>
+                  <span style="background:var(--ink);padding:3px;font:9px var(--mono);color:var(--paper);">15<br><span style="font-size:7px;">今天</span></span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">16</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">17</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">18</span>
+                  <!-- Week 4 -->
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">19</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">20</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">21</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">22</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">23</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">24</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">25</span>
+                  <!-- Week 5 -->
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">26</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">27</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">28</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">29</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">30</span>
+                  <span style="background:var(--paper-soft);padding:3px;font:9px var(--mono);color:var(--ink-mute);">31</span>
+                  <span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 06 ARTICLES · SECONDARY ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">06</span>Articles · 稿件库<span class="desc">全量笔记管理 + 筛选排序</span><span class="role">List</span></div>
+  <div class="frame">
+    <div class="chrome"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / <b>articles</b></span><span class="chrome-meta">1440 × 900</span></div>
+    <div class="body">
+      <div class="shell">
+        <div class="side">
+          <div class="side-brand"><div class="side-brand-mark"><span>书</span></div>创作工作室</div>
+          <div class="side-section">导航</div>
+          <nav class="nav">
+            <a><span class="ico"></span>创作对话</a>
+            <a class="active"><span class="ico"></span>笔记库<span class="badge">12</span></a>
+            <a><span class="ico"></span>模板库</a>
+            <a><span class="ico"></span>数据</a>
+            <a><span class="ico"></span>诊断</a>
+            <a><span class="ico"></span>任务中心</a>
+            <a><span class="ico"></span>AI 图片</a>
+            <a><span class="ico"></span>设置</a>
+          </nav>
+          <div class="side-foot"><div class="avatar">Y</div><div class="side-user"><div class="name">editor_yuan</div><div class="role">admin</div></div></div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <h2><span class="num">06</span>全部笔记</h2>
+            <span class="topbar-meta">47 篇笔记</span>
+            <div class="topbar-actions">
+              <button class="btn btn-ghost btn-sm">最近更新</button>
+              <button class="btn btn-primary btn-sm">去创作</button>
+            </div>
+          </div>
+          <div class="content" style="padding:16px 28px;display:flex;flex-direction:column;gap:0;overflow:hidden;">
+            <!-- Filter bar -->
+            <div style="display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:1px solid var(--rule);margin-bottom:12px;">
+              <span class="chip accent"><span class="chip-dot"></span>全部</span>
+              <span class="chip draft"><span class="chip-dot"></span>草稿 16</span>
+              <span class="chip published"><span class="chip-dot"></span>已发布 31</span>
+              <div style="margin-left:auto;border:1px solid var(--rule);padding:6px 12px;font-size:12px;color:var(--ink-mute);width:200px;">搜索…</div>
+            </div>
+            <!-- List -->
+            <div style="flex:1;display:flex;flex-direction:column;gap:0;overflow:hidden;">
+              <!-- Admin group header -->
+              <div style="font:500 10px var(--mono);letter-spacing:0.18em;color:var(--ink-mute);text-transform:uppercase;padding:8px 0;border-bottom:1px solid var(--rule-soft);">editor_yuan · 12 篇</div>
+              <!-- Row 1 -->
+              <div style="display:grid;grid-template-columns:48px 1fr 80px 60px 100px 120px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--rule-soft);">
+                <div style="width:48px;height:36px;background:var(--paper-deep);border:1px solid var(--rule-soft);display:grid;place-items:center;font:8px var(--mono);color:var(--ink-mute);">3:4</div>
+                <div>
+                  <div style="font:500 13.5px var(--sans);margin-bottom:2px;">学生党秋冬穿搭｜这 5 套照着穿绝不出错</div>
+                  <div style="font:11px var(--mono);color:var(--ink-mute);">#秋冬穿搭 #学生党穿搭 #平价好物</div>
+                </div>
+                <span class="chip draft" style="font-size:9px;"><span class="chip-dot"></span>草稿</span>
+                <span style="font:600 14px var(--serif);color:var(--ink);">7.9</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">5 min ago</span>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">对话优化</button>
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">编辑</button>
+                </div>
+              </div>
+              <!-- Row 2 -->
+              <div style="display:grid;grid-template-columns:48px 1fr 80px 60px 100px 120px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--rule-soft);">
+                <div style="width:48px;height:36px;background:var(--paper-deep);border:1px solid var(--rule-soft);display:grid;place-items:center;font:8px var(--mono);color:var(--ink-mute);">3:4</div>
+                <div>
+                  <div style="font:500 13.5px var(--sans);margin-bottom:2px;">早C晚A真的有用吗？我试了 30 天</div>
+                  <div style="font:11px var(--mono);color:var(--ink-mute);">#护肤 #早C晚A #学生党护肤</div>
+                </div>
+                <span class="chip published" style="font-size:9px;"><span class="chip-dot"></span>已发布</span>
+                <span style="font:600 14px var(--serif);color:var(--ink);">8.3</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">2 天前</span>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">对话优化</button>
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">编辑</button>
+                </div>
+              </div>
+              <!-- Row 3 -->
+              <div style="display:grid;grid-template-columns:48px 1fr 80px 60px 100px 120px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--rule-soft);">
+                <div style="width:48px;height:36px;background:var(--paper-deep);border:1px solid var(--rule-soft);display:grid;place-items:center;font:8px var(--mono);color:var(--ink-mute);">3:4</div>
+                <div>
+                  <div style="font:500 13.5px var(--sans);margin-bottom:2px;">这家咖啡店也太好拍了吧！附拍照攻略</div>
+                  <div style="font:11px var(--mono);color:var(--ink-mute);">#探店 #咖啡 #拍照打卡</div>
+                </div>
+                <span class="chip published" style="font-size:9px;"><span class="chip-dot"></span>已发布</span>
+                <span style="font:600 14px var(--serif);color:var(--ink);">8.7</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">5 天前</span>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">对话优化</button>
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">编辑</button>
+                </div>
+              </div>
+              <!-- Row 4 -->
+              <div style="display:grid;grid-template-columns:48px 1fr 80px 60px 100px 120px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--rule-soft);">
+                <div style="width:48px;height:36px;background:var(--paper-deep);border:1px solid var(--rule-soft);display:grid;place-items:center;font:8px var(--mono);color:var(--ink-mute);">3:4</div>
+                <div>
+                  <div style="font:500 13.5px var(--sans);margin-bottom:2px;">减脂期怎么吃？7 天食谱不重样</div>
+                  <div style="font:11px var(--mono);color:var(--ink-mute);">#减脂 #健康饮食 #食谱分享</div>
+                </div>
+                <span class="chip draft" style="font-size:9px;"><span class="chip-dot"></span>草稿</span>
+                <span style="font:600 14px var(--serif);color:var(--ink);">6.8</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">1 周前</span>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">对话优化</button>
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">编辑</button>
+                </div>
+              </div>
+              <!-- Row 5 -->
+              <div style="display:grid;grid-template-columns:48px 1fr 80px 60px 100px 120px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--rule-soft);">
+                <div style="width:48px;height:36px;background:var(--paper-deep);border:1px solid var(--rule-soft);display:grid;place-items:center;font:8px var(--mono);color:var(--ink-mute);">3:4</div>
+                <div>
+                  <div style="font:500 13.5px var(--sans);margin-bottom:2px;">新手化妆必看！5 分钟出门妆容教程</div>
+                  <div style="font:11px var(--mono);color:var(--ink-mute);">#美妆 #新手化妆 #快速出门</div>
+                </div>
+                <span class="chip published" style="font-size:9px;"><span class="chip-dot"></span>已发布</span>
+                <span style="font:600 14px var(--serif);color:var(--ink);">8.1</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">2 周前</span>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">对话优化</button>
+                  <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:11px;">编辑</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 07 TEMPLATES · SECONDARY ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">07</span>Templates · 结构骨架库<span class="desc">选模板 + 给主题 → AI 按骨架生成</span><span class="role">Library</span></div>
+  <div class="frame">
+    <div class="chrome"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / <b>templates</b></span><span class="chrome-meta">1440 × 900</span></div>
+    <div class="body">
+      <div class="shell">
+        <div class="side">
+          <div class="side-brand"><div class="side-brand-mark"><span>书</span></div>创作工作室</div>
+          <div class="side-section">导航</div>
+          <nav class="nav">
+            <a><span class="ico"></span>创作对话</a>
+            <a><span class="ico"></span>笔记库<span class="badge">12</span></a>
+            <a class="active"><span class="ico"></span>模板库</a>
+            <a><span class="ico"></span>数据</a>
+            <a><span class="ico"></span>诊断</a>
+            <a><span class="ico"></span>任务中心</a>
+            <a><span class="ico"></span>AI 图片</a>
+            <a><span class="ico"></span>设置</a>
+          </nav>
+          <div class="side-foot"><div class="avatar">Y</div><div class="side-user"><div class="name">editor_yuan</div><div class="role">admin</div></div></div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <h2><span class="num">07</span>模板库</h2>
+            <span class="topbar-meta">选一个结构模板，给一个主题，AI 按骨架生成完整笔记</span>
+            <div class="topbar-actions">
+              <button class="btn btn-primary btn-sm">自定义模板</button>
+            </div>
+          </div>
+          <div class="content" style="padding:20px 28px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-content:start;overflow:hidden;">
+            <!-- Template 1 -->
+            <div class="card" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font:italic 16px var(--serif);flex:1;">踩坑避雷</span>
+                <span class="chip" style="font-size:9px;">经验分享</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink-soft);line-height:1.5;">先说结论 → 踩坑经历 → 正确做法 → 总结建议。适合护肤/装修/购物类。</div>
+              <div style="font:11px var(--mono);color:var(--ink-mute);background:var(--paper-soft);padding:8px;border:1px solid var(--rule-soft);line-height:1.6;white-space:pre-wrap;">## 结论先行
+{一句话结论}
+
+## 我的踩坑经历
+{具体故事}
+
+## 正确做法
+{步骤清单}
+
+## 总结
+{一句话收尾 + CTA}</div>
+              <button class="btn btn-sm" style="align-self:flex-start;">按模板生成 →</button>
+            </div>
+            <!-- Template 2 -->
+            <div class="card" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font:italic 16px var(--serif);flex:1;">清单合集</span>
+                <span class="chip" style="font-size:9px;">种草推荐</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink-soft);line-height:1.5;">开头定调 → N 个推荐项（名称+理由+价格）→ 总结。适合好物/书单/歌单。</div>
+              <div style="font:11px var(--mono);color:var(--ink-mute);background:var(--paper-soft);padding:8px;border:1px solid var(--rule-soft);line-height:1.6;white-space:pre-wrap;">## 开头
+{场景+痛点}
+
+## 推荐清单
+1. {名称} · {价格}
+   {一句话理由}
+2. ...
+
+## 总结
+{使用场景建议}</div>
+              <button class="btn btn-sm" style="align-self:flex-start;">按模板生成 →</button>
+            </div>
+            <!-- Template 3 -->
+            <div class="card" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font:italic 16px var(--serif);flex:1;">种草测评</span>
+                <span class="chip" style="font-size:9px;">产品评测</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink-soft);line-height:1.5;">产品信息 → 使用体验 → 优缺点 → 适合人群 → 购买建议。</div>
+              <div style="font:11px var(--mono);color:var(--ink-mute);background:var(--paper-soft);padding:8px;border:1px solid var(--rule-soft);line-height:1.6;white-space:pre-wrap;">## 产品信息
+{品牌/名称/价格/规格}
+
+## 使用体验
+{真实感受}
+
+## 优缺点
+✅ ...
+❌ ...
+
+## 推荐指数
+{评分 + 适合人群}</div>
+              <button class="btn btn-sm" style="align-self:flex-start;">按模板生成 →</button>
+            </div>
+            <!-- Template 4 -->
+            <div class="card" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font:italic 16px var(--serif);flex:1;">情感共鸣</span>
+                <span class="chip" style="font-size:9px;">故事向</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink-soft);line-height:1.5;">情绪钩子 → 故事展开 → 转折/感悟 → 金句收尾。适合成长/情感/职场。</div>
+              <div style="font:11px var(--mono);color:var(--ink-mute);background:var(--paper-soft);padding:8px;border:1px solid var(--rule-soft);line-height:1.6;white-space:pre-wrap;">## 钩子
+{引发共鸣的一句话}
+
+## 故事
+{具体经历}
+
+## 感悟
+{转折 + 成长}
+
+## 金句
+{可被截图的一句话}</div>
+              <button class="btn btn-sm" style="align-self:flex-start;">按模板生成 →</button>
+            </div>
+            <!-- Template 5 -->
+            <div class="card" style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font:italic 16px var(--serif);flex:1;">教程攻略</span>
+                <span class="chip" style="font-size:9px;">干货教学</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink-soft);line-height:1.5;">效果展示 → 准备材料 → 分步教程 → 注意事项 → 成果对比。</div>
+              <div style="font:11px var(--mono);color:var(--ink-mute);background:var(--paper-soft);padding:8px;border:1px solid var(--rule-soft);line-height:1.6;white-space:pre-wrap;">## 效果预览
+{成品展示}
+
+## 你需要
+{材料/工具清单}
+
+## 步骤
+1. {配图说明}
+2. ...
+
+## 避坑提醒
+{常见错误}</div>
+              <button class="btn btn-sm" style="align-self:flex-start;">按模板生成 →</button>
+            </div>
+            <!-- Custom template placeholder -->
+            <div class="card" style="padding:16px;display:grid;place-items:center;border-style:dashed;min-height:200px;">
+              <div style="text-align:center;">
+                <div style="font:italic 16px var(--serif);color:var(--ink-mute);margin-bottom:6px;">+ 自定义模板</div>
+                <div style="font:11px var(--mono);color:var(--ink-mute);">从已有笔记提取结构</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 08 TASKS · SECONDARY ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">08</span>Tasks · 后台任务监控<span class="desc">Agent 执行 Trace、工具耗时、失败原因</span><span class="role">Trace</span></div>
+  <div class="frame">
+    <div class="chrome live"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / <b>tasks</b></span><span class="chrome-meta">1440 × 900</span></div>
+    <div class="body">
+      <div class="shell">
+        <div class="side">
+          <div class="side-brand"><div class="side-brand-mark"><span>书</span></div>创作工作室</div>
+          <div class="side-section">导航</div>
+          <nav class="nav">
+            <a><span class="ico"></span>创作对话</a>
+            <a><span class="ico"></span>笔记库<span class="badge">12</span></a>
+            <a><span class="ico"></span>模板库</a>
+            <a><span class="ico"></span>数据</a>
+            <a><span class="ico"></span>诊断</a>
+            <a class="active"><span class="ico"></span>任务中心<span class="badge">2</span></a>
+            <a><span class="ico"></span>AI 图片</a>
+            <a><span class="ico"></span>设置</a>
+          </nav>
+          <div class="side-foot"><div class="avatar">Y</div><div class="side-user"><div class="name">editor_yuan</div><div class="role">admin</div></div></div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <h2><span class="num">08</span>任务中心</h2>
+            <span class="topbar-meta">查看 Agent 执行 Trace、工具耗时、失败原因和任务恢复状态</span>
+            <div class="topbar-actions">
+              <button class="btn btn-ghost btn-sm">刷新</button>
+            </div>
+          </div>
+          <div class="content" style="padding:20px 28px;display:flex;flex-direction:column;gap:14px;overflow:hidden;">
+            <!-- Task 1: Running -->
+            <div class="card task-running" style="padding:16px;">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+                <span class="chip accent" style="font-size:9px;"><span class="chip-dot"></span>running</span>
+                <span style="font:500 13px var(--sans);">诊断任务</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">笔记 #7 · 对话 #14</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);margin-left:auto;">更新 12s ago</span>
+                <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;">停止</button>
+              </div>
+              <!-- Trace expanded -->
+              <div style="border:1px solid var(--rule-soft);padding:12px;background:var(--paper-soft);">
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px;">
+                  <div><div class="stat-label" style="font-size:9px;">首事件</div><div style="font:600 16px var(--mono);color:var(--ink);">0.8s</div></div>
+                  <div><div class="stat-label" style="font-size:9px;">首字</div><div style="font:600 16px var(--mono);color:var(--ink);">1.2s</div></div>
+                  <div><div class="stat-label" style="font-size:9px;">输出字符</div><div style="font:600 16px var(--mono);color:var(--ink);">2,847</div></div>
+                  <div><div class="stat-label" style="font-size:9px;">工具数</div><div style="font:600 16px var(--mono);color:var(--accent);">5</div></div>
+                </div>
+                <div style="font:500 10px var(--mono);letter-spacing:0.15em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:8px;">工具调用</div>
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                  <div style="display:flex;align-items:center;gap:8px;font:12px var(--mono);"><span style="color:var(--ok);">✓</span><span style="flex:1;">detect_category</span><span style="color:var(--ink-mute);">320ms</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;font:12px var(--mono);"><span style="color:var(--ok);">✓</span><span style="flex:1;">score_article</span><span style="color:var(--ink-mute);">1.8s</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;font:12px var(--mono);"><span style="color:var(--ok);">✓</span><span style="flex:1;">analyze_text</span><span style="color:var(--ink-mute);">2.1s</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;font:12px var(--mono);"><span style="color:var(--ok);">✓</span><span style="flex:1;">expert_diagnose</span><span style="color:var(--ink-mute);">4.7s</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;font:12px var(--mono);"><span style="color:var(--warn);">⟳</span><span style="flex:1;">expert_debate</span><span style="color:var(--accent);">running...</span></div>
+                </div>
+                <div class="event-feed" style="margin-top:12px;">
+                  <div><span>00:00</span><span>SSE task_id emitted to client</span><span>ok</span></div>
+                  <div><span>00:04</span><span>reconnect token stored in chatStore</span><span>ok</span></div>
+                  <div><span>00:12</span><span>debate chunk streamed · 812 chars</span><span>live</span></div>
+                </div>
+              </div>
+            </div>
+            <!-- Task 2: Completed -->
+            <div class="card" style="padding:16px;">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span class="chip published" style="font-size:9px;"><span class="chip-dot"></span>completed</span>
+                <span style="font:500 13px var(--sans);">诊断任务</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">笔记 #5 · 对话 #11</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);margin-left:auto;">3 min ago · 总耗时 18.4s</span>
+                <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;">查看 Trace</button>
+              </div>
+            </div>
+            <!-- Task 3: Failed -->
+            <div class="card" style="padding:16px;">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span class="chip alert" style="font-size:9px;"><span class="chip-dot"></span>failed</span>
+                <span style="font:500 13px var(--sans);">生图任务</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">generate_image · 笔记 #3</span>
+                <span style="font:11px var(--mono);color:var(--hazard);margin-left:auto;">timeout 8min · model: gpt-image-1</span>
+                <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;">重试</button>
+              </div>
+            </div>
+            <!-- Task 4: Completed -->
+            <div class="card" style="padding:16px;">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span class="chip published" style="font-size:9px;"><span class="chip-dot"></span>completed</span>
+                <span style="font:500 13px var(--sans);">对话任务</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">对话 #14 · 一键完整成稿</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);margin-left:auto;">10 min ago · 总耗时 6.2s · 3 tools</span>
+                <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;">查看 Trace</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 09 SETTINGS · SECONDARY ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">09</span>Settings · 工作室配置<span class="desc">模型队列 + 账号安全 + MCP 接入</span><span class="role">Config</span></div>
+  <div class="frame">
+    <div class="chrome live"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / <b>settings</b></span><span class="chrome-meta">1440 × 900</span></div>
+    <div class="body">
+      <div class="shell">
+        <div class="side">
+          <div class="side-brand"><div class="side-brand-mark"><span>书</span></div>创作工作室</div>
+          <div class="side-section">导航</div>
+          <nav class="nav">
+            <a><span class="ico"></span>创作对话</a>
+            <a><span class="ico"></span>笔记库<span class="badge">12</span></a>
+            <a><span class="ico"></span>模板库</a>
+            <a><span class="ico"></span>数据</a>
+            <a><span class="ico"></span>诊断</a>
+            <a><span class="ico"></span>任务中心</a>
+            <a><span class="ico"></span>AI 图片</a>
+            <a class="active"><span class="ico"></span>设置</a>
+          </nav>
+          <div class="side-foot"><div class="avatar">Y</div><div class="side-user"><div class="name">editor_yuan</div><div class="role">admin</div></div></div>
+        </div>
+        <div class="main">
+          <div class="topbar">
+            <h2><span class="num">09</span>设置</h2>
+          </div>
+          <div class="content" style="padding:20px 28px;display:flex;flex-direction:column;gap:20px;overflow:hidden;">
+            <!-- Section: Model Queue -->
+            <div class="card" style="padding:16px;">
+              <div class="section-head" style="margin-bottom:14px;">
+                <span class="num">A</span><span class="title">对话模型队列</span><span class="desc">拖拽排序优先级，首选失败自动 fallback</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <div style="display:grid;grid-template-columns:24px 1fr 200px 160px 60px;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--rule);font-size:12px;">
+                  <span style="font:11px var(--mono);color:var(--ink-mute);">1</span>
+                  <span style="font:500 13px var(--sans);">gpt-4o</span>
+                  <span style="font:11px var(--mono);color:var(--ink-mute);">https://api.openai.com/v1</span>
+                  <span style="font:11px var(--mono);color:var(--ink-mute);">sk-••••••7f3a</span>
+                  <span class="chip published" style="font-size:9px;">可用</span>
+                </div>
+                <div style="display:grid;grid-template-columns:24px 1fr 200px 160px 60px;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--rule-soft);font-size:12px;">
+                  <span style="font:11px var(--mono);color:var(--ink-mute);">2</span>
+                  <span style="font:500 13px var(--sans);">claude-sonnet-4-6</span>
+                  <span style="font:11px var(--mono);color:var(--ink-mute);">https://api.anthropic.com/v1</span>
+                  <span style="font:11px var(--mono);color:var(--ink-mute);">sk-••••••b2e1</span>
+                  <span class="chip published" style="font-size:9px;">可用</span>
+                </div>
+                <div style="display:grid;grid-template-columns:24px 1fr 200px 160px 60px;align-items:center;gap:10px;padding:8px 10px;border:1px dashed var(--rule-soft);font-size:12px;">
+                  <span style="font:11px var(--mono);color:var(--ink-mute);">3</span>
+                  <span style="font:500 13px var(--sans);color:var(--ink-mute);">+ 添加模型</span>
+                  <span></span><span></span><span></span>
+                </div>
+              </div>
+            </div>
+            <!-- Section: Image Model -->
+            <div class="card" style="padding:16px;">
+              <div class="section-head" style="margin-bottom:14px;">
+                <span class="num">B</span><span class="title">生图模型队列</span><span class="desc">支持 URL / quality 参数</span>
+              </div>
+              <div style="display:grid;grid-template-columns:24px 1fr 200px 100px 60px;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--rule);font-size:12px;">
+                <span style="font:11px var(--mono);color:var(--ink-mute);">1</span>
+                <span style="font:500 13px var(--sans);">gpt-image-1</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">https://api.openai.com/v1</span>
+                <span style="font:11px var(--mono);color:var(--ink-mute);">quality: hd</span>
+                <span class="chip published" style="font-size:9px;">可用</span>
+              </div>
+            </div>
+            <div class="audit-strip">
+              <div><b><span class="health-dot"></span>OK</b><span>chat route</span></div>
+              <div><b><span class="health-dot warn"></span>URL</b><span>image fallback</span></div>
+              <div><b><span class="health-dot"></span>20</b><span>mcp tools</span></div>
+              <div><b><span class="health-dot"></span>sync</b><span>settings hot reload</span></div>
+            </div>
+            <!-- Section: Account -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div class="card" style="padding:16px;">
+                <div class="section-head" style="margin-bottom:14px;">
+                  <span class="num">C</span><span class="title">账号安全</span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-size:12px;color:var(--ink-soft);width:80px;">当前密码</span>
+                    <div style="flex:1;border:1px solid var(--rule);padding:7px 10px;font-size:12px;color:var(--ink-mute);">••••••••</div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-size:12px;color:var(--ink-soft);width:80px;">新密码</span>
+                    <div style="flex:1;border:1px solid var(--rule);padding:7px 10px;font-size:12px;color:var(--ink-mute);"></div>
+                  </div>
+                  <button class="btn btn-sm" style="align-self:flex-start;">修改密码</button>
+                </div>
+              </div>
+              <div class="card" style="padding:16px;">
+                <div class="section-head" style="margin-bottom:14px;">
+                  <span class="num">D</span><span class="title">系统管理</span><span class="meta">admin only</span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-size:12px;color:var(--ink-soft);">开放注册</span>
+                    <div style="width:36px;height:20px;border-radius:10px;background:var(--ok);position:relative;"><div style="width:16px;height:16px;border-radius:50%;background:white;position:absolute;top:2px;right:2px;"></div></div>
+                  </div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-size:12px;color:var(--ink-soft);">用户列表</span>
+                    <span style="font:11px var(--mono);color:var(--ink-mute);">3 users</span>
+                  </div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span style="font-size:12px;color:var(--ink-soft);">MCP 接入</span>
+                    <span class="chip published" style="font-size:9px;">stdio + HTTP</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 10 IMAGE LAB · SECONDARY ===== -->
+<div class="cell">
+  <div class="cell-label"><span class="num">10</span>Image Lab · PS 式图片拆层<span class="desc">智能画布 + 图层面板 + AI 编辑</span><span class="role">Tool</span></div>
+  <div class="frame">
+    <div class="chrome live"><div class="chrome-dots"><i class="chrome-dot"></i><i class="chrome-dot"></i><i class="chrome-dot"></i></div><span class="chrome-path">xhs-agent / <b>ai-image-lab</b></span><span class="chrome-meta">1440 × 900</span></div>
+    <div class="body">
+      <div class="shell">
+        <!-- Left: Tool Panel -->
+        <div style="width:240px;flex-shrink:0;border-right:1px solid var(--rule);display:flex;flex-direction:column;padding:16px;gap:16px;overflow:hidden;">
+          <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;">整图生成 / 上传</div>
+          <div>
+            <label style="font:11px var(--mono);color:var(--ink-soft);display:block;margin-bottom:4px;">整图生成 Prompt</label>
+            <div style="border:1px solid var(--rule);padding:8px;font-size:11px;color:var(--ink-soft);line-height:1.5;min-height:48px;">小红书风格封面，秋冬穿搭，奶茶色系，高级感</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <div><label style="font:9px var(--mono);color:var(--ink-mute);">size</label><div style="border:1px solid var(--rule);padding:5px 6px;font:11px var(--mono);">1152×1536</div></div>
+            <div><label style="font:9px var(--mono);color:var(--ink-mute);">quality</label><div style="border:1px solid var(--rule);padding:5px 6px;font:11px var(--mono);">hd</div></div>
+          </div>
+          <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center;">用当前图片 API 生成整图</button>
+          <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;">上传已有图测试</button>
+
+          <div style="border-top:1px solid var(--rule);padding-top:12px;margin-top:4px;">
+            <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:8px;">PS 式像素拆层</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <label style="font:9px var(--mono);color:var(--ink-mute);">灵敏度</label>
+              <div style="flex:1;height:4px;background:var(--rule);position:relative;"><div style="position:absolute;left:60%;top:-4px;width:12px;height:12px;border-radius:50%;background:var(--ink);"></div></div>
+            </div>
+            <button class="btn btn-sm" style="width:100%;justify-content:center;">AI 语义识别</button>
+          </div>
+
+          <div style="border-top:1px solid var(--rule);padding-top:12px;margin-top:4px;">
+            <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:8px;">局部/整体编辑</div>
+            <div style="border:1px solid var(--rule);padding:8px;font-size:11px;color:var(--ink-soft);line-height:1.5;min-height:36px;margin-bottom:8px;">把背景换成咖啡店场景</div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <button class="btn btn-sm" style="width:100%;justify-content:center;font-size:10px;">AI 修改选区/图层</button>
+              <button class="btn btn-sm" style="width:100%;justify-content:center;font-size:10px;">AI 删除选区并补背景</button>
+              <button class="btn btn-sm" style="width:100%;justify-content:center;font-size:10px;">AI 整体编辑当前图</button>
+            </div>
+          </div>
+        </div>
+        <!-- Center: Canvas -->
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;">
+          <div style="padding:10px 16px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:12px;">
+            <span style="font:italic 14px var(--serif);">智能画布</span>
+            <span style="font:11px var(--mono);color:var(--ink-mute);">1152 × 1536 · 3:4</span>
+            <div style="margin-left:auto;display:flex;gap:6px;">
+              <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;">加文本层</button>
+              <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;">选区成元素层</button>
+              <button class="btn btn-accent btn-sm" style="padding:3px 8px;font-size:10px;">合成导出</button>
+            </div>
+          </div>
+          <div style="flex:1;display:grid;place-items:center;background:var(--paper-soft);overflow:hidden;">
+            <!-- Canvas placeholder -->
+            <div style="width:360px;height:480px;border:1px solid var(--rule);background:var(--paper);position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+              <div style="font:11px var(--mono);color:var(--ink-mute);text-align:center;line-height:1.6;">
+                画布区域<br>
+                <span style="font-size:9px;">拖拽选区 · 图层叠放 · 涂抹 mask</span>
+              </div>
+              <!-- Simulated selection -->
+              <div class="selection-box" style="position:absolute;top:80px;left:60px;width:240px;height:160px;border:2px dashed var(--accent);opacity:0.6;"></div>
+              <i class="selection-handle" style="top:76px;left:56px;"></i>
+              <i class="selection-handle" style="top:76px;left:296px;"></i>
+              <i class="selection-handle" style="top:236px;left:56px;"></i>
+              <i class="selection-handle" style="top:236px;left:296px;"></i>
+              <div style="position:absolute;top:80px;left:60px;padding:2px 6px;background:var(--accent);color:white;font:9px var(--mono);">选区 · 图层 2</div>
+              <div style="position:absolute;bottom:18px;left:22px;right:22px;border-top:1px solid var(--rule);padding-top:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;font:8px var(--mono);color:var(--ink-mute);">
+                <span>MASK 76%</span><span>EDGE +4</span><span>FEATHER 12</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Right: Layers + Result -->
+        <div style="width:240px;flex-shrink:0;border-left:1px solid var(--rule);display:flex;flex-direction:column;overflow:hidden;">
+          <div style="padding:12px;border-bottom:1px solid var(--rule);">
+            <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:8px;">图层面板</div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--accent-soft);border:1px solid var(--accent);font-size:11px;">
+                <div style="width:24px;height:18px;background:var(--paper-deep);border:1px solid var(--rule);"></div>
+                <span style="flex:1;font-weight:500;">图层 2 · 人物</span>
+                <span style="font:9px var(--mono);color:var(--accent);">选中</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--rule-soft);font-size:11px;">
+                <div style="width:24px;height:18px;background:var(--paper-deep);border:1px solid var(--rule);"></div>
+                <span style="flex:1;">图层 1 · 背景</span>
+                <span style="font:9px var(--mono);color:var(--ink-mute);">base</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--rule-soft);font-size:11px;">
+                <div style="width:24px;height:18px;background:var(--paper-deep);border:1px solid var(--rule);font:7px var(--mono);display:grid;place-items:center;color:var(--ink-mute);">T</div>
+                <span style="flex:1;">文本层 · 标题</span>
+                <span style="font:9px var(--mono);color:var(--ink-mute);">text</span>
+              </div>
+            </div>
+          </div>
+          <div style="padding:12px;border-bottom:1px solid var(--rule);">
+            <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:8px;">选中层编辑</div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-size:11px;">
+              <div style="display:flex;justify-content:space-between;"><span style="color:var(--ink-soft);">类型</span><span style="font-family:var(--mono);">image · AI 分割</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="color:var(--ink-soft);">尺寸</span><span style="font-family:var(--mono);">240 × 160</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="color:var(--ink-soft);">位置</span><span style="font-family:var(--mono);">x:60 y:80</span></div>
+            </div>
+          </div>
+          <div style="padding:12px;border-bottom:1px solid var(--rule);">
+            <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:8px;">结果图</div>
+            <div style="width:100%;height:80px;background:var(--paper-deep);border:1px solid var(--rule-soft);display:grid;place-items:center;font:9px var(--mono);color:var(--ink-mute);">等待生成</div>
+          </div>
+          <div style="padding:12px;flex:1;overflow:hidden;">
+            <div style="font:500 10px var(--mono);letter-spacing:0.2em;color:var(--ink-mute);text-transform:uppercase;margin-bottom:8px;">调用日志</div>
+            <div style="display:flex;flex-direction:column;gap:4px;font:10px var(--mono);color:var(--ink-soft);">
+              <div style="display:flex;align-items:center;gap:4px;"><span style="color:var(--ok);">✓</span> generate_image · 3.2s</div>
+              <div style="display:flex;align-items:center;gap:4px;"><span style="color:var(--ok);">✓</span> segment_layers · 1.8s</div>
+              <div style="display:flex;align-items:center;gap:4px;"><span style="color:var(--warn);">⟳</span> inpaint · pending</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+</main>
+
+<footer class="colophon">
+  <div>
+    <h3>Colophon</h3>
+    <p>原型基于真实代码：所有页面布局、按钮文案、模板名称、工具调用名都来自 <em>frontend/src/pages</em> 与 <em>backend/app/agents/tools.py</em>。</p>
+    <p>字型：<em>Source Serif 4 / Noto Serif SC</em>（Display）+ <em>Inter / PingFang SC</em>（Body）+ <em>JetBrains Mono</em>（Data HUD）。</p>
+    <p>色板：<em>#F4F1EA</em> paper · <em>#1A1814</em> ink · <em>#C8302E</em> accent。零紫色渐变、零 emoji 装饰图标、零撞 SaaS slop。</p>
+  </div>
+  <div class="credit">
+    <em>Created by Huashu-Design</em>
+    <small>2026 / Prototype v3</small>
+  </div>
+</footer>
+
+</body>
+</html>

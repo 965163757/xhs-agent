@@ -84,10 +84,10 @@ export default function TemplatesPage() {
   }
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1100, mx: 'auto' }}>
+    <Box className="editorial-page" sx={{ p: { xs: 2, md: 3 }, maxWidth: 1180, mx: 'auto' }}>
       <Stack direction="row" alignItems="flex-start" sx={{ mb: 3.5 }}>
         <Stack spacing={0.3}>
-          <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
+          <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 30, fontWeight: 800, letterSpacing: -0.8 }}>
             模板库
           </Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
@@ -114,7 +114,7 @@ export default function TemplatesPage() {
 
       {!loading && items.length === 0 && (
         <Box sx={{ textAlign: 'center', py: 10 }}>
-          <Typography sx={{ fontSize: 48, mb: 1.5 }}>📄</Typography>
+          <Typography className="editorial-mono" sx={{ fontSize: 11, color: 'primary.main', mb: 1.5 }}>EMPTY LIBRARY</Typography>
           <Typography sx={{ fontSize: 14, color: 'text.secondary' }}>
             暂无模板，创建一个或在对话中让助手提取
           </Typography>
@@ -144,15 +144,15 @@ export default function TemplatesPage() {
                 bgcolor: 'background.paper',
                 border: '1px solid',
                 borderColor: 'divider',
-                borderRadius: 3,
+                borderRadius: 0,
                 p: 2.5,
                 cursor: 'pointer',
-                transition: 'all .2s cubic-bezier(0.4,0,0.2,1)',
+                transition: 'all .18s cubic-bezier(0.16,1,0.3,1)',
                 position: 'relative',
                 '&:hover': {
-                  borderColor: 'rgba(255,36,66,0.15)',
-                  boxShadow: '0 6px 20px rgba(255,36,66,0.06), 0 2px 8px rgba(0,0,0,0.03)',
-                  transform: 'translateY(-2px)',
+                  borderColor: 'primary.main',
+                  boxShadow: 'none',
+                  transform: 'translateY(-1px)',
                 },
                 '&:hover .del-btn': { opacity: 1 },
               }}
@@ -166,11 +166,11 @@ export default function TemplatesPage() {
                 <DeleteOutlineIcon sx={{ fontSize: 15 }} />
               </IconButton>
               <Stack direction="row" alignItems="center" spacing={0.8} sx={{ mb: 1 }}>
-                <Typography sx={{ fontSize: 15, fontWeight: 700 }}>{t.name}</Typography>
+                <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 17, fontWeight: 650 }}>{t.name}</Typography>
                 <Chip
                   size="small"
                   label={t.category}
-                  sx={{ fontSize: 10.5, height: 18, bgcolor: 'rgba(255,122,0,0.08)', color: '#CC6200' }}
+                  sx={{ fontSize: 10.5, height: 18, bgcolor: 'var(--accent-soft)', color: 'primary.main' }}
                 />
               </Stack>
               <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mb: 1.5, lineHeight: 1.5 }}>
@@ -179,10 +179,10 @@ export default function TemplatesPage() {
               <Box
                 sx={{
                   p: 1.5,
-                  bgcolor: 'rgba(0,0,0,0.02)',
+                  bgcolor: 'var(--paper-soft)',
                   border: '1px solid',
                   borderColor: 'divider',
-                  borderRadius: 2,
+                  borderRadius: 0,
                   whiteSpace: 'pre-wrap',
                   fontSize: 11.5,
                   color: 'text.secondary',
@@ -198,7 +198,7 @@ export default function TemplatesPage() {
                     left: 0,
                     right: 0,
                     height: 40,
-                    background: 'linear-gradient(transparent, var(--bg, rgba(248,248,246,1)))',
+                    background: 'linear-gradient(transparent, var(--paper-soft))',
                     pointerEvents: 'none',
                   },
                 }}
@@ -208,7 +208,24 @@ export default function TemplatesPage() {
               {(t.tags || []).length > 0 && (
                 <Stack direction="row" spacing={0.4} sx={{ mt: 1.2, flexWrap: 'wrap', gap: 0.4 }}>
                   {(t.tags || []).slice(0, 4).map(x => (
-                    <Chip key={x} label={x} size="small" sx={{ fontSize: 10, height: 18 }} />
+                    <Chip
+                      key={x}
+                      label={x}
+                      size="small"
+                      sx={{
+                        fontSize: 10.5,
+                        minHeight: 20,
+                        height: 'auto',
+                        color: 'text.primary',
+                        maxWidth: '100%',
+                        '& .MuiChip-label': {
+                          py: 0.2,
+                          lineHeight: 1.25,
+                          whiteSpace: 'normal',
+                          overflowWrap: 'anywhere',
+                        },
+                      }}
+                    />
                   ))}
                 </Stack>
               )}
@@ -257,7 +274,6 @@ export default function TemplatesPage() {
             onClick={apply}
             disabled={!topic || busy}
             startIcon={busy ? <CircularProgress size={14} /> : null}
-            sx={{ background: 'linear-gradient(135deg,#FF2442,#FF7A00)', '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' } }}
           >
             {busy ? '生成中…' : '生成并打开'}
           </Button>
@@ -318,7 +334,6 @@ export default function TemplatesPage() {
             onClick={handleCreate}
             disabled={!form.name || !form.body || busy}
             startIcon={busy ? <CircularProgress size={14} /> : null}
-            sx={{ background: 'linear-gradient(135deg,#FF2442,#FF7A00)', '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' } }}
           >
             {busy ? '创建中…' : '创建模板'}
           </Button>

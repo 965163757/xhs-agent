@@ -50,11 +50,11 @@ const STEPS = [
 ]
 
 const GRADE_COLORS: Record<string, string> = {
-  S: '#FF2741',
-  A: '#FF7A00',
-  B: '#F59E0B',
-  C: '#6B7280',
-  D: '#DC2626',
+  S: '#C8302E',
+  A: '#A87029',
+  B: '#D3A257',
+  C: '#8C8578',
+  D: '#8B2520',
 }
 
 function RadarChart({ data }: { data: Record<string, number> }) {
@@ -90,21 +90,21 @@ function RadarChart({ data }: { data: Record<string, number> }) {
           key={scale}
           points={polygon(points(r * scale))}
           fill="none"
-          stroke="#e5e7eb"
+          stroke="var(--rule)"
           strokeWidth={0.5}
         />
       ))}
       {points(r).map((p, i) => (
-        <line key={i} x1={cx} y1={cy} x2={p[0]} y2={p[1]} stroke="#e5e7eb" strokeWidth={0.5} />
+        <line key={i} x1={cx} y1={cy} x2={p[0]} y2={p[1]} stroke="var(--rule)" strokeWidth={0.5} />
       ))}
       <polygon
         points={polygon(dataPoints)}
-        fill="rgba(255,39,65,0.15)"
-        stroke="#FF2741"
+        fill="rgba(200,48,46,0.12)"
+        stroke="var(--accent)"
         strokeWidth={2}
       />
       {dataPoints.map((p, i) => (
-        <circle key={i} cx={p[0]} cy={p[1]} r={4} fill="#FF2741" />
+        <circle key={i} cx={p[0]} cy={p[1]} r={4} fill="var(--accent)" />
       ))}
       {points(r + 16).map((p, i) => (
         <text
@@ -114,7 +114,7 @@ function RadarChart({ data }: { data: Record<string, number> }) {
           textAnchor="middle"
           dominantBaseline="middle"
           fontSize={11}
-          fill="#6B7280"
+          fill="var(--ink-soft)"
           fontWeight={600}
         >
           {labels[keys[i]]}
@@ -125,11 +125,13 @@ function RadarChart({ data }: { data: Record<string, number> }) {
 }
 
 function CommentCard({ comment }: { comment: any }) {
-  const sentimentColor = comment.sentiment === 'positive' ? '#16A34A' : comment.sentiment === 'negative' ? '#DC2626' : '#6B7280'
+  const sentimentColor = comment.sentiment === 'positive' ? 'var(--ok)' : comment.sentiment === 'negative' ? 'var(--hazard)' : 'var(--ink-mute)'
   return (
     <Paper variant="outlined" sx={{ p: 1.5, mb: 1 }}>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-        <Typography fontSize={16}>{comment.avatar_emoji || '👤'}</Typography>
+        <Box sx={{ width: 24, height: 24, border: '1px solid', borderColor: 'text.primary', display: 'grid', placeItems: 'center', fontFamily: 'var(--mono)', fontSize: 10, color: 'primary.main' }}>
+          {String(comment.username || 'U').slice(0, 1).toUpperCase()}
+        </Box>
         <Typography fontSize={13} fontWeight={600} color="text.primary">{comment.username}</Typography>
         <Chip label={comment.persona || comment.sentiment} size="small" sx={{ fontSize: 10, height: 18, bgcolor: sentimentColor + '15', color: sentimentColor }} />
         <Box flex={1} />
@@ -363,12 +365,12 @@ export default function DiagnosePage() {
   }
 
   return (
-    <Box sx={{ maxWidth: 1100, mx: 'auto', p: { xs: 2, md: 3 } }}>
+    <Box className="editorial-page" sx={{ maxWidth: 1180, mx: 'auto', p: { xs: 2, md: 3 } }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 3 }}>
         <IconButton onClick={() => nav(`/articles/${id}`)}>
           <ArrowBackIcon />
         </IconButton>
-        <Typography variant="h6" fontWeight={700}>笔记诊断</Typography>
+        <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 28, fontWeight: 800 }}>笔记诊断</Typography>
         {report && (
           <Chip
             label={`${report.grade}级 · ${report.overall_score}分`}
@@ -388,7 +390,7 @@ export default function DiagnosePage() {
       {historyLoaded && history.length > 0 && (
         <Alert
           severity="info"
-          sx={{ mb: 2, borderRadius: 2 }}
+          sx={{ mb: 2 }}
           action={
             <Stack direction="row" spacing={1}>
               <Button
@@ -435,7 +437,7 @@ export default function DiagnosePage() {
                       setError('')
                       setActiveStep(STEPS.length - 1)
                     }}
-                    sx={selected ? { bgcolor: '#FF2741', '&:hover': { bgcolor: '#E0223A' } } : undefined}
+                    sx={selected ? { bgcolor: 'primary.main', '&:hover': { bgcolor: 'primary.dark' } } : undefined}
                   >
                     {item.grade || '-'}级 · {item.overall_score || 0}分 · {fmtTime(item.created_at)}
                   </Button>
@@ -503,7 +505,7 @@ export default function DiagnosePage() {
                         <LinearProgress
                           variant="determinate"
                           value={v}
-                          sx={{ flex: 1, height: 6, borderRadius: 3, minWidth: 80, '& .MuiLinearProgress-bar': { bgcolor: '#FF2741' } }}
+                          sx={{ flex: 1, height: 4, borderRadius: 0, minWidth: 80, '& .MuiLinearProgress-bar': { bgcolor: 'primary.main' } }}
                         />
                         <Typography fontSize={12} fontWeight={600}>{v}</Typography>
                       </Stack>
@@ -576,7 +578,6 @@ export default function DiagnosePage() {
                     !Number(report.id || report.diagnosis_id) ||
                     (!report.optimized_title && !report.optimized_content && !(report.optimized_tags || []).length)
                   }
-                  sx={{ bgcolor: '#FF2741', '&:hover': { bgcolor: '#E0223A' } }}
                 >
                   {report.applied_at ? '已应用，可再次应用' : applying ? '应用中...' : '应用优化方案'}
                 </Button>
@@ -612,7 +613,24 @@ export default function DiagnosePage() {
                     <Typography fontSize={13} fontWeight={600} color="text.secondary" sx={{ mb: 0.5 }}>推荐标签</Typography>
                     <Stack direction="row" flexWrap="wrap" gap={0.5}>
                       {report.optimized_tags.map((t, i) => (
-                        <Chip key={i} label={`#${String(t).replace(/^[#＃]+/, '')}`} size="small" onClick={() => copyText(`#${String(t).replace(/^[#＃]+/, '')}`)} sx={{ cursor: 'pointer' }} />
+                        <Chip
+                          key={i}
+                          label={`#${String(t).replace(/^[#＃]+/, '')}`}
+                          size="small"
+                          onClick={() => copyText(`#${String(t).replace(/^[#＃]+/, '')}`)}
+                          sx={{
+                            cursor: 'pointer',
+                            minHeight: 22,
+                            height: 'auto',
+                            color: 'text.primary',
+                            '& .MuiChip-label': {
+                              py: 0.25,
+                              lineHeight: 1.25,
+                              whiteSpace: 'normal',
+                              overflowWrap: 'anywhere',
+                            },
+                          }}
+                        />
                       ))}
                     </Stack>
                   </Box>
@@ -743,7 +761,7 @@ export default function DiagnosePage() {
           {/* Actions */}
           <Stack direction="row" spacing={2} justifyContent="center" sx={{ pb: 4 }}>
             <Button variant="outlined" onClick={() => nav(`/articles/${id}`)}>返回笔记</Button>
-            <Button variant="contained" onClick={startDiagnosis} sx={{ bgcolor: '#FF2741', '&:hover': { bgcolor: '#E0223A' } }}>
+            <Button variant="contained" onClick={startDiagnosis}>
               重新诊断
             </Button>
           </Stack>

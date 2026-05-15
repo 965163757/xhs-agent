@@ -36,9 +36,9 @@ type ArticleRow =
   | { type: 'article'; key: string; article: Article }
 
 const statusColors: Record<string, { bg: string; color: string }> = {
-  draft: { bg: 'rgba(107,114,128,0.08)', color: '#6B7280' },
-  published: { bg: 'rgba(22,163,74,0.08)', color: '#16A34A' },
-  scheduled: { bg: 'rgba(217,119,6,0.08)', color: '#D97706' },
+  draft: { bg: 'rgba(140,133,120,0.10)', color: '#5C564C' },
+  published: { bg: 'rgba(62,107,78,0.10)', color: '#3E6B4E' },
+  scheduled: { bg: 'rgba(168,112,41,0.10)', color: '#A87029' },
 }
 
 function articleScore(a: Article) {
@@ -111,11 +111,11 @@ export default function ArticlesPage() {
   }, [filtered, isAdmin])
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: { xs: '100%', lg: 1120, xl: 1240 }, mx: 'auto' }}>
+    <Box className="editorial-page" sx={{ p: { xs: 2, md: 3 }, maxWidth: { xs: '100%', lg: 1180, xl: 1280 }, mx: 'auto' }}>
       {/* Header */}
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3.5, flexWrap: 'wrap', gap: 1 }}>
         <Stack spacing={0.2}>
-          <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
+          <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 30, fontWeight: 800, letterSpacing: -0.8 }}>
             {isAdmin ? '全部笔记' : '我的笔记'}
           </Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
@@ -130,9 +130,9 @@ export default function ArticlesPage() {
             sx={{
               height: 24,
               fontSize: 12,
-              bgcolor: 'rgba(59,130,246,0.08)',
-              color: '#2563EB',
-              '& .MuiChip-icon': { color: '#2563EB' },
+              bgcolor: 'var(--accent-soft)',
+              color: 'primary.main',
+              '& .MuiChip-icon': { color: 'primary.main' },
             }}
           />
         )}
@@ -148,13 +148,13 @@ export default function ArticlesPage() {
               px: 1.4,
               py: 0.5,
               textTransform: 'none',
-              borderRadius: '8px !important',
+              borderRadius: '0 !important',
               border: '1px solid',
               borderColor: 'divider',
               '&.Mui-selected': {
-                bgcolor: 'rgba(255,36,66,0.06)',
-                color: '#FF2442',
-                borderColor: 'rgba(255,36,66,0.2)',
+                bgcolor: 'var(--accent-soft)',
+                color: 'primary.main',
+                borderColor: 'primary.main',
               },
             },
           }}
@@ -169,7 +169,7 @@ export default function ArticlesPage() {
             value={sortBy}
             onChange={e => setSortBy(e.target.value as SortKey)}
             startAdornment={<SortIcon sx={{ fontSize: 14, mr: 0.5, color: 'text.secondary' }} />}
-            sx={{ fontSize: 12, height: 32, borderRadius: 2 }}
+            sx={{ fontSize: 12, height: 32, borderRadius: 0 }}
           >
             <MenuItem value="updated">最近更新</MenuItem>
             <MenuItem value="score">评分最高</MenuItem>
@@ -194,10 +194,6 @@ export default function ArticlesPage() {
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => nav('/')}
-          sx={{
-            background: 'linear-gradient(135deg,#FF2442,#FF7A00)',
-            '&:hover': { background: 'linear-gradient(135deg,#E01E3A,#E06A00)' },
-          }}
         >
           去创作
         </Button>
@@ -211,8 +207,8 @@ export default function ArticlesPage() {
 
       {!loading && filtered.length === 0 && (
         <Box sx={{ textAlign: 'center', py: 10 }}>
-          <Typography sx={{ fontSize: 48, mb: 1.5 }}>
-            {items.length === 0 ? '📝' : '🔍'}
+          <Typography className="editorial-mono" sx={{ fontSize: 11, color: 'primary.main', mb: 1.5 }}>
+            {items.length === 0 ? 'EMPTY' : 'FILTER'}
           </Typography>
           <Typography sx={{ fontSize: 14, color: 'text.secondary' }}>
             {items.length === 0
@@ -238,7 +234,7 @@ export default function ArticlesPage() {
                   '&:first-of-type': { pt: 0 },
                 }}
               >
-                <PersonOutlineIcon sx={{ fontSize: 16, color: '#2563EB' }} />
+                <PersonOutlineIcon sx={{ fontSize: 16, color: 'primary.main' }} />
                 <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: 'text.primary' }}>
                   {row.ownerName}
                 </Typography>
@@ -259,12 +255,12 @@ export default function ArticlesPage() {
               bgcolor: 'background.paper',
               border: '1px solid',
               borderColor: 'divider',
-              borderRadius: 3,
+              borderRadius: 0,
               cursor: 'pointer',
               transition: 'all .2s cubic-bezier(0.4,0,0.2,1)',
               '&:hover': {
-                borderColor: 'rgba(255,36,66,0.15)',
-                boxShadow: '0 4px 16px rgba(255,36,66,0.06), 0 2px 6px rgba(0,0,0,0.03)',
+                borderColor: 'primary.main',
+                boxShadow: 'none',
                 transform: 'translateY(-1px)',
                 '& .row-actions': { opacity: 1 },
               },
@@ -275,16 +271,19 @@ export default function ArticlesPage() {
               sx={{
                 width: 80,
                 height: 80,
-                borderRadius: 2.5,
-                bgcolor: 'rgba(0,0,0,0.03)',
+                borderRadius: 0,
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'var(--paper-deep)',
                 backgroundImage: a.cover_image ? `url(${a.cover_image})` : undefined,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 display: 'grid',
                 placeItems: 'center',
                 color: 'text.secondary',
-                fontSize: 20,
-                fontWeight: 700,
+                fontSize: 18,
+                fontWeight: 800,
+                fontFamily: 'var(--serif)',
                 flexShrink: 0,
                 overflow: 'hidden',
               }}
@@ -314,7 +313,7 @@ export default function ArticlesPage() {
                   <Chip
                     size="small"
                     label={`${articleScore(a)}分`}
-                    sx={{ bgcolor: 'rgba(22,163,74,0.08)', color: '#16A34A', fontSize: 11, height: 20, fontWeight: 600 }}
+                    sx={{ bgcolor: 'rgba(62,107,78,0.10)', color: 'success.main', fontSize: 11, height: 20, fontWeight: 600 }}
                   />
                 )}
                 {a.owner_user && (
@@ -323,12 +322,12 @@ export default function ArticlesPage() {
                     icon={<PersonOutlineIcon sx={{ fontSize: '13px !important' }} />}
                     label={a.owner_user.username || `用户 ${a.user_id || ''}`}
                     sx={{
-                      bgcolor: 'rgba(59,130,246,0.08)',
-                      color: '#2563EB',
+                      bgcolor: 'var(--accent-soft)',
+                      color: 'primary.main',
                       fontSize: 11,
                       height: 20,
                       fontWeight: 600,
-                      '& .MuiChip-icon': { color: '#2563EB' },
+                      '& .MuiChip-icon': { color: 'primary.main' },
                     }}
                   />
                 )}
@@ -353,14 +352,31 @@ export default function ArticlesPage() {
                     label={`#${String(t).replace(/^[#＃]+/, '')}`}
                     size="small"
                     sx={{
-                      fontSize: 10.5,
-                      height: 18,
-                      bgcolor: 'rgba(0,0,0,0.03)',
+                      fontSize: 11,
+                      minHeight: 20,
+                      height: 'auto',
+                      bgcolor: 'var(--paper-soft)',
+                      color: 'text.primary',
                       border: '1px solid',
                       borderColor: 'divider',
+                      maxWidth: 160,
+                      '& .MuiChip-label': {
+                        px: 0.75,
+                        py: 0.2,
+                        lineHeight: 1.25,
+                        whiteSpace: 'normal',
+                        overflowWrap: 'anywhere',
+                      },
                     }}
                   />
                 ))}
+                {(a.tags || []).length > 5 && (
+                  <Chip
+                    label={`+${(a.tags || []).length - 5}`}
+                    size="small"
+                    sx={{ height: 20, fontSize: 10.5, bgcolor: 'background.paper', color: 'text.secondary' }}
+                  />
+                )}
               </Stack>
             </Box>
 

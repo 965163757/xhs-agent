@@ -47,30 +47,12 @@ export default function LoginPage() {
         overflow: 'hidden',
       }}
     >
-      {/* Ambient gradient orbs */}
       <Box
         sx={{
           position: 'absolute',
-          top: '-20%',
-          right: '-10%',
-          width: 600,
-          height: 600,
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(255,36,66,0.06) 0%, transparent 60%)',
-          filter: 'blur(60px)',
-          pointerEvents: 'none',
-        }}
-      />
-      <Box
-        sx={{
-          position: 'absolute',
-          bottom: '-20%',
-          left: '-10%',
-          width: 500,
-          height: 500,
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(255,122,0,0.05) 0%, transparent 60%)',
-          filter: 'blur(60px)',
+          inset: { xs: 20, md: 48 },
+          border: '1px solid',
+          borderColor: 'divider',
           pointerEvents: 'none',
         }}
       />
@@ -80,13 +62,12 @@ export default function LoginPage() {
           width: '100%',
           maxWidth: 380,
           bgcolor: 'background.paper',
-          borderRadius: 5,
           border: '1px solid',
           borderColor: 'divider',
           p: { xs: 3.5, sm: 4.5 },
           position: 'relative',
           zIndex: 1,
-          boxShadow: '0 20px 60px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+          boxShadow: 'none',
         }}
       >
         <Stack alignItems="center" spacing={1.5} sx={{ mb: 4 }}>
@@ -94,23 +75,24 @@ export default function LoginPage() {
             sx={{
               width: 52,
               height: 52,
-              borderRadius: '14px',
-              background: 'linear-gradient(135deg,#FF2442 0%,#FF7A00 100%)',
+              border: '2px solid',
+              borderColor: 'text.primary',
+              background: 'background.paper',
               display: 'grid',
               placeItems: 'center',
-              color: '#fff',
+              color: 'primary.main',
               fontWeight: 800,
               fontSize: 20,
-              boxShadow: '0 8px 24px rgba(255,36,66,0.3)',
+              fontFamily: 'var(--mono)',
             }}
           >
-            红
+            书
           </Box>
           <Stack alignItems="center" spacing={0.3}>
-            <Typography sx={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.5 }}>
+            <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
               小红书创作助手
             </Typography>
-            <Typography sx={{ fontSize: 12.5, color: 'text.secondary', letterSpacing: 0.3 }}>
+            <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 13.5, color: 'text.secondary', letterSpacing: 0 }}>
               AI 驱动的内容创作平台
             </Typography>
           </Stack>
@@ -125,9 +107,8 @@ export default function LoginPage() {
             minHeight: 36,
             '& .MuiTab-root': { minHeight: 36, py: 0.8 },
             '& .MuiTabs-indicator': {
-              height: 2.5,
-              borderRadius: 2,
-              background: 'linear-gradient(90deg,#FF2442,#FF7A00)',
+              height: 2,
+              background: 'var(--ink)',
             },
           }}
         >
@@ -161,14 +142,10 @@ export default function LoginPage() {
               disabled={busy || !username || !password}
               sx={{
                 py: 1.3,
-                background: 'linear-gradient(135deg,#FF2442,#FF7A00)',
                 fontWeight: 700,
                 fontSize: 14.5,
-                borderRadius: 3,
-                boxShadow: '0 4px 16px rgba(255,36,66,0.25)',
                 '&:hover': {
-                  background: 'linear-gradient(135deg,#E01E3A,#E06A00)',
-                  boxShadow: '0 8px 24px rgba(255,36,66,0.35)',
+                  bgcolor: 'primary.main',
                   transform: 'translateY(-1px)',
                 },
                 '&:active': { transform: 'translateY(0.5px)' },

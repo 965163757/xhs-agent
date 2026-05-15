@@ -27,7 +27,7 @@ import {
   subscribe,
 } from '../chatStore'
 
-export type HeroAction = { icon: string; title: string; prompt: string }
+export type HeroAction = { icon: string; title: string; prompt: string; desc?: string }
 
 export default function ChatPanel({
   article,
@@ -44,7 +44,7 @@ export default function ChatPanel({
   sessionKey: sessionKeyProp,
 }: {
   article?: Article | null
-  onArticleMayChange?: () => void
+  onArticleMayChange?: (article?: Article | null) => void
   onConversationCreated?: (id: number) => void
   onArticleCreated?: (id: number) => void
   quickActions?: Array<{ label: string; prompt: string }>
@@ -113,20 +113,22 @@ export default function ChatPanel({
         >
           <Box
             sx={{
-              width: 22,
-              height: 22,
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg,#ef4444,#f97316)',
-              color: '#fff',
+              width: 24,
+              height: 24,
+              border: '1.5px solid',
+              borderColor: 'text.primary',
+              background: 'background.paper',
+              color: 'primary.main',
               display: 'grid',
               placeItems: 'center',
               fontSize: 11,
-              fontWeight: 700,
+              fontWeight: 800,
+              fontFamily: 'var(--mono)',
             }}
           >
-            红
+            书
           </Box>
-          <Typography sx={{ fontSize: 14, fontWeight: 600 }}>
+          <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 15, fontWeight: 700 }}>
             {article ? `为笔记 #${article.id} 继续打磨` : 'AI 创作助手'}
           </Typography>
           <Box sx={{ flex: 1 }} />
@@ -142,8 +144,8 @@ export default function ChatPanel({
               size="small"
               label="AI 工作中"
               sx={{
-                bgcolor: '#FFF1B8',
-                color: '#92400e',
+                bgcolor: 'rgba(168,112,41,0.10)',
+                color: 'warning.main',
                 fontSize: 11,
                 height: 20,
                 fontWeight: 600,
@@ -167,14 +169,16 @@ export default function ChatPanel({
         }}
       >
         {messages.length === 0 && (
-          <Box sx={{ maxWidth: 720, width: '100%', mx: 'auto', py: 4 }}>
+          <Box sx={{ maxWidth: 860, width: '100%', mx: 'auto', py: 4 }}>
             {article ? (
               <>
                 <Typography
                   sx={{
                     fontSize: { xs: 26, md: 30 },
-                    fontWeight: 600,
-                    letterSpacing: -0.5,
+                    fontFamily: 'var(--serif)',
+                    fontStyle: 'italic',
+                    fontWeight: 650,
+                    letterSpacing: -0.3,
                     color: 'text.primary',
                     textAlign: 'center',
                   }}
@@ -197,8 +201,10 @@ export default function ChatPanel({
                 <Typography
                   sx={{
                     fontSize: { xs: 28, md: 32 },
-                    fontWeight: 600,
-                    letterSpacing: -0.5,
+                    fontFamily: 'var(--serif)',
+                    fontStyle: 'italic',
+                    fontWeight: 650,
+                    letterSpacing: -0.3,
                     color: 'text.primary',
                     textAlign: 'center',
                   }}
@@ -222,7 +228,7 @@ export default function ChatPanel({
               <Box
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                  gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' },
                   gap: 1.2,
                   mt: 3,
                 }}
@@ -241,13 +247,24 @@ export default function ChatPanel({
                     }}
                     sx={{
                       textAlign: 'left',
-                      p: 1.6,
+                      p: 1.5,
                       border: '1px solid',
                       borderColor: 'divider',
-                      borderRadius: 2.5,
                       bgcolor: 'background.paper',
                       cursor: 'pointer',
-                      transition: 'all .15s',
+                      minHeight: 104,
+                      position: 'relative',
+                      overflow: 'hidden',
+                      transition: 'transform .18s cubic-bezier(0.16,1,0.3,1), border-color .18s ease, background-color .18s ease',
+                      '&::after': {
+                        content: '""',
+                        position: 'absolute',
+                        inset: 0,
+                        background: 'linear-gradient(100deg, transparent 10%, rgba(200,48,46,.08) 45%, transparent 70%)',
+                        transform: 'translateX(-120%)',
+                        animation: 'editorial-sweep 4.8s ease-in-out infinite',
+                        pointerEvents: 'none',
+                      },
                       '&:hover': {
                         borderColor: 'text.primary',
                         bgcolor: 'background.default',
@@ -260,14 +277,14 @@ export default function ChatPanel({
                       },
                     }}
                   >
-                    <Typography sx={{ fontSize: 18, lineHeight: 1 }}>{a.icon}</Typography>
+                    <Typography className="editorial-mono" sx={{ fontSize: 10, lineHeight: 1, color: 'primary.main' }}>{a.icon}</Typography>
                     <Typography
-                      sx={{ fontSize: 13.5, fontWeight: 600, mt: 0.6, color: 'text.primary' }}
+                      sx={{ fontSize: 13.5, fontWeight: 700, mt: 0.8, color: 'text.primary' }}
                     >
                       {a.title}
                     </Typography>
-                    <Typography sx={{ fontSize: 12.5, color: 'text.secondary', mt: 0.3 }}>
-                      {a.prompt}
+                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mt: 0.5, lineHeight: 1.5 }}>
+                      {a.desc || a.prompt}
                     </Typography>
                   </Box>
                 ))}
@@ -310,7 +327,11 @@ export default function ChatPanel({
         {messages.length > 0 && (
           <Box sx={{ maxWidth: 760, width: '100%', mx: 'auto' }}>
             {messages.map((m, i) => (
-              <MessageBubble key={i} msg={m} />
+              <MessageBubble
+                key={i}
+                msg={m}
+                streaming={streaming && i === messages.length - 1 && m.role === 'assistant'}
+              />
             ))}
 
             {streaming && status && (
@@ -417,15 +438,14 @@ export default function ChatPanel({
               gap: 0.4,
               border: '1px solid',
               borderColor: 'divider',
-              borderRadius: 28,
               px: 1.2,
               py: 0.8,
               bgcolor: 'background.paper',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+              boxShadow: 'none',
               transition: 'border-color .15s, box-shadow .15s',
               '&:focus-within': {
-                borderColor: 'text.primary',
-                boxShadow: '0 2px 8px rgba(31,31,31,0.06)',
+                borderColor: 'primary.main',
+                boxShadow: '0 0 0 3px var(--accent-soft)',
               },
             }}
           >
@@ -475,7 +495,7 @@ export default function ChatPanel({
                 onClick={() => abortSession(sessionKey)}
                 sx={{
                   bgcolor: 'text.primary',
-                  color: '#fff',
+                  color: 'background.paper',
                   width: 34,
                   height: 34,
                   alignSelf: 'center',
