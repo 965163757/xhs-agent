@@ -486,6 +486,8 @@ export default function ArticleDetailPage() {
     'crop' | 'inpaint' | 'erase' | 'variation'
   >('inpaint')
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const articleRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const articleLoadSeq = useRef(0)
   const [sidebar, setSidebar] = useState(false)
   const [mobileChat, setMobileChat] = useState(false)
   const [agentChatPulse, setAgentChatPulse] = useState(false)
@@ -670,23 +672,40 @@ export default function ArticleDetailPage() {
   }
 
   const load = useCallback(async () => {
-    const a = await getArticle(Number(id))
+    const articleId = Number(id)
+    if (!Number.isFinite(articleId) || articleId <= 0) return
+    const seq = ++articleLoadSeq.current
+    const a = await getArticle(articleId)
+    if (seq !== articleLoadSeq.current) return
     setArt(a)
     setSavedArt(a)
   }, [id])
 
+  const scheduleArticleRefresh = useCallback((delay = 120) => {
+    if (articleRefreshTimer.current) clearTimeout(articleRefreshTimer.current)
+    articleRefreshTimer.current = setTimeout(() => {
+      load().catch(() => {})
+    }, delay)
+  }, [load])
+
   const handleArticleMayChange = useCallback((next?: Article | null) => {
     if (next && Number(next.id) === Number(id)) {
+      articleLoadSeq.current += 1
       setArt(next)
       setSavedArt(next)
+      scheduleArticleRefresh(180)
       return
     }
-    load()
-  }, [id, load])
+    scheduleArticleRefresh()
+  }, [id, scheduleArticleRefresh])
 
   useEffect(() => {
-    load()
+    load().catch(() => {})
   }, [load])
+
+  useEffect(() => () => {
+    if (articleRefreshTimer.current) clearTimeout(articleRefreshTimer.current)
+  }, [])
 
   useEffect(() => {
     setShowImageContext(false)
@@ -722,7 +741,7 @@ export default function ArticleDetailPage() {
         }
       }).catch(() => {})
     }
-  }, [convId, currentSessionKey, load])
+  }, [convId, currentSessionKey, handleArticleMayChange])
 
   useEffect(() => {
     if (!shouldOpenChat) return

@@ -9,7 +9,7 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 from sqlalchemy import or_, select
@@ -2760,10 +2760,22 @@ async def _bind_image_to_article(
     role: str = "content",
     replace_index: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
+    _, err = await _bind_image_to_article_payload(url, article_id, role=role, replace_index=replace_index)
+    return err
+
+
+async def _bind_image_to_article_payload(
+    url: str,
+    article_id: Optional[int],
+    role: str = "content",
+    replace_index: Optional[int] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     if not article_id:
-        return None
+        return None, None
     bound = await _bind_generated_urls_to_article(article_id, [url], role=role, replace_index=replace_index)
-    return None if bound else {"ok": False, "error": f"article {article_id} not found"}
+    if not bound:
+        return None, {"ok": False, "error": f"article {article_id} not found"}
+    return bound, None
 
 
 async def _bind_generated_urls_to_article(
@@ -2829,7 +2841,7 @@ async def tool_crop_image(args: Dict[str, Any]) -> Dict[str, Any]:
     if access_err:
         return access_err
     new_url = crop_image(image_url, x, y, w, h)
-    bind_err = await _bind_image_to_article(
+    bound_article, bind_err = await _bind_image_to_article_payload(
         new_url,
         article_id,
         args.get("role", "content"),
@@ -2838,7 +2850,10 @@ async def tool_crop_image(args: Dict[str, Any]) -> Dict[str, Any]:
     if bind_err:
         return bind_err
     elapsed = _elapsed_ms(op_start)
-    return {"ok": True, "image": new_url, "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
+    result = {"ok": True, "image": new_url, "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2)}
+    if bound_article:
+        result["article"] = bound_article
+    return result
 
 
 async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -2879,7 +2894,7 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
         }
     if not urls:
         return {"ok": False, "error": "no image returned"}
-    bind_err = await _bind_image_to_article(
+    bound_article, bind_err = await _bind_image_to_article_payload(
         urls[0],
         article_id,
         args.get("role", "content"),
@@ -2889,6 +2904,8 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
         return bind_err
     elapsed = _elapsed_ms(op_start)
     result = {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2), "image_attempts": image_attempts}
+    if bound_article:
+        result["article"] = bound_article
     used = _successful_image_attempt(image_attempts)
     if used:
         result["used_image_model"] = used.get("model")
@@ -2937,7 +2954,7 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
         }
     if not urls:
         return {"ok": False, "error": "no image returned"}
-    bind_err = await _bind_image_to_article(
+    bound_article, bind_err = await _bind_image_to_article_payload(
         urls[0],
         article_id,
         args.get("role", "content"),
@@ -2947,6 +2964,8 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
         return bind_err
     elapsed = _elapsed_ms(op_start)
     result = {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2), "image_attempts": image_attempts}
+    if bound_article:
+        result["article"] = bound_article
     used = _successful_image_attempt(image_attempts)
     if used:
         result["used_image_model"] = used.get("model")
@@ -2994,7 +3013,7 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
         }
     if not urls:
         return {"ok": False, "error": "no image returned"}
-    bind_err = await _bind_image_to_article(
+    bound_article, bind_err = await _bind_image_to_article_payload(
         urls[0],
         article_id,
         args.get("role", "content"),
@@ -3004,6 +3023,8 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
         return bind_err
     elapsed = _elapsed_ms(op_start)
     result = {"ok": True, "image": urls[0], "elapsed_ms": elapsed, "elapsed_sec": round(elapsed / 1000, 2), "image_attempts": image_attempts}
+    if bound_article:
+        result["article"] = bound_article
     used = _successful_image_attempt(image_attempts)
     if used:
         result["used_image_model"] = used.get("model")
