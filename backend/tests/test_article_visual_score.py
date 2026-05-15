@@ -6,6 +6,7 @@ from app.agents.banned_words import check_banned_words
 from app.agents.tools import (
     _article_image_context,
     _article_payload,
+    _image_ref_access_error,
     _build_image_storyboard,
     _fallback_storyboard_shots,
     _infer_image_size_from_request,
@@ -13,6 +14,8 @@ from app.agents.tools import (
     _normalize_tags,
     _normalize_title,
     _score_for_article,
+    reset_tool_user_id,
+    set_tool_user_id,
 )
 from app.config import Settings
 from app.database import Article, ArticleDiagnosis
@@ -68,6 +71,22 @@ class ArticleVisualAndScoreTests(unittest.TestCase):
         self.assertEqual(payload["cover_image"], "/static/images/a.png")
         self.assertEqual(payload["cover_image_full_url"], "https://xhs.example.com/app/static/images/a.png")
         self.assertEqual(payload["images_full_urls"], ["https://xhs.example.com/app/static/images/b.png"])
+
+    def test_user_uploaded_images_are_user_scoped_not_article_scoped(self):
+        token = set_tool_user_id(2)
+        try:
+            self.assertIsNone(_image_ref_access_error("/static/images/user_2/upload.png"))
+            self.assertIsNone(_image_ref_access_error("/static/images/legacy_generated.png"))
+            self.assertEqual(
+                _image_ref_access_error("/static/images/../user_2/upload.png"),
+                {"ok": False, "error": "非法图片路径"},
+            )
+            self.assertEqual(
+                _image_ref_access_error("/static/images/user_3/upload.png"),
+                {"ok": False, "error": "无权访问该图片"},
+            )
+        finally:
+            reset_tool_user_id(token)
 
     def test_score_for_article_always_has_five_dimensions(self):
         art = Article(

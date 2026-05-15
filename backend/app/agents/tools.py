@@ -235,24 +235,64 @@ async def _ensure_article_access(article_id: Optional[int]) -> Optional[Dict[str
     return None
 
 
+def _image_ref_access_error(image_url: str) -> Optional[Dict[str, Any]]:
+    """Prevent one user from operating another user's uploaded static image.
+
+    Images uploaded through `/upload` are stored under
+    `/static/images/user_<id>/...`.  Those are user-owned assets and can be
+    edited independently or inserted into any article owned by that user.
+    Legacy/generated root images under `/static/images/...` have no owner
+    marker, so they remain usable for backward compatibility.
+    """
+    uid = get_tool_user_id()
+    if uid is None or not str(image_url or "").strip():
+        return None
+    path_part = ""
+    canonical = _canonicalize_app_image_ref(image_url)
+    if canonical.startswith("/static/images/"):
+        path_part = canonical[len("/static/images/"):].lstrip("/")
+    else:
+        local = _static_image_path(canonical)
+        if local:
+            try:
+                base = Path(get_settings().image_dir).resolve()
+                path_part = local.resolve().relative_to(base).as_posix()
+            except Exception:
+                path_part = ""
+    parts = [p for p in path_part.split("/") if p]
+    if any(p in {".", ".."} for p in parts):
+        return {"ok": False, "error": "非法图片路径"}
+    first = path_part.split("/", 1)[0] if path_part else ""
+    if first.startswith("user_"):
+        owner = first[len("user_"):].strip()
+        if owner.isdigit() and int(owner) != int(uid):
+            return {"ok": False, "error": "无权访问该图片"}
+    return None
+
+
 async def _ensure_article_image_access(
     article_id: Optional[int],
     image_url: str,
 ) -> Optional[Dict[str, Any]]:
-    """When editing in-place, ensure the source image belongs to the target article."""
+    """Ensure the user can operate this image and, if present, the article.
+
+    This intentionally does *not* require the image to already belong to the
+    target article.  Chat-uploaded images and independently generated images are
+    valid user assets: Agent may edit them first, then insert/set/move them into
+    any article the user can access.
+    """
+    img_err = _image_ref_access_error(image_url)
+    if img_err:
+        return img_err
     if not article_id:
         return None
     art, err = await _get_article_for_user(int(article_id))
     if err:
         return {"ok": False, "error": err}
+    # If the image is already in the article, this is an in-place edit.  If it
+    # is not, treat it as a user-owned/uploaded source image that will be bound
+    # after the operation succeeds.
     assert art is not None
-    allowed = {
-        _canonicalize_app_image_ref(x)
-        for x in [art.cover_image, *(art.images or [])]
-        if str(x or "").strip()
-    }
-    if _canonicalize_app_image_ref(image_url) not in allowed:
-        return {"ok": False, "error": "图片不属于该笔记"}
     return None
 
 
@@ -2320,6 +2360,8 @@ async def tool_arrange_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
     """Arrange article images as one visual queue; position 0 is the cover/first image."""
     aid = int(args["article_id"])
     action = str(args.get("action") or "set_order").strip().lower()
+    source_aid = _optional_article_id(args.get("source_article_id"))
+    remove_from_source = bool(args.get("remove_from_source") or args.get("move_from_source"))
     async with SessionLocal() as s:
         art = await s.get(Article, aid)
         if not art:
@@ -2329,13 +2371,22 @@ async def tool_arrange_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
             return {"ok": False, "error": "无权操作该笔记"}
 
         queue = _article_visual_queue(art)
-        image_url = str(args.get("image_url") or "").strip()
+        image_url = _canonicalize_app_image_ref(str(args.get("image_url") or "").strip())
+        if image_url:
+            img_err = _image_ref_access_error(image_url)
+            if img_err:
+                return img_err
 
         if action in {"set_order", "reorder"}:
             order = args.get("order")
             if not isinstance(order, list):
                 return {"ok": False, "error": "order must be a list of image URLs"}
-            queue = _dedupe_preserve_order([str(x) for x in order])
+            canonical_order = [_canonicalize_app_image_ref(str(x)) for x in order]
+            for item in canonical_order:
+                img_err = _image_ref_access_error(item)
+                if img_err:
+                    return img_err
+            queue = _dedupe_preserve_order(canonical_order)
         elif action == "move":
             if not queue:
                 return {"ok": False, "error": "no images to move"}
@@ -2358,9 +2409,9 @@ async def tool_arrange_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
                     return {"ok": False, "error": f"position {pos} out of range"}
                 item = queue.pop(pos)
                 queue.insert(0, item)
-        elif action == "insert":
+        elif action in {"insert", "transfer", "move_to_article"}:
             if not image_url:
-                return {"ok": False, "error": "image_url is required for insert"}
+                return {"ok": False, "error": "image_url is required for insert/transfer"}
             pos = _safe_int(args.get("position"), len(queue), min_value=0, max_value=len(queue))
             if image_url in queue:
                 queue.remove(image_url)
@@ -2387,6 +2438,23 @@ async def tool_arrange_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
         else:
             return {"ok": False, "error": f"unknown action: {action}"}
 
+        source_removed = False
+        if remove_from_source and source_aid and source_aid != aid and image_url:
+            source_art = await s.get(Article, int(source_aid))
+            if not source_art:
+                return {"ok": False, "error": f"source article {source_aid} not found"}
+            if uid is not None and source_art.user_id != uid:
+                return {"ok": False, "error": "无权操作来源笔记"}
+            src_queue = _article_visual_queue(source_art)
+            src_next = [
+                item for item in src_queue
+                if _canonicalize_app_image_ref(item) != image_url
+            ]
+            source_removed = len(src_next) != len(src_queue)
+            if source_removed:
+                _apply_article_visual_queue(source_art, src_next)
+                source_art.score = _score_for_article(source_art)
+
         _apply_article_visual_queue(art, queue)
         await s.commit()
         await s.refresh(art)
@@ -2399,7 +2467,9 @@ async def tool_arrange_article_images(args: Dict[str, Any]) -> Dict[str, Any]:
             "ok": True,
             "article": _article_payload(art),
             "visual_queue": _article_visual_queue(art),
-            "message": "已更新图片顺序。第 1 张会作为小红书首图/封面展示。",
+            "source_article_id": source_aid,
+            "source_removed": source_removed,
+            "message": "已更新图片顺序。第 1 张会作为小红书首图/封面展示；用户上传图也可插入、替换或设为首图。",
         }
 
 
@@ -3354,16 +3424,18 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_arrange_article_images,
         "schema": _fn_schema(
             "arrange_article_images",
-            "编排笔记图片队列：第 1 张就是小红书首图/封面。可把某张图设为封面、移动到第 N 张、插入、替换、删除或按完整 order 重排。",
+            "编排笔记图片队列：第 1 张就是小红书首图/封面。可把笔记原有图片、用户聊天上传图片、独立生成图片插入到任意有权限的笔记，设为封面、移动到第 N 张、替换、删除或按完整 order 重排。跨笔记移动时传 source_article_id + remove_from_source=true。",
             {
                 "article_id": {"type": "integer"},
                 "action": {
                     "type": "string",
-                    "enum": ["set_order", "move", "set_cover", "insert", "replace", "remove", "clear"],
-                    "description": "set_order=按 order 完整重排；move=from_position 移到 to_position；set_cover=position/image_url 设为首图；insert/replace/remove/clear 如名",
+                    "enum": ["set_order", "move", "set_cover", "insert", "transfer", "move_to_article", "replace", "remove", "clear"],
+                    "description": "set_order=按 order 完整重排；move=from_position 移到 to_position；set_cover=position/image_url 设为首图；insert/transfer=插入到目标笔记；replace/remove/clear 如名",
                 },
                 "order": {"type": "array", "items": {"type": "string"}, "description": "完整展示队列，order[0] 会成为封面"},
                 "image_url": {"type": "string", "description": "insert/replace/set_cover/remove 可用"},
+                "source_article_id": {"type": "integer", "description": "跨笔记移动时的来源笔记 ID；用户上传图可不传"},
+                "remove_from_source": {"type": "boolean", "description": "跨笔记移动后是否从来源笔记移除该图"},
                 "from_position": {"type": "integer", "description": "0-based 展示位置；0 是封面"},
                 "to_position": {"type": "integer", "description": "0-based 展示位置；0 是封面"},
                 "position": {"type": "integer", "description": "0-based 展示位置；0 是封面"},
@@ -3421,7 +3493,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_crop_image,
         "schema": _fn_schema(
             "crop_image",
-            "按像素盒裁剪图片，可直接写回笔记（role=cover|content + replace_index）。",
+            "按像素盒裁剪图片，可直接写回笔记（role=cover|content + replace_index）。图片不必已经属于目标笔记；用户上传图可裁剪后写入任意有权限的笔记。",
             {
                 "image_url": {"type": "string"},
                 "x": {"type": "integer"},
@@ -3483,7 +3555,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_edit_image,
         "schema": _fn_schema(
             "edit_image",
-            "自然语言图片编辑（不带 mask）：用于整体风格化、同风格变体、清晰度增强、改色调，也用于用户用文字指定对象/位置的语义改图，例如去掉行李箱、删除路人、增加一个年轻女性、替换局部元素、保持主题结构不变进行重绘。蒙版不是必填；只有用户明确给了 mask_url/选区才改用 inpaint_image/remove_object。可用 source_article_id 指明原图归属，再把结果绑定到另一个真实 article_id；独立编辑不要传 article_id=0。",
+            "自然语言图片编辑（不带 mask）：用于整体风格化、同风格变体、清晰度增强、改色调，也用于用户用文字指定对象/位置的语义改图，例如去掉行李箱、删除路人、增加一个年轻女性、替换局部元素、保持主题结构不变进行重绘。蒙版不是必填。用户聊天上传图不需要属于某篇笔记，也可编辑后绑定到任意有权限的 article_id；可用 source_article_id 指明原图归属，再把结果绑定到另一个真实 article_id；独立编辑不要传 article_id=0。",
             {
                 "image_url": {"type": "string"},
                 "prompt": {"type": "string"},

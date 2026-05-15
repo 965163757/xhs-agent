@@ -202,9 +202,11 @@ class RemoveImageRequest(BaseModel):
 
 class ArticleImageArrangeRequest(BaseModel):
     article_id: int
-    action: str = Field(default="set_order", description="set_order/move/set_cover/insert/replace/remove/clear")
+    action: str = Field(default="set_order", description="set_order/move/set_cover/insert/transfer/move_to_article/replace/remove/clear")
     order: List[str] = Field(default_factory=list, description="完整展示队列：第 1 张即封面")
     image_url: str = ""
+    source_article_id: Optional[int] = None
+    remove_from_source: bool = False
     from_position: Optional[int] = None
     to_position: Optional[int] = None
     position: Optional[int] = None
@@ -268,6 +270,7 @@ class EditImageRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     size: str = "1024x1024"
     quality: str = "high"
+    source_article_id: Optional[int] = None
     article_id: Optional[int] = None
     role: str = "content"
     replace_index: Optional[int] = None
