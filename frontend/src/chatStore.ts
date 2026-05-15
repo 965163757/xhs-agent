@@ -137,7 +137,7 @@ export function getConversationId(key: string): number | null {
 export async function loadFromConversation(convId: number, key: string): Promise<string | null> {
   const conv = await getConversation(convId)
   const s = ensure(key)
-  s.messages = (conv.messages || []) as UiMessage[]
+  s.messages = compactMessagesForHistory((conv.messages || []) as UiMessage[])
   s.conversationId = convId
   bump(key)
   return conv.active_task_id || null
@@ -222,8 +222,119 @@ const toolLabel: Record<string, string> = {
   edit_image: '编辑图片',
 }
 
+const MAX_CLIENT_MESSAGES = 80
+const MAX_CLIENT_MESSAGE_CHARS = 12000
+const MAX_CLIENT_IMAGES_PER_MESSAGE = 8
+const MAX_CLIENT_TOOL_EVENTS = 24
+const MAX_CLIENT_TOOL_RESULT_CHARS = 6000
+
+function truncateText(value: any, limit = MAX_CLIENT_MESSAGE_CHARS): string {
+  const text = String(value || '').trim()
+  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`
+}
+
+function compactToolResultForHistory(result: any): any {
+  if (!result || typeof result !== 'object') return result
+  const compact: any = {}
+  for (const key of [
+    'ok',
+    'error',
+    'timeout',
+    'elapsed_ms',
+    'elapsed_sec',
+    'image',
+    'images',
+    'generated_cover',
+    'generated_content_images',
+    'visual_queue',
+    'used_image_model',
+    'used_image_base_url',
+    'retry_options',
+    'score',
+    'titles',
+    'tags',
+    'outline',
+    'diagnostic',
+    'message',
+  ]) {
+    if (key in result) compact[key] = result[key]
+  }
+  if (Array.isArray(result.image_attempts)) compact.image_attempts = result.image_attempts.slice(0, 8)
+  if (result.workflow && typeof result.workflow === 'object') {
+    compact.workflow = {}
+    for (const key of [
+      'generated_cover',
+      'generated_content_images',
+      'generated_visual_queue',
+      'visual_queue',
+      'title_candidates',
+      'image_attempts',
+      'elapsed_sec',
+    ]) {
+      if (key in result.workflow) compact.workflow[key] = result.workflow[key]
+    }
+    if (Array.isArray(compact.workflow.image_attempts)) compact.workflow.image_attempts = compact.workflow.image_attempts.slice(0, 8)
+  }
+  if (result.article && typeof result.article === 'object') {
+    compact.article = {
+      id: result.article.id,
+      title: result.article.title,
+      body: truncateText(result.article.body, 3000),
+      tags: result.article.tags,
+      status: result.article.status,
+      cover_image: result.article.cover_image,
+      images: Array.isArray(result.article.images) ? result.article.images.slice(0, 12) : result.article.images,
+      score: result.article.score,
+      content_stats: result.article.content_stats,
+    }
+  }
+  const payload = Object.keys(compact).length ? compact : result
+  const json = JSON.stringify(payload)
+  if (json.length <= MAX_CLIENT_TOOL_RESULT_CHARS) return payload
+  return {
+    ok: result.ok ?? true,
+    error: result.error ? truncateText(result.error, 1500) : undefined,
+    summary: truncateText(json, MAX_CLIENT_TOOL_RESULT_CHARS),
+    note: 'tool result compacted for stored chat history',
+  }
+}
+
+function compactToolEventsForHistory(events: ToolEvent[] | undefined): ToolEvent[] | undefined {
+  if (!Array.isArray(events) || events.length === 0) return undefined
+  return events.slice(-MAX_CLIENT_TOOL_EVENTS).map(ev => {
+    const out: ToolEvent = {
+      type: ev.type,
+      name: truncateText(ev.name, 120),
+      id: ev.id ? truncateText(ev.id, 120) : ev.id,
+      elapsed_ms: ev.elapsed_ms,
+      ok: ev.ok,
+    }
+    if (ev.arguments !== undefined) {
+      const argJson = JSON.stringify(ev.arguments)
+      out.arguments = argJson.length <= 3000 ? ev.arguments : { summary: truncateText(argJson, 3000) }
+    }
+    if (ev.result !== undefined) out.result = compactToolResultForHistory(ev.result)
+    return out
+  })
+}
+
+function compactMessagesForHistory(messages: UiMessage[]): UiMessage[] {
+  return messages.slice(-MAX_CLIENT_MESSAGES).map(m => {
+    const item: UiMessage = {
+      ...m,
+      content: truncateText(m.content),
+      images: Array.isArray(m.images) ? m.images.filter(Boolean).slice(0, MAX_CLIENT_IMAGES_PER_MESSAGE) : [],
+    }
+    const toolEvents = compactToolEventsForHistory(m.tool_events)
+    if (toolEvents) item.tool_events = toolEvents
+    else delete item.tool_events
+    return item
+  })
+}
+
 async function persistToBackend(key: string, articleId?: number | null) {
   const s = ensure(key)
+  s.messages = compactMessagesForHistory(s.messages)
   const title = s.messages.find(m => m.role === 'user')?.content?.slice(0, 30) || '新对话'
   try {
     if (s.conversationId) {
@@ -267,7 +378,7 @@ export async function sendMessage(
   const userMsg: UiMessage = { role: 'user', content, images }
   const assistant: UiMessage = { role: 'assistant', content: '', tool_events: [] }
 
-  s.messages = [...s.messages, userMsg, assistant]
+  s.messages = compactMessagesForHistory([...s.messages, userMsg, assistant])
   s.pendingImages = []
   s.input = ''
   s.streaming = true
@@ -368,7 +479,7 @@ export async function sendMessage(
           if (!last.content.trim()) last.content = '已停止生成。'
         }
         copy[copy.length - 1] = last
-        cur.messages = copy
+        cur.messages = compactMessagesForHistory(copy)
         bump(key)
       },
       controller.signal,
@@ -386,7 +497,7 @@ export async function sendMessage(
         last.content += `\n\n⚠️ ${detail}`
         copy[copy.length - 1] = last
       }
-      cur.messages = copy
+      cur.messages = compactMessagesForHistory(copy)
       bump(key)
     }
   } finally {
@@ -439,7 +550,7 @@ export async function reconnectTask(
         if (toolEvents.length) last.tool_events = toolEvents
         copy[copy.length - 1] = last
       }
-      cur.messages = copy
+      cur.messages = compactMessagesForHistory(copy)
       cur.streaming = false
       cur.status = ''
       cur.taskId = null
@@ -472,7 +583,7 @@ export async function reconnectTask(
         last.tool_events = toolEvents
         copy[copy.length - 1] = last
       }
-      cur.messages = copy
+      cur.messages = compactMessagesForHistory(copy)
     }
     cur.status = '继续生成中…'
     bump(key)
@@ -522,7 +633,7 @@ export async function reconnectTask(
           }
           copy[copy.length - 1] = last
         }
-        cur.messages = copy
+        cur.messages = compactMessagesForHistory(copy)
         bump(key)
       },
       controller.signal,
@@ -537,7 +648,7 @@ export async function reconnectTask(
       if (!last.content.includes('重连失败')) {
         last.content += `\n\n⚠️ 重连失败：${err?.message || '请刷新后重试'}`
         copy[copy.length - 1] = last
-        cur.messages = copy
+        cur.messages = compactMessagesForHistory(copy)
       }
     }
   } finally {

@@ -71,12 +71,174 @@ router = APIRouter()
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 25_000_000
+MAX_CHAT_REQUEST_MESSAGES = 96
+MAX_STORED_CONVERSATION_MESSAGES = 80
+MAX_CHAT_MESSAGE_CHARS = 12_000
+MAX_CHAT_IMAGES_PER_MESSAGE = 8
+MAX_CHAT_TOOL_EVENTS_PER_MESSAGE = 24
+MAX_CHAT_TOOL_RESULT_CHARS = 6_000
 IMAGE_FORMAT_TO_EXT = {
     "PNG": ".png",
     "JPEG": ".jpg",
     "WEBP": ".webp",
     "GIF": ".gif",
 }
+
+
+def _truncate_chat_text(value: Any, limit: int = MAX_CHAT_MESSAGE_CHARS) -> str:
+    text = value if isinstance(value, str) else str(value or "")
+    text = text.strip()
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _sanitize_chat_images(images: Any) -> List[str]:
+    if not isinstance(images, list):
+        return []
+    out: List[str] = []
+    seen = set()
+    for raw in images:
+        url = str(raw or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        out.append(_truncate_chat_text(url, 2048))
+        if len(out) >= MAX_CHAT_IMAGES_PER_MESSAGE:
+            break
+    return out
+
+
+def _compact_chat_tool_result(result: Any) -> Any:
+    """Keep persisted tool cards useful without letting raw gateway errors bloat DB."""
+    if not isinstance(result, dict):
+        return result
+    compact: Dict[str, Any] = {}
+    for key in (
+        "ok",
+        "error",
+        "timeout",
+        "elapsed_ms",
+        "elapsed_sec",
+        "image",
+        "images",
+        "generated_cover",
+        "generated_content_images",
+        "visual_queue",
+        "used_image_model",
+        "used_image_base_url",
+        "retry_options",
+        "score",
+        "titles",
+        "tags",
+        "outline",
+        "diagnostic",
+        "message",
+    ):
+        if key in result:
+            compact[key] = result[key]
+    if isinstance(result.get("image_attempts"), list):
+        compact["image_attempts"] = result["image_attempts"][:8]
+    if isinstance(result.get("workflow"), dict):
+        workflow = result["workflow"]
+        compact["workflow"] = {
+            k: workflow.get(k)
+            for k in (
+                "generated_cover",
+                "generated_content_images",
+                "generated_visual_queue",
+                "visual_queue",
+                "title_candidates",
+                "image_attempts",
+                "elapsed_sec",
+            )
+            if k in workflow
+        }
+        if isinstance(compact["workflow"].get("image_attempts"), list):
+            compact["workflow"]["image_attempts"] = compact["workflow"]["image_attempts"][:8]
+    if isinstance(result.get("article"), dict):
+        article = result["article"]
+        compact["article"] = {
+            "id": article.get("id"),
+            "title": article.get("title"),
+            "body": _truncate_chat_text(article.get("body"), 3000),
+            "tags": article.get("tags"),
+            "status": article.get("status"),
+            "cover_image": article.get("cover_image"),
+            "images": (article.get("images") or [])[:12],
+            "score": article.get("score"),
+            "content_stats": article.get("content_stats"),
+        }
+    text = json.dumps(compact or result, ensure_ascii=False, default=str)
+    if len(text) <= MAX_CHAT_TOOL_RESULT_CHARS:
+        return compact or result
+    return {
+        "ok": result.get("ok", True),
+        "error": _truncate_chat_text(result.get("error"), 1500) if result.get("error") else None,
+        "summary": _truncate_chat_text(text, MAX_CHAT_TOOL_RESULT_CHARS),
+        "note": "tool result compacted for stored chat history",
+    }
+
+
+def _sanitize_chat_tool_events(events: Any) -> List[Dict[str, Any]]:
+    if not isinstance(events, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for ev in events[-MAX_CHAT_TOOL_EVENTS_PER_MESSAGE:]:
+        if not isinstance(ev, dict):
+            continue
+        item: Dict[str, Any] = {
+            "type": ev.get("type"),
+            "name": _truncate_chat_text(ev.get("name"), 120),
+        }
+        if ev.get("id"):
+            item["id"] = _truncate_chat_text(ev.get("id"), 120)
+        if ev.get("elapsed_ms") is not None:
+            item["elapsed_ms"] = ev.get("elapsed_ms")
+        if ev.get("ok") is not None:
+            item["ok"] = ev.get("ok")
+        if ev.get("arguments") is not None:
+            args = ev.get("arguments")
+            arg_text = json.dumps(args, ensure_ascii=False, default=str)
+            item["arguments"] = args if len(arg_text) <= 3000 else {"summary": _truncate_chat_text(arg_text, 3000)}
+        if ev.get("result") is not None:
+            item["result"] = _compact_chat_tool_result(ev.get("result"))
+        out.append(item)
+    return out
+
+
+def _sanitize_chat_message(raw: Any) -> Dict[str, Any]:
+    msg = raw if isinstance(raw, dict) else {}
+    role = str(msg.get("role") or "user").strip()
+    if role not in {"user", "assistant", "system", "tool"}:
+        role = "user"
+    item: Dict[str, Any] = {
+        "role": role,
+        "content": _truncate_chat_text(msg.get("content")),
+        "images": _sanitize_chat_images(msg.get("images")),
+    }
+    tool_events = _sanitize_chat_tool_events(msg.get("tool_events"))
+    if tool_events:
+        item["tool_events"] = tool_events
+    return item
+
+
+def _sanitize_conversation_messages(raw_messages: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw_messages, list):
+        return []
+    return [_sanitize_chat_message(m) for m in raw_messages[-MAX_STORED_CONVERSATION_MESSAGES:]]
+
+
+def _sanitize_runtime_messages(raw_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Bound incoming Agent context while preserving current article preface."""
+    sanitized = [_sanitize_chat_message(m) for m in raw_messages]
+    protected: List[Dict[str, Any]] = []
+    dialog: List[Dict[str, Any]] = []
+    for msg in sanitized:
+        content = str(msg.get("content") or "")
+        if msg.get("role") == "system" or content.startswith("【当前笔记上下文"):
+            protected.append(msg)
+        else:
+            dialog.append(msg)
+    return protected[-4:] + dialog[-MAX_CHAT_REQUEST_MESSAGES:]
 
 
 async def _call_user_tool(
@@ -223,6 +385,7 @@ async def chat_stream(req: ChatRequest, request: Request, user: User = Depends(g
         messages.append(
             {"role": m.role, "content": m.content, "images": m.images}
         )
+    messages = _sanitize_runtime_messages(messages)
 
     try:
         task_id = await spawn_agent_task(
@@ -1127,7 +1290,7 @@ async def create_conversation(payload: Dict[str, Any], user: User = Depends(get_
             user_id=user.id,
             title=payload.get("title", "新对话"),
             article_id=article_id,
-            messages=payload.get("messages", []),
+            messages=_sanitize_conversation_messages(payload.get("messages", [])),
         )
         s.add(c)
         await s.commit()
@@ -1147,7 +1310,10 @@ async def update_conversation(cid: int, payload: Dict[str, Any], user: User = De
                 raise HTTPException(404, "article not found")
         for k in ("title", "messages", "article_id"):
             if k in payload:
-                setattr(c, k, payload[k])
+                if k == "messages":
+                    setattr(c, k, _sanitize_conversation_messages(payload[k]))
+                else:
+                    setattr(c, k, payload[k])
         await s.commit()
         await s.refresh(c)
         result = c.to_dict()
