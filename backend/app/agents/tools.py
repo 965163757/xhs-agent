@@ -2210,6 +2210,12 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
     access_err = await _ensure_article_access(aid)
     if access_err:
         return access_err
+    reference_images = args.get("reference_images")
+    if isinstance(reference_images, list):
+        for ref in reference_images:
+            ref_err = _image_ref_access_error(str(ref or ""))
+            if ref_err:
+                return ref_err
     emit_tool_progress(
         "正在生成图片" + (f"并准备绑定到笔记 #{aid}" if aid else "（独立图片，不创建笔记）"),
         step="image_generation_start",
@@ -2224,7 +2230,7 @@ async def tool_generate_image(args: Dict[str, Any]) -> Dict[str, Any]:
                 size=size,
                 quality=quality,
                 n=n,
-                reference_images=args.get("reference_images"),
+                reference_images=reference_images,
                 attempt_trace=image_attempts,
             ),
             label="图片生成",
@@ -2849,6 +2855,9 @@ async def tool_inpaint_image(args: Dict[str, Any]) -> Dict[str, Any]:
     access_err = await _ensure_article_image_access(article_id, image_url)
     if access_err:
         return access_err
+    mask_err = _image_ref_access_error(mask_url)
+    if mask_err:
+        return mask_err
     image_attempts: List[Dict[str, Any]] = []
     try:
         urls = await _await_with_progress(
@@ -2904,6 +2913,9 @@ async def tool_remove_object(args: Dict[str, Any]) -> Dict[str, Any]:
     access_err = await _ensure_article_image_access(article_id, image_url)
     if access_err:
         return access_err
+    mask_err = _image_ref_access_error(mask_url)
+    if mask_err:
+        return mask_err
     image_attempts: List[Dict[str, Any]] = []
     try:
         urls = await _await_with_progress(
@@ -2954,6 +2966,9 @@ async def tool_edit_image(args: Dict[str, Any]) -> Dict[str, Any]:
     # source_article_id lets Agent imitate an image from one note and bind the
     # edited/variant result to another note.  article_id remains the write target.
     article_id = _optional_article_id(args.get("article_id"))
+    target_err = await _ensure_article_access(article_id)
+    if target_err:
+        return target_err
     source_article_id = _optional_article_id(args.get("source_article_id")) or article_id
     access_err = await _ensure_article_image_access(source_article_id, image_url)
     if access_err:

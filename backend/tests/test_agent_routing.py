@@ -106,6 +106,26 @@ class AgentRoutingTests(unittest.TestCase):
 
 
 class AgentRunnerStreamTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_stream_returns_error_instead_of_blank_done(self):
+        async def fake_empty_stream(**_kwargs):
+            yield SimpleNamespace(choices=[])
+
+        orig_stream = runner.chat_completion_stream
+        try:
+            runner.chat_completion_stream = fake_empty_stream
+            events = [
+                ev
+                async for ev in run_agent_stream(
+                    [{"role": "user", "content": "帮我写一篇小红书"}],
+                    max_tool_rounds=1,
+                )
+            ]
+        finally:
+            runner.chat_completion_stream = orig_stream
+
+        self.assertEqual(events[-1]["type"], "error")
+        self.assertIn("没有返回有效内容", events[-1]["message"])
+
     async def test_invalid_streamed_tool_arguments_return_error_without_calling_tool(self):
         calls = {"stream": 0, "tool": 0}
 

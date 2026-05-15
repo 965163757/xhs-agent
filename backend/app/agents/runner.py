@@ -481,6 +481,13 @@ async def run_agent_stream(
             yield {"type": "error", "message": f"模型调用失败: {e}"}
             return
 
+        if not collected_text.strip() and not tool_calls_acc:
+            yield {
+                "type": "error",
+                "message": "模型没有返回有效内容或工具调用，已中止本轮，避免产生空白回复。请切换备用文本模型或重试。",
+            }
+            return
+
         if not tool_calls_acc:
             yield {"type": "done", "text": collected_text}
             return

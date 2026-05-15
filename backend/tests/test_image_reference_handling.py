@@ -2,8 +2,15 @@ import base64
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
-from app.agents.tools import _image_retry_options
+from app.agents.tools import (
+    _image_retry_options,
+    reset_tool_user_id,
+    set_tool_user_id,
+    tool_generate_image,
+    tool_inpaint_image,
+)
 from app.config import Settings
 from app.services import llm
 
@@ -75,11 +82,91 @@ class _FailIfCalledClient:
         self.images = _FailIfCalledImages()
 
 
+class _FakeChatCompletions:
+    async def create(self, **kwargs):
+        model = kwargs.get("model")
+
+        async def empty_stream():
+            yield SimpleNamespace(choices=[])
+
+        async def ok_stream():
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="OK", tool_calls=None))])
+
+        return empty_stream() if model == "empty-model" else ok_stream()
+
+
+class _FakeChatClient:
+    def __init__(self) -> None:
+        self.chat = SimpleNamespace(completions=_FakeChatCompletions())
+
+
 class ImageReferenceHandlingTests(unittest.IsolatedAsyncioTestCase):
     def test_image_edit_timeout_budget_is_eight_minutes(self):
         self.assertEqual(llm.IMAGE_GENERATION_TIMEOUT_SECONDS, 8 * 60)
         self.assertEqual(llm.IMAGE_EDIT_COMPAT_TIMEOUT_SECONDS, llm.IMAGE_GENERATION_TIMEOUT_SECONDS)
         self.assertTrue(llm._is_gateway_timeout_status(524))
+
+    async def test_chat_stream_falls_back_when_first_model_only_returns_usage_chunks(self):
+        settings = Settings(chat_model="empty-model", chat_base_url="https://primary.invalid/v1", chat_api_key="k")
+
+        orig_ordered = llm._ordered_model_candidates
+        orig_get_client = llm.get_client
+        try:
+            llm._ordered_model_candidates = lambda _settings, kind, explicit_model=None: [
+                {"model": "empty-model", "base_url": "https://primary.invalid/v1", "api_key": "k"},
+                {"model": "ok-model", "base_url": "https://backup.invalid/v1", "api_key": "k"},
+            ]
+            llm.get_client = lambda _settings=None, kind="chat": _FakeChatClient()
+
+            chunks = [
+                chunk
+                async for chunk in llm.chat_completion_stream(
+                    [{"role": "user", "content": "hello"}],
+                    settings=settings,
+                )
+            ]
+        finally:
+            llm._ordered_model_candidates = orig_ordered
+            llm.get_client = orig_get_client
+            llm.reset_client()
+
+        visible = [
+            chunk.choices[0].delta.content
+            for chunk in chunks
+            if getattr(chunk, "choices", None)
+        ]
+        self.assertEqual(visible, ["OK"])
+
+    async def test_generate_image_rejects_other_user_reference_before_network(self):
+        token = set_tool_user_id(2)
+        try:
+            result = await tool_generate_image(
+                {
+                    "prompt": "生成一张参考图同风格海报",
+                    "reference_images": ["/static/images/user_3/ref.png"],
+                }
+            )
+        finally:
+            reset_tool_user_id(token)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "无权访问该图片")
+
+    async def test_inpaint_rejects_other_user_mask_before_network(self):
+        token = set_tool_user_id(2)
+        try:
+            result = await tool_inpaint_image(
+                {
+                    "image_url": "/static/images/user_2/source.png",
+                    "mask_url": "/static/images/user_3/mask.png",
+                    "prompt": "局部重绘",
+                }
+            )
+        finally:
+            reset_tool_user_id(token)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "无权访问该图片")
 
     async def test_public_app_static_url_uploads_file_when_url_capability_disabled(self):
         with tempfile.TemporaryDirectory() as image_dir:

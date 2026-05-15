@@ -3,6 +3,7 @@ import unittest
 from app.agents import tools
 from app.agents.runner import SYSTEM_PROMPT
 from app.agents.research_data import detect_category
+from app.services import llm
 
 
 class CopywritingPromptingTests(unittest.TestCase):
@@ -73,6 +74,24 @@ class CopywritingPromptingTests(unittest.TestCase):
         )
 
         self.assertEqual(tools._chat_text(streamed), "你好，小红书")
+
+    def test_non_stream_tool_call_response_is_not_treated_as_empty_failure(self):
+        resp = {
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {"id": "call_1", "type": "function", "function": {"name": "read_article", "arguments": "{}"}}
+                        ],
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 10},
+        }
+
+        self.assertFalse(llm._chat_response_needs_fallback(resp))
 
 
 class CopywritingProtocolGuardTests(unittest.IsolatedAsyncioTestCase):

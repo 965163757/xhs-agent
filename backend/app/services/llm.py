@@ -346,7 +346,38 @@ def _chat_response_needs_fallback(resp: Any) -> bool:
     """True when a provider returned protocol/usage but no assistant content."""
     if chat_response_text(resp).strip():
         return False
+    if _stream_chunk_has_assistant_payload(resp):
+        return False
     return _looks_like_chat_protocol_payload(resp)
+
+
+def _stream_chunk_has_assistant_payload(chunk: Any) -> bool:
+    """Return True if a streamed chunk contains visible text or tool calls."""
+    try:
+        choices = getattr(chunk, "choices", None)
+        if choices is None and isinstance(chunk, dict):
+            choices = chunk.get("choices")
+    except Exception:
+        choices = None
+    if not choices:
+        return False
+    for choice in choices:
+        if _choice_to_text(choice):
+            return True
+        if isinstance(choice, dict):
+            delta = choice.get("delta") or {}
+            message = choice.get("message") or {}
+            for container in (delta, message, choice):
+                if isinstance(container, dict) and container.get("tool_calls"):
+                    return True
+        else:
+            for attr in ("delta", "message"):
+                container = getattr(choice, attr, None)
+                if container is not None and getattr(container, "tool_calls", None):
+                    return True
+            if getattr(choice, "tool_calls", None):
+                return True
+    return False
 
 
 def _new_image_attempt(action: str, s: Settings, index: int) -> Dict[str, Any]:
@@ -949,19 +980,24 @@ async def chat_completion_stream(
                 continue
 
         yielded = False
+        meaningful = False
         try:
             async for chunk in stream:
                 yielded = True
+                meaningful = meaningful or _stream_chunk_has_assistant_payload(chunk)
                 yield chunk
+            if not meaningful:
+                raise RuntimeError("upstream stream returned no assistant content or tool calls")
             _record_model_success("chat", candidate_settings)
             return
         except Exception as e:
-            if yielded:
+            if yielded and meaningful:
                 _record_model_failure("chat", candidate_settings, e)
                 raise
             errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} stream: {type(e).__name__}: {e}")
             _record_model_failure("chat", candidate_settings, e)
             if has_images and _should_retry_inline_images(e):
+                retry_meaningful = False
                 try:
                     if inline_messages is None:
                         inline_messages = await to_openai_messages(messages, inline_remote_images=True, settings=s)
@@ -969,11 +1005,14 @@ async def chat_completion_stream(
                     retry_stream = await client.chat.completions.create(**kwargs)
                     async for chunk in retry_stream:
                         yielded = True
+                        retry_meaningful = retry_meaningful or _stream_chunk_has_assistant_payload(chunk)
                         yield chunk
+                    if not retry_meaningful:
+                        raise RuntimeError("upstream inline-image stream returned no assistant content or tool calls")
                     _record_model_success("chat", candidate_settings)
                     return
                 except Exception as inline_e:
-                    if yielded:
+                    if yielded and retry_meaningful:
                         _record_model_failure("chat", candidate_settings, inline_e)
                         raise
                     errors.append(f"{candidate_settings.chat_model}@{candidate_settings.effective_chat_base_url} inline-images stream: {type(inline_e).__name__}: {inline_e}")
