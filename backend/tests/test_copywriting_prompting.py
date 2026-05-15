@@ -53,6 +53,67 @@ class CopywritingPromptingTests(unittest.TestCase):
     def test_chat_text_accepts_plain_string_gateway_fallback(self):
         self.assertEqual(tools._chat_text('{"title":"测试"}'), '{"title":"测试"}')
 
+    def test_chat_text_drops_usage_only_sse_chunks(self):
+        usage_only = (
+            'data: {"id":"","object":"chat.completion.chunk","created":0,'
+            '"model":"gpt-5.4","choices":[],"usage":{"prompt_tokens":1884}}'
+            "\n\n"
+            "data: [DONE]"
+        )
+
+        self.assertEqual(tools._chat_text(usage_only), "")
+
+    def test_chat_text_extracts_sse_delta_content(self):
+        streamed = (
+            'data: {"object":"chat.completion.chunk","choices":[{"delta":{"content":"你好"}}]}'
+            "\n\n"
+            'data: {"object":"chat.completion.chunk","choices":[{"delta":{"content":"，小红书"}}]}'
+            "\n\n"
+            "data: [DONE]"
+        )
+
+        self.assertEqual(tools._chat_text(streamed), "你好，小红书")
+
+
+class CopywritingProtocolGuardTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generate_article_refuses_to_write_protocol_chunk_as_body(self):
+        async def fake_chat_completion(**_kwargs):
+            return (
+                'data: {"id":"","object":"chat.completion.chunk","created":0,'
+                '"model":"gpt-5.4","choices":[],"usage":{"prompt_tokens":1884}}'
+                "\n\n"
+                "data: [DONE]"
+            )
+
+        orig = tools.chat_completion
+        try:
+            tools.chat_completion = fake_chat_completion
+            result = await tools.tool_generate_article({"topic": "威海海景民宿"})
+        finally:
+            tools.chat_completion = orig
+
+        self.assertFalse(result["ok"])
+        self.assertIn("协议 chunk", result["error"])
+
+    async def test_complete_workflow_refuses_to_write_protocol_chunk_as_body(self):
+        async def fake_chat_completion(**_kwargs):
+            return (
+                'data: {"id":"","object":"chat.completion.chunk","created":0,'
+                '"model":"gpt-5.4","choices":[],"usage":{"prompt_tokens":1884}}'
+                "\n\n"
+                "data: [DONE]"
+            )
+
+        orig = tools.chat_completion
+        try:
+            tools.chat_completion = fake_chat_completion
+            result = await tools.tool_create_complete_note_workflow({"topic": "威海海景民宿"})
+        finally:
+            tools.chat_completion = orig
+
+        self.assertFalse(result["ok"])
+        self.assertIn("协议 chunk", result["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

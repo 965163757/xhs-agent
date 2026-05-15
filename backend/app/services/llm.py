@@ -226,6 +226,129 @@ def _fallback_error(action: str, errors: List[str], attempts: Optional[List[Dict
     return RuntimeError(f"{action}：所有候选模型均失败。失败详情: {_compact_attempt_errors(errors, limit=2600)}")
 
 
+def _content_part_to_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content") or ""
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return str(content)
+
+
+def _choice_to_text(choice: Any) -> str:
+    if choice is None:
+        return ""
+    if isinstance(choice, dict):
+        message = choice.get("message") or {}
+        delta = choice.get("delta") or {}
+        for container in (message, delta, choice):
+            if isinstance(container, dict):
+                text = _content_part_to_text(container.get("content") or container.get("text"))
+                if text:
+                    return text
+        return ""
+    for attr in ("message", "delta"):
+        container = getattr(choice, attr, None)
+        if container is not None:
+            text = _content_part_to_text(getattr(container, "content", None))
+            if text:
+                return text
+    return _content_part_to_text(getattr(choice, "text", None))
+
+
+def _extract_sse_chat_text(text: str) -> Optional[str]:
+    """Extract assistant text from accidental text/event-stream payloads.
+
+    Some OpenAI-compatible gateways incorrectly return SSE frames even for a
+    non-streaming chat request.  A usage-only frame such as
+    `data: {"choices": [], "usage": ...}` must never be treated as article
+    content.  Return None when the input is not SSE-like; otherwise return the
+    concatenated assistant delta/message text, possibly an empty string.
+    """
+    raw = str(text or "")
+    if not re.search(r"(?m)^\s*data\s*:", raw):
+        return None
+    chunks: List[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("data:"):
+            continue
+        payload = stripped[len("data:"):].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            obj = json.loads(payload)
+        except Exception:
+            continue
+        chunks.append(_chat_response_text_from_structured(obj))
+    return "".join(x for x in chunks if x)
+
+
+def _chat_response_text_from_structured(resp: Any) -> str:
+    if resp is None:
+        return ""
+    if isinstance(resp, dict):
+        choices = resp.get("choices") or []
+        if choices:
+            return "".join(_choice_to_text(choice) for choice in choices)
+        return _content_part_to_text(resp.get("content") or resp.get("text"))
+    choices = getattr(resp, "choices", None)
+    if choices is not None:
+        try:
+            return "".join(_choice_to_text(choice) for choice in (choices or []))
+        except Exception:
+            return ""
+    return ""
+
+
+def _looks_like_chat_protocol_payload(resp: Any) -> bool:
+    if resp is None:
+        return False
+    if isinstance(resp, str):
+        raw = resp.strip()
+        if re.search(r"(?m)^\s*data\s*:", raw):
+            return True
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return False
+        return _looks_like_chat_protocol_payload(parsed)
+    if isinstance(resp, dict):
+        obj = str(resp.get("object") or "")
+        return obj.startswith("chat.completion") or ("choices" in resp and "usage" in resp)
+    return hasattr(resp, "choices") and (hasattr(resp, "usage") or hasattr(resp, "model"))
+
+
+def chat_response_text(resp: Any) -> str:
+    """Best-effort assistant text extraction for official and loose gateways."""
+    if resp is None:
+        return ""
+    if isinstance(resp, str):
+        sse_text = _extract_sse_chat_text(resp)
+        if sse_text is not None:
+            return sse_text
+        if _looks_like_chat_protocol_payload(resp):
+            return _chat_response_text_from_structured(json.loads(resp))
+        return resp
+    return _chat_response_text_from_structured(resp)
+
+
+def _chat_response_needs_fallback(resp: Any) -> bool:
+    """True when a provider returned protocol/usage but no assistant content."""
+    if chat_response_text(resp).strip():
+        return False
+    return _looks_like_chat_protocol_payload(resp)
+
+
 def _new_image_attempt(action: str, s: Settings, index: int) -> Dict[str, Any]:
     return {
         "index": index,
@@ -753,6 +876,8 @@ async def chat_completion(
             kwargs["tool_choice"] = tool_choice
         try:
             resp = await client.chat.completions.create(**kwargs)
+            if _chat_response_needs_fallback(resp):
+                raise RuntimeError("upstream returned chat protocol/usage chunk but no assistant content")
             _record_model_success("chat", candidate_settings)
             return resp
         except Exception as e:
@@ -768,6 +893,8 @@ async def chat_completion(
                     inline_messages = await to_openai_messages(messages, inline_remote_images=True, settings=s)
                 kwargs["messages"] = inline_messages
                 resp = await client.chat.completions.create(**kwargs)
+                if _chat_response_needs_fallback(resp):
+                    raise RuntimeError("upstream returned chat protocol/usage chunk but no assistant content")
                 _record_model_success("chat", candidate_settings)
                 return resp
             except Exception as inline_e:

@@ -18,6 +18,7 @@ from ..config import get_settings
 from ..database import Article, ArticleDiagnosis, ArticleVersion, Conversation, SessionLocal, Template
 from ..services.llm import (
     chat_completion,
+    chat_response_text,
     crop_image,
     edit_image,
     generate_image,
@@ -363,23 +364,7 @@ def _chat_text(resp: Any) -> str:
     `'str' object has no attribute choices'`; it should parse whatever text is
     available and then fall back gracefully.
     """
-    if resp is None:
-        return ""
-    if isinstance(resp, str):
-        return resp
-    if isinstance(resp, dict):
-        try:
-            choices = resp.get("choices") or []
-            if choices:
-                message = (choices[0] or {}).get("message") or {}
-                return str(message.get("content") or choices[0].get("text") or "")
-            return str(resp.get("content") or resp.get("text") or "")
-        except Exception:
-            return ""
-    try:
-        return str(resp.choices[0].message.content or "")
-    except Exception:
-        return str(resp or "")
+    return chat_response_text(resp)
 
 
 def _configured_public_base_url() -> str:
@@ -1316,6 +1301,11 @@ async def tool_generate_article(args: Dict[str, Any]) -> Dict[str, Any]:
     data = _safe_json(content)
     title = _normalize_title(data.get("title"), topic)
     body = data.get("body") or content
+    if not str(body or "").strip():
+        return {
+            "ok": False,
+            "error": "文本模型没有返回可写入的正文，已阻止把空内容或协议 chunk 写入笔记。请检查模型是否误返回流式 data/usage chunk，或切换备用文本模型后重试。",
+        }
     tags = _normalize_tags(data.get("tags") or [])
 
     uid = get_tool_user_id()
@@ -1392,11 +1382,18 @@ async def tool_create_complete_note_workflow(args: Dict[str, Any]) -> Dict[str, 
         ],
         temperature=0.85,
     )
-    data = _safe_json(_chat_text(resp))
+    raw_plan_text = _chat_text(resp)
+    data = _safe_json(raw_plan_text)
     emit_tool_progress("已完成初稿生成，正在整理标题、正文、标签和图片方向", step="draft_ready")
 
     title = _normalize_title(data.get("title"), topic)
     body = str(data.get("body") or "").strip()
+    if not body:
+        return {
+            "ok": False,
+            "error": "一键成稿没有拿到有效正文，已阻止把空内容或协议 chunk 写入草稿箱。请检查文本模型是否误返回流式 data/usage chunk，或切换备用文本模型后重试。",
+            "raw_text_preview": raw_plan_text[:500],
+        }
     tags = _normalize_tags(data.get("tags") or [])
     title_candidates = [
         _normalize_title(x)
