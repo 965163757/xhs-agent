@@ -144,6 +144,12 @@ export default function App() {
   }, [navCollapsed])
 
   useEffect(() => {
+    if (/^\/articles\/\d+(?:\/|$)/.test(location.pathname)) {
+      setNavCollapsed(true)
+    }
+  }, [location.pathname])
+
+  useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ id?: number; conversationId?: number | null; target?: string }>).detail || {}
       const id = Number(detail.id || 0)
