@@ -100,15 +100,8 @@ function adaptiveBodyRows(
     .split('\n')
     .reduce((total, line) => total + Math.max(1, Math.ceil((line.trim().length || 1) / charsPerLine)), 0)
 
-  const contentWidth = Math.max(280, centerWidth - 42)
-  const tileWidth = viewport.width < 720 ? 96 : 112
-  const tileGap = 7
-  const imageColumns = Math.max(1, Math.floor((contentWidth + tileGap) / (tileWidth + tileGap)))
-  const imageRows = imageCount > 0 ? Math.ceil(imageCount / imageColumns) : 1
-  const imageGridHeight = imageCount > 0
-    ? imageRows * (tileWidth * 4 / 3) + Math.max(0, imageRows - 1) * tileGap
-    : 126
-  const imageQueueHeight = 34 + 12 + imageGridHeight + (showImageContext ? 112 : 0)
+  const imageGridHeight = imageCount > 0 ? 82 : 76
+  const imageQueueHeight = 34 + 8 + imageGridHeight + (showImageContext ? 112 : 0)
   const rootHeight = Math.max(560, viewport.height - 56)
   const outerVerticalPadding = viewport.width >= 1536 ? 60 : viewport.width >= 900 ? 54 : 46
   const toolbarHeight = viewport.width >= 1536 ? 56 : viewport.width >= 900 ? 72 : 96
@@ -213,6 +206,7 @@ function ImageFrame({
   onSetCover,
   onMovePrev,
   onMoveNext,
+  compact,
 }: {
   src?: string
   aspect: string
@@ -229,19 +223,23 @@ function ImageFrame({
   onSetCover?: () => void
   onMovePrev?: () => void
   onMoveNext?: () => void
+  compact?: boolean
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   return (
     <Box
+      className={compact ? `cover-thumb${src ? ' has-image' : ''}` : undefined}
       sx={{
         position: 'relative',
-        width: '100%',
-        aspectRatio: aspect,
+        width: compact ? 56 : '100%',
+        height: compact ? 72 : undefined,
+        flex: compact ? '0 0 56px' : undefined,
+        aspectRatio: compact ? undefined : aspect,
         borderRadius: 0,
         overflow: 'hidden',
         border: '1px solid',
-        borderColor: dragging ? 'primary.main' : 'divider',
-        bgcolor: 'background.default',
+        borderColor: dragging ? 'primary.main' : compact && label !== 'COVER' ? 'var(--rule-soft)' : 'divider',
+        bgcolor: compact ? 'var(--paper-deep)' : 'background.default',
         opacity: dragging ? 0.55 : 1,
         cursor: draggable ? 'grab' : 'default',
         '&:hover .img-toolbar': { opacity: 1 },
@@ -279,7 +277,11 @@ function ImageFrame({
         </Box>
       )}
 
-      {label && (
+      {label && compact && (
+        <span className="tag">{label}</span>
+      )}
+
+      {label && !compact && (
         <Chip
           size="small"
           label={label}
@@ -301,15 +303,16 @@ function ImageFrame({
           className="img-toolbar"
           sx={{
             position: 'absolute',
-            top: 6,
-            right: 6,
+            top: compact ? 4 : 6,
+            right: compact ? 4 : 6,
             opacity: 0,
             transition: 'opacity .15s',
             display: 'flex',
             gap: 0.4,
+            zIndex: 3,
           }}
         >
-          {onEdit && (
+          {onEdit && !compact && (
             <Tooltip title="编辑图片">
               <IconButton
                 size="small"
@@ -317,13 +320,13 @@ function ImageFrame({
                 sx={{
                   bgcolor: 'primary.main',
                   color: 'background.paper',
-                  width: 28,
-                  height: 28,
+                  width: compact ? 22 : 28,
+                  height: compact ? 22 : 28,
                   borderRadius: 0,
                   '&:hover': { bgcolor: 'primary.dark' },
                 }}
               >
-                <AutoFixHighIcon sx={{ fontSize: 14 }} />
+                <AutoFixHighIcon sx={{ fontSize: compact ? 12 : 14 }} />
               </IconButton>
             </Tooltip>
           )}
@@ -333,13 +336,13 @@ function ImageFrame({
             sx={{
               bgcolor: 'text.primary',
               color: 'background.paper',
-              width: 28,
-              height: 28,
+              width: compact ? 22 : 28,
+              height: compact ? 22 : 28,
               borderRadius: 0,
               '&:hover': { bgcolor: 'text.primary' },
             }}
           >
-            <MoreVertIcon sx={{ fontSize: 14 }} />
+            <MoreVertIcon sx={{ fontSize: compact ? 12 : 14 }} />
           </IconButton>
         </Box>
       )}
@@ -1491,12 +1494,11 @@ export default function ArticleDetailPage() {
             {/* images queue */}
             <Box sx={{ order: 2, mt: 0.2, ...sectionCardSx }}>
               <Box sx={sectionHeaderSx}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ flexWrap: 'wrap', gap: 0.8 }}>
-                  <Typography sx={{ fontSize: 12, color: 'text.primary', fontWeight: 800 }}>
-                    图片队列
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
+                  <Typography className="editorial-mono" sx={{ fontSize: 10, color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                    图片队列 · 共 {visualImages.length} 张
                   </Typography>
-                  <Chip size="small" label={`共 ${visualImages.length} 张`} sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: 'background.paper', color: 'text.secondary' }} />
-                  <Typography sx={{ fontSize: 11.5, color: 'text.secondary', whiteSpace: { xs: 'normal', md: 'nowrap' } }}>
+                  <Typography sx={{ fontSize: 11.5, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     可拖拽调换顺序，也可在菜单中设为首图、前移、后移或删除。
                   </Typography>
                   <Box sx={{ flex: 1 }} />
@@ -1526,9 +1528,12 @@ export default function ArticleDetailPage() {
                 {visualImages.length > 0 ? (
                   <Box
                     sx={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))',
-                      gap: 0.85,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      minHeight: 74,
+                      overflowX: 'auto',
+                      pb: 0.15,
                     }}
                   >
                     {visualImages.map((u, pos) => {
@@ -1539,7 +1544,8 @@ export default function ArticleDetailPage() {
                           src={u}
                           aspect="3 / 4"
                           placeholder=""
-                          label={pos === 0 ? '首图/封面' : `第 ${pos + 1} 张`}
+                          label={pos === 0 ? 'COVER' : String(pos + 1).padStart(2, '0')}
+                          compact
                           draggable
                           dragging={dragImagePos === pos}
                           onDragStart={e => {
@@ -1568,22 +1574,50 @@ export default function ArticleDetailPage() {
                         />
                       )
                     })}
+                    <Box
+                      sx={{
+                        width: 56,
+                        height: 72,
+                        flex: '0 0 56px',
+                        border: '1px dashed',
+                        borderColor: 'divider',
+                        display: 'grid',
+                        placeItems: 'center',
+                        color: 'text.secondary',
+                        font: '10px var(--mono)',
+                        bgcolor: 'background.paper',
+                      }}
+                    >
+                      +
+                    </Box>
                   </Box>
                 ) : (
                   <Box
                     sx={{
-                      minHeight: 126,
-                      border: '1px dashed',
-                      borderColor: 'divider',
-                      borderRadius: 0,
-                      display: 'grid',
-                      placeItems: 'center',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1.2,
+                      minHeight: 74,
                       color: 'text.secondary',
                       fontSize: 12,
-                      bgcolor: 'background.default',
                     }}
                   >
-                    暂无图片。可以让 Agent 生成封面或内容配图，第一张会自动作为首图/封面。
+                    <Box
+                      sx={{
+                        width: 56,
+                        height: 72,
+                        flex: '0 0 56px',
+                        border: '1px dashed',
+                        borderColor: 'divider',
+                        display: 'grid',
+                        placeItems: 'center',
+                        font: '10px var(--mono)',
+                        bgcolor: 'background.paper',
+                      }}
+                    >
+                      +
+                    </Box>
+                    <span>暂无图片。可以让 Agent 生成封面或内容配图。</span>
                   </Box>
                 )}
               </Box>

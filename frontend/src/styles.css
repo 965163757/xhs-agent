@@ -396,6 +396,82 @@ body {
   text-transform: uppercase;
 }
 
+.cover-thumb {
+  position: relative;
+  overflow: hidden;
+  background: var(--paper-deep);
+}
+
+.cover-thumb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 0 48%, rgba(200,48,46,0.22) 48% 52%, transparent 52%);
+  opacity: .55;
+  pointer-events: none;
+}
+
+.cover-thumb.has-image::after {
+  opacity: .16;
+}
+
+.cover-thumb .tag {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  z-index: 2;
+  padding: 2px 4px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--accent);
+  font: 700 8px var(--mono);
+  letter-spacing: .12em;
+  line-height: 1;
+}
+
+.settings-card {
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.settings-card--dense {
+  padding: 16px;
+}
+
+.settings-field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-field-row .k {
+  width: 80px;
+  flex: 0 0 80px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.settings-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  border-bottom: 1px solid var(--rule-soft);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.settings-status-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-status-row b {
+  color: var(--ink-mute);
+  font: 700 11px var(--mono);
+  letter-spacing: .08em;
+}
+
 .MuiPaper-root,
 .MuiCard-root,
 .MuiDialog-paper {

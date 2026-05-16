@@ -696,6 +696,19 @@ export default function SettingsPage() {
     alignItems: 'start',
   }
   const wideSx = { gridColumn: '1 / -1' }
+  const passwordInputSx = {
+    flex: 1,
+    '& .MuiInputBase-root': {
+      height: 32,
+      border: '1px solid',
+      borderColor: 'divider',
+      bgcolor: 'background.paper',
+      px: 1,
+      fontSize: 12,
+      color: 'text.primary',
+    },
+    '& input': { py: 0 },
+  }
 
   return (
     <Box className="editorial-page studio-page studio-page--wide">
@@ -805,44 +818,85 @@ export default function SettingsPage() {
       )}
 
       {s && (
-        <Section num="B" title="账号安全" desc="修改当前登录账号的密码。" meta={user?.username || ''}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr auto' }, gap: 1.2, alignItems: 'start' }}>
-            <TextField
-              label="当前密码"
-              fullWidth
-              type={showPasswords ? 'text' : 'password'}
-              value={currentPassword}
-              onChange={e => setCurrentPassword(e.target.value)}
-              InputProps={{
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton onClick={() => setShowPasswords(v => !v)} edge="end" size="small">
-                      {showPasswords ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              }}
-            />
-            <TextField
-              label="新密码"
-              fullWidth
-              type={showPasswords ? 'text' : 'password'}
-              value={newPassword}
-              onChange={e => setNewPassword(e.target.value)}
-              helperText="至少 4 位"
-            />
-            <TextField
-              label="确认新密码"
-              fullWidth
-              type={showPasswords ? 'text' : 'password'}
-              value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
-            />
-            <Button variant="outlined" onClick={savePassword} disabled={busy} sx={{ alignSelf: 'start', minWidth: 104 }}>
-              修改密码
-            </Button>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 2, mb: 1.6 }}>
+            <Box className="settings-card settings-card--dense">
+              <div className="editorial-section-label" style={{ marginBottom: 14 }}>
+                <span className="num">C</span>
+                <span className="title">账号安全</span>
+                <span className="meta">{user?.username || ''}</span>
+              </div>
+              <Stack spacing={1.25}>
+                <div className="settings-field-row">
+                  <span className="k">当前密码</span>
+                  <TextField
+                    variant="standard"
+                    type={showPasswords ? 'text' : 'password'}
+                    value={currentPassword}
+                    onChange={e => setCurrentPassword(e.target.value)}
+                    placeholder="••••••••"
+                    sx={passwordInputSx}
+                    InputProps={{
+                      disableUnderline: true,
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton onClick={() => setShowPasswords(v => !v)} edge="end" size="small" sx={{ mr: -0.6 }}>
+                            {showPasswords ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                </div>
+                <div className="settings-field-row">
+                  <span className="k">新密码</span>
+                  <TextField
+                    variant="standard"
+                    type={showPasswords ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="至少 4 位"
+                    sx={passwordInputSx}
+                    InputProps={{ disableUnderline: true }}
+                  />
+                </div>
+                <div className="settings-field-row">
+                  <span className="k">确认密码</span>
+                  <TextField
+                    variant="standard"
+                    type={showPasswords ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    sx={passwordInputSx}
+                    InputProps={{ disableUnderline: true }}
+                  />
+                </div>
+                <Button variant="outlined" onClick={savePassword} disabled={busy} size="small" sx={{ alignSelf: 'flex-start', minWidth: 96, borderRadius: 0 }}>
+                  修改密码
+                </Button>
+              </Stack>
+            </Box>
+            <Box className="settings-card settings-card--dense">
+              <div className="editorial-section-label" style={{ marginBottom: 14 }}>
+                <span className="num">D</span>
+                <span className="title">运行状态</span>
+                <span className="meta">{isAdmin ? 'admin only' : 'personal'}</span>
+              </div>
+              <Stack spacing={1}>
+                <div className="settings-status-row">
+                  <span>开放注册</span>
+                  <b>{regOpen ? 'ON' : 'OFF'}</b>
+                </div>
+                <div className="settings-status-row">
+                  <span>凭证模式</span>
+                  <b>{useOwnKey ? 'PERSONAL' : 'GLOBAL'}</b>
+                </div>
+                <div className="settings-status-row">
+                  <span>MCP 接入</span>
+                  <b>{mcpTools.length ? `${mcpTools.length} TOOLS` : 'READY'}</b>
+                </div>
+              </Stack>
+            </Box>
           </Box>
-        </Section>
       )}
 
       {/* Admin panel */}
