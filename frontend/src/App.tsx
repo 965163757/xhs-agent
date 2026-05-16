@@ -21,6 +21,7 @@ import ArticlesPage from './pages/ArticlesPage'
 import LoginPage from './pages/LoginPage'
 import CommandPalette from './components/CommandPalette'
 import OnboardingDialog from './components/OnboardingDialog'
+import { navigateWithTransition } from './utils/navigation'
 
 const ArticleDetailPage = lazy(() => import('./pages/ArticleDetailPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
@@ -141,6 +142,21 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('xhs_global_nav_collapsed', navCollapsed ? 'true' : 'false')
   }, [navCollapsed])
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: number; conversationId?: number | null }>).detail || {}
+      const id = Number(detail.id || 0)
+      if (!Number.isFinite(id) || id <= 0) return
+      const qs = new URLSearchParams()
+      if (detail.conversationId) qs.set('c', String(detail.conversationId))
+      qs.set('chat', '1')
+      qs.set('from', 'agent')
+      navigateWithTransition(nav, `/articles/${id}?${qs.toString()}`)
+    }
+    window.addEventListener('xhs:open-article', handler)
+    return () => window.removeEventListener('xhs:open-article', handler)
+  }, [nav])
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>

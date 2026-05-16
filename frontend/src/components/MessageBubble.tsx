@@ -1,4 +1,4 @@
-import { Box, Chip, CircularProgress, Collapse, Dialog, IconButton, Stack, Tooltip, Typography } from '@mui/material'
+import { Box, Chip, Collapse, Dialog, IconButton, Stack, Tooltip, Typography } from '@mui/material'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import CloseIcon from '@mui/icons-material/Close'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -108,6 +108,35 @@ function articleIdFromProgress(progress: ToolEvent[] | undefined): number {
     if (id > 0) return id
   }
   return 0
+}
+
+function compactJson(value: any, limit = 220): string {
+  if (value === undefined || value === null || value === '') return ''
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 0)
+  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`
+}
+
+function toolPlanItems(name: string, args: any): Array<{ label: string; value: string }> {
+  if (!args || typeof args !== 'object') return []
+  const fields: Array<[string, string[]]> = [
+    ['目标', ['topic', 'brief', 'prompt', 'instruction']],
+    ['受众', ['audience']],
+    ['风格', ['tone', 'style']],
+    ['写入笔记', ['article_id', 'target_article_id']],
+    ['参考笔记', ['reference_article_id', 'source_article_id']],
+    ['图片策略', ['generate_cover', 'generate_content_images', 'generate_images', 'image_count', 'size', 'image_size', 'image_ratio']],
+  ]
+  const out: Array<{ label: string; value: string }> = []
+  for (const [label, keys] of fields) {
+    const picked: Record<string, any> = {}
+    for (const key of keys) {
+      if (args[key] !== undefined && args[key] !== null && args[key] !== '') picked[key] = args[key]
+    }
+    const value = compactJson(Object.keys(picked).length === 1 ? Object.values(picked)[0] : picked, 180)
+    if (value && value !== '{}') out.push({ label, value })
+  }
+  if (!out.length && name) out.push({ label: '工具', value: toolNameZh[name] || name })
+  return out.slice(0, 6)
 }
 
 function uniqImages(values: Array<string | undefined | null>): string[] {
@@ -236,7 +265,7 @@ function ToolCard({
     result?.result?.shots
 
   const argJson = JSON.stringify(call?.arguments ?? {}, null, 2)
-  const latestProgress = progress[progress.length - 1]
+  const planItems = toolPlanItems(name, call?.arguments)
 
   return (
     <Box
@@ -280,18 +309,34 @@ function ToolCard({
           }}
         />
       </Stack>
-      {latestProgress?.message && (
-        <Box sx={{ px: 1.4, pb: 0.9, mt: -0.2 }}>
-          <Stack direction="row" spacing={0.8} alignItems="center">
-            {running && <CircularProgress size={10} sx={{ color: 'text.secondary' }} />}
-            <Typography sx={{ fontSize: 12, color: 'text.secondary' }} noWrap>
-              {latestProgress.message}
-            </Typography>
-          </Stack>
-        </Box>
-      )}
       <Collapse in={open}>
         <Box sx={{ px: 1.4, pb: 1.4, borderTop: '1px solid', borderColor: 'divider', pt: 1 }}>
+          {planItems.length > 0 && (
+            <Box
+              sx={{
+                mb: 1,
+                p: 1,
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+              }}
+            >
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.75 }}>
+                AI 执行计划
+              </Typography>
+              <Stack direction="row" spacing={0.6} flexWrap="wrap" sx={{ gap: 0.6 }}>
+                {planItems.map(item => (
+                  <Chip
+                    key={item.label}
+                    size="small"
+                    label={`${item.label}：${item.value}`}
+                    sx={{ maxWidth: '100%', height: 22, fontSize: 11, bgcolor: 'action.hover' }}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          )}
           {progress.length > 0 && (
             <Box
               sx={{
@@ -304,7 +349,7 @@ function ToolCard({
               }}
             >
               <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.75 }}>
-                执行过程
+                执行细节
               </Typography>
               <Stack spacing={0.55}>
                 {progress.slice(-12).map((p, idx) => (
@@ -325,6 +370,14 @@ function ToolCard({
                       {p.step && (
                         <Typography className="editorial-mono" sx={{ fontSize: 10.5, color: 'text.disabled' }}>
                           {p.step}
+                        </Typography>
+                      )}
+                      {p.data && (
+                        <Typography
+                          className="editorial-mono"
+                          sx={{ fontSize: 10.5, color: 'text.disabled', mt: 0.15, whiteSpace: 'pre-wrap' }}
+                        >
+                          {compactJson(p.data, 180)}
                         </Typography>
                       )}
                     </Box>

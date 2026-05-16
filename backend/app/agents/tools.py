@@ -3256,7 +3256,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_generate_article,
         "schema": _fn_schema(
             "generate_article",
-            "从主题从零生成一篇小红书风格笔记并入库。",
+            "从主题从零生成一篇小红书风格文章/笔记内容并入库。适用于用户只要一篇文章、正文、文案、笔记内容、不要图片、不要完整流程的场景；不要升级成一键成稿。",
             {
                 "topic": {"type": "string", "description": "主题或灵感"},
                 "tone": {"type": "string"},
@@ -3274,7 +3274,7 @@ TOOLS: Dict[str, Dict[str, Any]] = {
         "fn": tool_create_complete_note_workflow,
         "schema": _fn_schema(
             "create_complete_note_workflow",
-            "端到端创作工作流：只在用户明确要求生成完整笔记/帖子/草稿/一键成稿时使用。会解析 brief，生成笔记、标题候选、标签、首图/后续图方向，本地自检并可自动二次优化后入库。不要用于单纯生成图片/首图/海报。",
+            "端到端创作工作流：仅在用户明确说一键成稿、完整成稿、完整方案、从0到1、发布前自检，或明确要标题候选+标签+封面方向+自检一起交付时使用。不要用于用户只要一篇文章/正文/文案/不要图片/普通生成笔记内容的场景。",
             {
                 "topic": {"type": "string", "description": "主题、灵感或完整 brief"},
                 "audience": {"type": "string", "description": "目标受众"},

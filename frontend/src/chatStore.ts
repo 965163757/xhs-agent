@@ -297,6 +297,16 @@ function latestArticleResultFromEvents(events: StreamEvent[] | undefined): { id:
   return { id: 0 }
 }
 
+function openArticleSoftly(
+  id: number,
+  conversationId?: number | null,
+  opts?: { onArticleCreated?: (id: number, conversationId?: number | null) => void },
+) {
+  if (!Number.isFinite(id) || id <= 0) return
+  opts?.onArticleCreated?.(id, conversationId)
+  window.dispatchEvent(new CustomEvent('xhs:open-article', { detail: { id, conversationId } }))
+}
+
 const MAX_CLIENT_MESSAGES = 80
 const MAX_CLIENT_MESSAGE_CHARS = 12000
 const MAX_CLIENT_IMAGES_PER_MESSAGE = 8
@@ -479,7 +489,7 @@ async function reconcileTaskResult(
     if (cid) updateConversation(cid, { article_id: latest.id } as any).catch(() => {})
     opts.onArticleMayChange?.(latest.article || null)
     if (!alreadyOpened && (!latest.name || articleOpeningTools.has(latest.name))) {
-      opts.onArticleCreated?.(latest.id, cid)
+      openArticleSoftly(latest.id, cid, opts)
       return { articleId: latest.id, opened: true }
     }
     return { articleId: latest.id, opened: alreadyOpened }
@@ -570,7 +580,7 @@ export async function sendMessage(
             if (cid) updateConversation(cid, { article_id: progressArticleId } as any).catch(() => {})
             if (!articleCreatedNotified) {
               articleCreatedNotified = true
-              opts.onArticleCreated?.(progressArticleId, cid)
+              openArticleSoftly(progressArticleId, cid, opts)
             }
           }
         } else if (ev.type === 'tool_result') {
@@ -584,7 +594,7 @@ export async function sendMessage(
             if (cid) updateConversation(cid, { article_id: createdArticleId } as any).catch(() => {})
             if (!articleCreatedNotified) {
               articleCreatedNotified = true
-              opts.onArticleCreated?.(createdArticleId, cid)
+              openArticleSoftly(createdArticleId, cid, opts)
             }
           }
           maybePersist()

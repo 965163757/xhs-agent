@@ -27,6 +27,9 @@ class AgentRoutingTests(unittest.TestCase):
         self.assertIn("避免无必要地分多轮逐个追问", SYSTEM_PROMPT)
         self.assertIn("如果只有 1 个真正阻塞点，可以只问 1 个", SYSTEM_PROMPT)
         self.assertIn("不等同于真实生图", SYSTEM_PROMPT)
+        self.assertIn("用户只要“一篇文章/一篇内容/正文/文案", SYSTEM_PROMPT)
+        self.assertIn("优先调用 generate_article", SYSTEM_PROMPT)
+        self.assertIn("不要调用 create_complete_note_workflow", SYSTEM_PROMPT)
         self.assertNotIn("先反问 1 个关键问题", SYSTEM_PROMPT)
 
     def test_default_tool_round_limit_is_12(self):
@@ -95,6 +98,13 @@ class AgentRoutingTests(unittest.TestCase):
         self.assertEqual(server_attached, 4)
 
     def test_visual_tool_schema_uses_single_queue_semantics(self):
+        generate_schema = TOOLS["generate_article"]["schema"]["function"]
+        workflow_schema = TOOLS["create_complete_note_workflow"]["schema"]["function"]
+        self.assertIn("只要一篇文章", generate_schema["description"])
+        self.assertIn("不要升级成一键成稿", generate_schema["description"])
+        self.assertIn("仅在用户明确说一键成稿", workflow_schema["description"])
+        self.assertIn("不要用于用户只要一篇文章", workflow_schema["description"])
+
         workflow_schema = TOOLS["create_complete_note_workflow"]["schema"]["function"]
         workflow_props = workflow_schema["parameters"]["properties"]
         self.assertIn("展示队列第 1 张", workflow_props["generate_cover"]["description"])
