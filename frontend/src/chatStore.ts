@@ -254,6 +254,25 @@ function articleIdFromToolResult(result: any): number {
   return 0
 }
 
+function toolEventsFromStreamEvents(events: StreamEvent[] | undefined): ToolEvent[] {
+  const toolEvents: ToolEvent[] = []
+  for (const ev of events || []) {
+    if (ev.type === 'tool_call' || ev.type === 'tool_progress' || ev.type === 'tool_result') {
+      toolEvents.push(ev as ToolEvent)
+    }
+  }
+  return toolEvents
+}
+
+function latestArticleResultFromEvents(events: StreamEvent[] | undefined): { id: number; article?: Article; name?: string } {
+  for (const ev of [...(events || [])].reverse()) {
+    if (ev.type !== 'tool_result') continue
+    const id = articleIdFromToolResult(ev.result)
+    if (id > 0) return { id, article: ev.result?.article, name: ev.name }
+  }
+  return { id: 0 }
+}
+
 const MAX_CLIENT_MESSAGES = 80
 const MAX_CLIENT_MESSAGE_CHARS = 12000
 const MAX_CLIENT_IMAGES_PER_MESSAGE = 8
@@ -391,6 +410,57 @@ async function persistToBackend(key: string, articleId?: number | null) {
   } catch {
     /* network failure — non-critical */
   }
+}
+
+async function reconcileTaskResult(
+  key: string,
+  taskId: string | null | undefined,
+  opts: {
+    onArticleMayChange?: (article?: Article | null) => void
+    onArticleCreated?: (id: number, conversationId?: number | null) => void
+  },
+  alreadyOpened: boolean,
+): Promise<{ articleId: number; opened: boolean }> {
+  if (!taskId) return { articleId: 0, opened: alreadyOpened }
+  let task: Awaited<ReturnType<typeof getTask>> | null = null
+  for (let i = 0; i < 4; i += 1) {
+    try {
+      task = await getTask(taskId)
+      if (task?.events?.some(ev => ev.type === 'tool_result') || task?.status !== 'running') break
+    } catch {
+      return { articleId: 0, opened: alreadyOpened }
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 180))
+  }
+  if (!task) return { articleId: 0, opened: alreadyOpened }
+
+  const events = task.events || []
+  const toolEvents = toolEventsFromStreamEvents(events)
+  const cur = ensure(key)
+  const copy = cur.messages.slice()
+  if (copy.length > 0 && copy[copy.length - 1].role === 'assistant') {
+    const last = { ...copy[copy.length - 1] } as UiMessage
+    if (task.result_text && (!last.content || task.result_text.length >= last.content.length)) {
+      last.content = task.result_text
+    }
+    if (toolEvents.length) last.tool_events = toolEvents
+    copy[copy.length - 1] = last
+    cur.messages = compactMessagesForHistory(copy)
+    bump(key)
+  }
+
+  const latest = latestArticleResultFromEvents(events)
+  if (latest.id > 0) {
+    const cid = ensure(key).conversationId
+    if (cid) updateConversation(cid, { article_id: latest.id } as any).catch(() => {})
+    opts.onArticleMayChange?.(latest.article || null)
+    if (!alreadyOpened && (!latest.name || articleOpeningTools.has(latest.name))) {
+      opts.onArticleCreated?.(latest.id, cid)
+      return { articleId: latest.id, opened: true }
+    }
+    return { articleId: latest.id, opened: alreadyOpened }
+  }
+  return { articleId: 0, opened: alreadyOpened }
 }
 
 export async function sendMessage(
@@ -542,6 +612,10 @@ export async function sendMessage(
       bump(key)
     }
   } finally {
+    const taskIdToReconcile = ensure(key).taskId
+    const reconciled = await reconcileTaskResult(key, taskIdToReconcile, opts, articleCreatedNotified)
+    if (reconciled.articleId > 0) activeArticleId = reconciled.articleId
+    articleCreatedNotified = reconciled.opened
     const cur = ensure(key)
     cur.streaming = false
     cur.status = ''
@@ -583,12 +657,7 @@ export async function reconnectTask(
           .map(ev => ev.text)
           .join('')
         if (storedText) last.content = storedText
-        const toolEvents: ToolEvent[] = []
-        for (const ev of task.events) {
-          if (ev.type === 'tool_call') toolEvents.push(ev as ToolEvent)
-          else if (ev.type === 'tool_progress') toolEvents.push(ev as ToolEvent)
-          else if (ev.type === 'tool_result') toolEvents.push(ev as ToolEvent)
-        }
+        const toolEvents = toolEventsFromStreamEvents(task.events)
         if (toolEvents.length) last.tool_events = toolEvents
         copy[copy.length - 1] = last
       }
@@ -598,11 +667,8 @@ export async function reconnectTask(
       cur.taskId = null
       cur.abort = undefined
       bump(key)
-      const latestArticleEvent = [...(task.events || [])]
-        .reverse()
-        .find((ev): ev is Extract<StreamEvent, { type: 'tool_result' }> => ev.type === 'tool_result' && !!ev.result?.article)
-      const latestArticle = latestArticleEvent?.result?.article
-      opts.onArticleMayChange?.(latestArticle || null)
+      const latest = latestArticleResultFromEvents(task.events)
+      opts.onArticleMayChange?.(latest.article || null)
       return
     }
 
@@ -617,12 +683,7 @@ export async function reconnectTask(
           .filter((ev): ev is Extract<StreamEvent, { type: 'token' }> => ev.type === 'token')
           .map(ev => ev.text)
           .join('')
-        const toolEvents: ToolEvent[] = []
-        for (const ev of replayEvents) {
-          if (ev.type === 'tool_call') toolEvents.push(ev as ToolEvent)
-          else if (ev.type === 'tool_progress') toolEvents.push(ev as ToolEvent)
-          else if (ev.type === 'tool_result') toolEvents.push(ev as ToolEvent)
-        }
+        const toolEvents = toolEventsFromStreamEvents(replayEvents)
         last.tool_events = toolEvents
         copy[copy.length - 1] = last
       }
