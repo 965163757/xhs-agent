@@ -82,6 +82,34 @@ function toAbs(url: string) {
   return url // same-origin /static/images/... works via vite proxy
 }
 
+function articleIdFromText(text: any): number {
+  const value = String(text || '')
+  const patterns = [
+    /(?:笔记|文章|草稿)\s*[#＃]\s*(\d+)/i,
+    /(?:article_id|articleId|文章ID|笔记ID)\D{0,8}(\d+)/i,
+  ]
+  for (const pattern of patterns) {
+    const match = value.match(pattern)
+    const id = Number(match?.[1] || 0)
+    if (Number.isFinite(id) && id > 0) return id
+  }
+  return 0
+}
+
+function articleIdFromProgress(progress: ToolEvent[] | undefined): number {
+  for (const ev of [...(progress || [])].reverse()) {
+    const data: any = ev.data || {}
+    const candidates = [data.article_id, data.articleId, data.article?.id]
+    for (const value of candidates) {
+      const id = Number(value || 0)
+      if (Number.isFinite(id) && id > 0) return id
+    }
+    const id = articleIdFromText(ev.message)
+    if (id > 0) return id
+  }
+  return 0
+}
+
 function uniqImages(values: Array<string | undefined | null>): string[] {
   const out: string[] = []
   const seen = new Set<string>()
@@ -192,6 +220,7 @@ function ToolCard({
     result?.result?.workflow?.article_id ||
     result?.result?.workflow?.article?.id ||
     call?.arguments?.article_id ||
+    articleIdFromProgress(progress) ||
     0,
   )
   const titles: string[] | undefined = result?.result?.titles || result?.result?.workflow?.title_candidates

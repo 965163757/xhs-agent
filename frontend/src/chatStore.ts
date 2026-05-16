@@ -254,6 +254,30 @@ function articleIdFromToolResult(result: any): number {
   return 0
 }
 
+function articleIdFromText(text: any): number {
+  const value = String(text || '')
+  const patterns = [
+    /(?:笔记|文章|草稿)\s*[#＃]\s*(\d+)/i,
+    /(?:article_id|articleId|文章ID|笔记ID)\D{0,8}(\d+)/i,
+  ]
+  for (const pattern of patterns) {
+    const match = value.match(pattern)
+    const id = Number(match?.[1] || 0)
+    if (Number.isFinite(id) && id > 0) return id
+  }
+  return 0
+}
+
+function articleIdFromToolProgress(ev: Extract<StreamEvent, { type: 'tool_progress' }>): number {
+  const data: any = ev.data || {}
+  const candidates = [data.article_id, data.articleId, data.article?.id]
+  for (const value of candidates) {
+    const id = Number(value || 0)
+    if (Number.isFinite(id) && id > 0) return id
+  }
+  return articleIdFromText(ev.message)
+}
+
 function toolEventsFromStreamEvents(events: StreamEvent[] | undefined): ToolEvent[] {
   const toolEvents: ToolEvent[] = []
   for (const ev of events || []) {
@@ -539,6 +563,16 @@ export async function sendMessage(
           cur.status = `${toolLabel[ev.name] || ev.name}…`
         } else if (ev.type === 'tool_progress') {
           cur.status = ev.message || `${toolLabel[ev.name] || ev.name}…`
+          const progressArticleId = articleOpeningTools.has(ev.name) ? articleIdFromToolProgress(ev) : 0
+          if (progressArticleId > 0) {
+            activeArticleId = progressArticleId
+            const cid = ensure(key).conversationId
+            if (cid) updateConversation(cid, { article_id: progressArticleId } as any).catch(() => {})
+            if (!articleCreatedNotified) {
+              articleCreatedNotified = true
+              opts.onArticleCreated?.(progressArticleId, cid)
+            }
+          }
         } else if (ev.type === 'tool_result') {
           cur.status = ev.elapsed_ms ? `${toolLabel[ev.name] || ev.name}完成，用时 ${(ev.elapsed_ms / 1000).toFixed(1)}s，整合结果…` : '整合结果…'
           opts.onArticleMayChange?.(ev.result?.article || null)
