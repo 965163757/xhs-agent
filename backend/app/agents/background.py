@@ -22,6 +22,23 @@ MAX_RUNNING_TASKS_PER_USER = 2
 TRACE_FLUSH_INTERVAL_SECONDS = 2.0
 STREAM_RETENTION_SECONDS = 60
 MAX_MEMORY_BRIEFS = 20
+ARTICLE_BINDING_TOOL_NAMES = {
+    "generate_article",
+    "create_complete_note_workflow",
+    "create_article",
+    "imitate_article_style",
+    "rewrite_article",
+    "optimize_article",
+    "update_article",
+    "apply_template",
+    "generate_article_images",
+    "arrange_article_images",
+    "edit_image",
+    "crop_image",
+    "inpaint_image",
+    "remove_object",
+    "remove_image",
+}
 
 
 class TaskStream:
@@ -88,6 +105,35 @@ def _truncate(text: Any, limit: int = 800) -> str:
     s = text if isinstance(text, str) else str(text or "")
     s = s.strip()
     return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def _safe_article_id_from_result(result: Any) -> Optional[int]:
+    if not isinstance(result, dict):
+        return None
+    candidates = [
+        ((result.get("article") or {}).get("id") if isinstance(result.get("article"), dict) else None),
+        result.get("article_id"),
+        ((result.get("workflow") or {}).get("article_id") if isinstance(result.get("workflow"), dict) else None),
+        (((result.get("workflow") or {}).get("article") or {}).get("id") if isinstance(result.get("workflow"), dict) and isinstance((result.get("workflow") or {}).get("article"), dict) else None),
+    ]
+    for value in candidates:
+        try:
+            aid = int(value or 0)
+        except Exception:
+            aid = 0
+        if aid > 0:
+            return aid
+    return None
+
+
+def _latest_bound_article_id(events: List[Dict[str, Any]]) -> Optional[int]:
+    for ev in reversed(events or []):
+        if ev.get("type") != "tool_result" or ev.get("name") not in ARTICLE_BINDING_TOOL_NAMES:
+            continue
+        aid = _safe_article_id_from_result(ev.get("result"))
+        if aid:
+            return aid
+    return None
 
 
 def _new_trace(
@@ -551,6 +597,9 @@ async def _finalize_task(
                 conv = await s.get(Conversation, conversation_id)
                 if conv:
                     conv.active_task_id = None
+                    bound_article_id = _latest_bound_article_id(events)
+                    if bound_article_id:
+                        conv.article_id = bound_article_id
                     msgs = list(conv.messages or [])
                     if msgs and msgs[-1].get("role") == "assistant":
                         msgs[-1]["content"] = result_text

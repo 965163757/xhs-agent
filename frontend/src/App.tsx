@@ -145,18 +145,37 @@ export default function App() {
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ id?: number; conversationId?: number | null }>).detail || {}
+      const detail = (event as CustomEvent<{ id?: number; conversationId?: number | null; target?: string }>).detail || {}
       const id = Number(detail.id || 0)
       if (!Number.isFinite(id) || id <= 0) return
-      const qs = new URLSearchParams()
-      if (detail.conversationId) qs.set('c', String(detail.conversationId))
-      qs.set('chat', '1')
-      qs.set('from', 'agent')
-      navigateWithTransition(nav, `/articles/${id}?${qs.toString()}`)
+      const target = detail.target || (() => {
+        const qs = new URLSearchParams()
+        if (detail.conversationId) qs.set('c', String(detail.conversationId))
+        qs.set('chat', '1')
+        qs.set('from', 'agent')
+        return `/articles/${id}?${qs.toString()}`
+      })()
+      navigateWithTransition(nav, target)
     }
     window.addEventListener('xhs:open-article', handler)
     return () => window.removeEventListener('xhs:open-article', handler)
   }, [nav])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('xhs_pending_open_article')
+      if (!raw) return
+      const pending = JSON.parse(raw) as { id?: number; target?: string; at?: number }
+      const id = Number(pending.id || 0)
+      if (!Number.isFinite(id) || id <= 0) return
+      if (Date.now() - Number(pending.at || 0) > 30_000) return
+      if (location.pathname !== `/articles/${id}` && pending.target) {
+        navigateWithTransition(nav, pending.target)
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [location.pathname, nav])
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>

@@ -303,8 +303,24 @@ function openArticleSoftly(
   opts?: { onArticleCreated?: (id: number, conversationId?: number | null) => void },
 ) {
   if (!Number.isFinite(id) || id <= 0) return
+  const qs = new URLSearchParams()
+  if (conversationId) qs.set('c', String(conversationId))
+  qs.set('chat', '1')
+  qs.set('from', 'agent')
+  const target = `/articles/${id}?${qs.toString()}`
+  try {
+    localStorage.setItem('xhs_pending_open_article', JSON.stringify({ id, conversationId: conversationId || null, target, at: Date.now() }))
+  } catch {
+    /* ignore */
+  }
   opts?.onArticleCreated?.(id, conversationId)
-  window.dispatchEvent(new CustomEvent('xhs:open-article', { detail: { id, conversationId } }))
+  window.dispatchEvent(new CustomEvent('xhs:open-article', { detail: { id, conversationId, target } }))
+  window.setTimeout(() => {
+    const expected = `/articles/${id}`
+    if (window.location.pathname === expected) return
+    window.history.pushState(null, '', target)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, 220)
 }
 
 const MAX_CLIENT_MESSAGES = 80
