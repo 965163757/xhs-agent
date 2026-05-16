@@ -1257,6 +1257,15 @@ export default function ArticleDetailPage() {
             </Button>
           </Stack>
 
+          <Box sx={{ mb: 1.25 }}>
+            <div className="editorial-audit-strip">
+              <div><b>{art.status === 'published' ? 'live' : 'draft'}</b><span>manuscript state</span></div>
+              <div><b>{getScoreValue(art.score, 'overall') || '—'}</b><span>pre publish score</span></div>
+              <div><b>{bannedHits.length}</b><span>banned word risk</span></div>
+              <div><b>{visualImages.length}</b><span>visual queue</span></div>
+            </div>
+          </Box>
+
           <Menu anchorEl={articleMenuAnchor} open={!!articleMenuAnchor} onClose={() => setArticleMenuAnchor(null)}>
             {articleOptions.length === 0 && (
               <MenuItem disabled>正在加载笔记…</MenuItem>
@@ -1442,6 +1451,19 @@ export default function ArticleDetailPage() {
                   onChange={tags => setArt({ ...art, tags })}
                   showLabel={false}
                 />
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1fr 1fr' }, gap: 1, mt: 1.1 }}>
+                  <div className="editorial-proof-note" data-mark="EDITOR NOTE">
+                    {art.body.length < 300
+                      ? '正文偏短，建议补充真实体验、价格/时间/路线等具体细节。'
+                      : art.body.length > 1000
+                        ? '正文信息较满，发布前可让 Agent 精简长段，把重点放到首屏。'
+                        : '正文长度处于较优区间，下一步重点检查开头钩子、CTA 和封面吸引力。'}
+                  </div>
+                  <div className="editorial-diff-box">
+                    <del>{art.title || '当前标题'}</del><br />
+                    <ins>{art.title ? `${art.title.slice(0, 18)}｜收藏版` : '建议补一个更强钩子的标题'}</ins>
+                  </div>
+                </Box>
               </Box>
             </Box>
 

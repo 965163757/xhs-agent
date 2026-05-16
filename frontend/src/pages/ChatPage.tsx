@@ -461,6 +461,15 @@ export default function ChatPage() {
         </Button>
       </Stack>
 
+      <Box sx={{ px: 2.5, py: 0.9, borderBottom: 1, borderColor: 'divider', bgcolor: 'var(--paper-soft)' }}>
+        <div className="editorial-audit-strip">
+          <div><b>{convos.length}</b><span>history threads</span></div>
+          <div><b>{article ? `#${article.id}` : 'free'}</b><span>article context</span></div>
+          <div><b>{getSession(currentSessionKey).messages.length}</b><span>session messages</span></div>
+          <div><b>{isAdmin ? 'admin' : 'editor'}</b><span>workspace role</span></div>
+        </div>
+      </Box>
+
       <Menu anchorEl={articleMenuAnchor} open={!!articleMenuAnchor} onClose={() => setArticleMenuAnchor(null)}>
         <MenuItem onClick={() => selectArticleContext(null)} selected={!articleId}>
           不绑定笔记，直接新创作

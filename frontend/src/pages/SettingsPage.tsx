@@ -45,13 +45,15 @@ import {
 import { useAuth } from '../AuthContext'
 import { formatBeijingDate } from '../utils/time'
 
-function Section({ title, desc, children }: { title: string; desc?: string; children: any }) {
+function Section({ title, desc, num, meta, children }: { title: string; desc?: string; num?: string; meta?: string; children: any }) {
   return (
-    <Paper sx={{ p: { xs: 1.5, md: 2 }, mb: 1.5, borderRadius: 0 }}>
-      <Typography sx={{ fontSize: 15, fontWeight: 800, color: 'text.primary', mb: 0.2 }}>{title}</Typography>
-      {desc && (
-        <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 1.4 }}>{desc}</Typography>
-      )}
+    <Paper sx={{ p: { xs: 1.5, md: 2 }, mb: 1.6, borderRadius: 0, bgcolor: 'background.paper' }}>
+      <div className="editorial-section-label">
+        <span className="num">{num || '—'}</span>
+        <span className="title">{title}</span>
+        {desc && <span className="desc">{desc}</span>}
+        {meta && <span className="meta">{meta}</span>}
+      </div>
       {children}
     </Paper>
   )
@@ -259,9 +261,9 @@ function ModelQueueEditor({
   }
 
   return (
-    <Paper variant="outlined" sx={{ p: 1.1, borderRadius: 0, bgcolor: 'rgba(15,23,42,0.015)', ...sx }}>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.8 }}>
-        <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#334155' }}>{title}</Typography>
+    <Paper variant="outlined" sx={{ p: 1.15, borderRadius: 0, bgcolor: 'var(--paper-soft)', borderColor: 'divider', ...sx }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.85 }}>
+        <Typography className="editorial-mono" sx={{ fontSize: 10.5, fontWeight: 800, color: 'primary.main' }}>{title}</Typography>
         <Chip size="small" label={`${filledCount} 个模型`} sx={{ height: 20, fontSize: 10.5 }} />
         <Chip size="small" label="第 1 个为主模型" color="primary" variant="outlined" sx={{ height: 20, fontSize: 10.5 }} />
         <Box sx={{ flex: 1 }} />
@@ -269,7 +271,7 @@ function ModelQueueEditor({
           添加模型
         </Button>
       </Stack>
-      <Table size="small" sx={{ '& td, & th': { px: 0.5, py: 0.4, borderBottomColor: 'rgba(15,23,42,0.06)' } }}>
+      <Table size="small" sx={{ '& td, & th': { px: 0.6, py: 0.45, borderBottomColor: 'var(--rule-soft)' }, '& th': { fontFamily: 'var(--mono)', letterSpacing: '.12em', textTransform: 'uppercase' } }}>
         <TableHead>
           <TableRow>
             <TableCell sx={{ width: 64, fontSize: 11.5, color: 'text.secondary' }}>顺序</TableCell>
@@ -303,12 +305,13 @@ function ModelQueueEditor({
               onDragEnd={() => setDraggingIdx(null)}
               sx={{
                 opacity: draggingIdx === idx ? 0.55 : 1,
-                bgcolor: idx === 0 ? 'rgba(255,36,66,0.035)' : 'transparent',
+                bgcolor: idx === 0 ? 'var(--accent-soft)' : 'background.paper',
+                outline: draggingIdx === idx ? '1px solid var(--accent)' : 'none',
               }}
             >
               <TableCell>
                 <Stack direction="row" spacing={0.5} alignItems="center">
-                  <Box sx={{ cursor: 'grab', color: 'text.secondary', fontSize: 14, lineHeight: 1 }}>☰</Box>
+                  <Box sx={{ cursor: 'grab', color: 'text.secondary', fontSize: 14, lineHeight: 1 }}>↕</Box>
                   <Chip
                     size="small"
                     label={idx === 0 ? '主' : `备${idx}`}
@@ -695,15 +698,15 @@ export default function SettingsPage() {
   const wideSx = { gridColumn: '1 / -1' }
 
   return (
-    <Box sx={{ p: { xs: 1.25, md: 2.2 }, maxWidth: 1180, mx: 'auto' }}>
-      <Stack spacing={0.25} sx={{ mb: 1.8 }}>
-        <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
-          设置
-        </Typography>
-        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
-          管理个人模型配置{isAdmin ? '和系统管理' : ''}
-        </Typography>
-      </Stack>
+    <Box className="editorial-page studio-page studio-page--wide">
+      <div className="studio-page-head">
+        <span className="num">09</span>
+        <div>
+          <div className="title">设置</div>
+          <div className="desc">工作室配置中心：模型队列、图片公网能力、账号安全、MCP 接入和管理员控制。</div>
+        </div>
+        <div className="meta">{isAdmin ? 'admin config' : 'personal config'}</div>
+      </div>
 
       {!s && (
         <Box sx={{ display: 'grid', placeItems: 'center', py: 10 }}>
@@ -713,11 +716,22 @@ export default function SettingsPage() {
 
       {msg && <Alert severity={msg.kind} sx={{ mb: 2, borderRadius: 0 }}>{msg.text}</Alert>}
 
+      {s && (
+        <div className="editorial-audit-strip" style={{ marginBottom: 16 }}>
+          <div><b>{useOwnKey ? 'personal' : 'global'}</b><span>active credential</span></div>
+          <div><b>{s.chat_model || '-'}</b><span>chat primary</span></div>
+          <div><b>{s.image_model || '-'}</b><span>image primary</span></div>
+          <div><b>{s.public_base_url ? 'public' : 'local'}</b><span>static image mode</span></div>
+        </div>
+      )}
+
       {/* Personal settings */}
       {s && (
         <Section
+          num="A"
           title="我的模型配置"
           desc="开启后使用自己的 API Key 调用模型，关闭则使用管理员提供的全局配置。"
+          meta={useOwnKey ? 'enabled' : 'fallback'}
         >
           <FormControlLabel
             control={<Switch checked={useOwnKey} onChange={e => setUseOwnKey(e.target.checked)} />}
@@ -791,8 +805,8 @@ export default function SettingsPage() {
       )}
 
       {s && (
-        <Section title="账号安全" desc="修改当前登录账号的密码。">
-          <Stack spacing={2}>
+        <Section num="B" title="账号安全" desc="修改当前登录账号的密码。" meta={user?.username || ''}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr auto' }, gap: 1.2, alignItems: 'start' }}>
             <TextField
               label="当前密码"
               fullWidth
@@ -815,7 +829,7 @@ export default function SettingsPage() {
               type={showPasswords ? 'text' : 'password'}
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
-              helperText="至少 4 位，修改后当前登录不会被强制退出。"
+              helperText="至少 4 位"
             />
             <TextField
               label="确认新密码"
@@ -824,10 +838,10 @@ export default function SettingsPage() {
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
             />
-            <Button variant="outlined" onClick={savePassword} disabled={busy} sx={{ alignSelf: 'flex-start' }}>
+            <Button variant="outlined" onClick={savePassword} disabled={busy} sx={{ alignSelf: 'start', minWidth: 104 }}>
               修改密码
             </Button>
-          </Stack>
+          </Box>
         </Section>
       )}
 
@@ -835,8 +849,10 @@ export default function SettingsPage() {
       {isAdmin && s && (
         <>
           <Section
+            num="C"
             title="全局 API 配置"
             desc="所有未配置个人 Key 的用户将使用此配置。"
+            meta="admin only"
           >
             <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ gap: 0.5, mb: 2.5 }}>
               <Chip
@@ -1111,7 +1127,7 @@ export default function SettingsPage() {
             </Box>
           </Section>
 
-          <Section title="系统管理" desc="注册控制和用户角色管理。">
+          <Section num="D" title="系统管理" desc="注册控制和用户角色管理。" meta={`${users.length} users`}>
             <FormControlLabel
               control={<Switch checked={regOpen} onChange={toggleReg} />}
               label={<Typography sx={{ fontSize: 13.5 }}>开放注册</Typography>}
@@ -1166,8 +1182,10 @@ export default function SettingsPage() {
       )}
 
       <Section
+        num="E"
         title="MCP 接入"
         desc="本项目同时提供 HTTP 桥和 stdio server 两种 MCP 接入方式。"
+        meta={`${mcpTools.length} tools`}
       >
         <Stack spacing={0.6} sx={{ mb: 2 }}>
           <Typography sx={{ fontSize: 12.5, color: 'text.primary' }}>

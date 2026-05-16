@@ -84,10 +84,11 @@ export default function TemplatesPage() {
   }
 
   return (
-    <Box className="editorial-page" sx={{ p: { xs: 2, md: 3 }, maxWidth: 1180, mx: 'auto' }}>
-      <Stack direction="row" alignItems="flex-start" sx={{ mb: 3.5 }}>
+    <Box className="editorial-page studio-page">
+      <Stack direction="row" alignItems="flex-start" sx={{ mb: 2.5, borderBottom: '1px solid', borderColor: 'divider', pb: 1.5 }}>
+        <Typography className="editorial-mono" sx={{ fontSize: 10, fontWeight: 800, color: 'primary.main', transform: 'translateY(5px)', mr: 1.5 }}>07</Typography>
         <Stack spacing={0.3}>
-          <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 30, fontWeight: 800, letterSpacing: -0.8 }}>
+          <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 32, fontWeight: 800, letterSpacing: -0.8, lineHeight: 1 }}>
             模板库
           </Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>

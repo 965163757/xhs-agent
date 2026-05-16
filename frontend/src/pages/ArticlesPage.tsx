@@ -111,15 +111,16 @@ export default function ArticlesPage() {
   }, [filtered, isAdmin])
 
   return (
-    <Box className="editorial-page" sx={{ p: { xs: 2, md: 3 }, maxWidth: { xs: '100%', lg: 1180, xl: 1280 }, mx: 'auto' }}>
+    <Box className="editorial-page studio-page">
       {/* Header */}
-      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3.5, flexWrap: 'wrap', gap: 1 }}>
+      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2.5, flexWrap: 'wrap', gap: 1, borderBottom: '1px solid', borderColor: 'divider', pb: 1.5 }}>
+        <Typography className="editorial-mono" sx={{ fontSize: 10, fontWeight: 800, color: 'primary.main', transform: 'translateY(-8px)' }}>06</Typography>
         <Stack spacing={0.2}>
-          <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 30, fontWeight: 800, letterSpacing: -0.8 }}>
+          <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 32, fontWeight: 800, letterSpacing: -0.8, lineHeight: 1 }}>
             {isAdmin ? '全部笔记' : '我的笔记'}
           </Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
-            {items.length} 篇笔记{isAdmin ? ' · 管理员视图' : ''}
+            稿件库 · {items.length} 篇笔记{isAdmin ? ' · 管理员视图' : ''}
           </Typography>
         </Stack>
         {isAdmin && (

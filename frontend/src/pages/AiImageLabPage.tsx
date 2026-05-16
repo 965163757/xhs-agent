@@ -625,10 +625,11 @@ export default function AiImageLabPage() {
   } : undefined
 
   return (
-    <Box className="editorial-page" sx={{ p: { xs: 2, md: 3 }, maxWidth: 1680, mx: 'auto' }}>
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} sx={{ mb: 2 }}>
+    <Box className="editorial-page studio-page studio-page--wide">
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} sx={{ mb: 2, borderBottom: '1px solid', borderColor: 'divider', pb: 1.5 }}>
+        <Typography className="editorial-mono" sx={{ fontSize: 10, fontWeight: 800, color: 'primary.main', transform: { md: 'translateY(-13px)' } }}>10</Typography>
         <Box flex={1}>
-          <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 30, fontWeight: 800, letterSpacing: -0.8 }}>PS式图片拆层编辑 Demo</Typography>
+          <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 32, fontWeight: 800, letterSpacing: -0.8, lineHeight: 1 }}>PS式图片拆层编辑 Demo</Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary', mt: 0.5 }}>
             核心走本地像素拆层：扁平图 → 清理背景 + 透明 PNG 图层 → 拖拽/缩放/删除/调层级 → 合成导出；AI 只作为整体生成和局部重绘的增强能力。
           </Typography>

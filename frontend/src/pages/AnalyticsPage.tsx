@@ -155,15 +155,15 @@ export default function AnalyticsPage() {
   const monthStr = `${today.year}-${String(today.month).padStart(2, '0')}`
 
   return (
-    <Box sx={{ p: { xs: 2, md: 4 }, maxWidth: 1100, mx: 'auto' }}>
-      <Stack spacing={0.3} sx={{ mb: 3.5 }}>
-        <Typography sx={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.5 }}>
-          数据概览
-        </Typography>
-        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
-          创作数据一目了然
-        </Typography>
-      </Stack>
+    <Box className="editorial-page studio-page">
+      <div className="studio-page-head">
+        <span className="num">05</span>
+        <div>
+          <div className="title">数据概览</div>
+          <div className="desc">编辑部数据看板：稿件状态、平均评分、标签分布和发布日历。</div>
+        </div>
+        <div className="meta">{monthStr}</div>
+      </div>
 
       {/* Stats cards */}
       {stats && (

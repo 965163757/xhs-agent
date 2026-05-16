@@ -152,10 +152,11 @@ export default function TasksPage() {
   useEffect(() => { load() }, [])
 
   return (
-    <Box className="editorial-page" sx={{ p: { xs: 2, md: 3 }, maxWidth: 1180, mx: 'auto' }}>
-      <Stack direction="row" alignItems="center" sx={{ mb: 3 }}>
+    <Box className="editorial-page studio-page">
+      <Stack direction="row" alignItems="center" sx={{ mb: 2.5, borderBottom: '1px solid', borderColor: 'divider', pb: 1.5 }}>
+        <Typography className="editorial-mono" sx={{ fontSize: 10, fontWeight: 800, color: 'primary.main', transform: 'translateY(-7px)', mr: 1.5 }}>08</Typography>
         <Box sx={{ flex: 1 }}>
-          <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 30, fontWeight: 800, letterSpacing: -0.8 }}>任务中心</Typography>
+          <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 32, fontWeight: 800, letterSpacing: -0.8, lineHeight: 1 }}>任务中心</Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Agent 执行 Trace、工具耗时、失败原因和任务恢复状态</Typography>
         </Box>
         <Button startIcon={<RefreshIcon />} variant="outlined" onClick={load}>刷新</Button>

@@ -365,16 +365,23 @@ export default function DiagnosePage() {
   }
 
   return (
-    <Box className="editorial-page" sx={{ maxWidth: 1180, mx: 'auto', p: { xs: 2, md: 3 } }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 3 }}>
-        <IconButton onClick={() => nav(`/articles/${id}`)}>
-          <ArrowBackIcon />
+    <Box className="editorial-page studio-page studio-page--wide">
+      <div className="studio-page-head">
+        <span className="num">04</span>
+        <div>
+          <div className="title">发布前诊断</div>
+          <div className="desc">把诊断页做成审稿会：评分雷达、问题优先级、专家会议纪要和可一键写回的优化方案同屏可见。</div>
+        </div>
+        <div className="meta">article #{id}</div>
+      </div>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+        <IconButton onClick={() => nav(`/articles/${id}`)} size="small">
+          <ArrowBackIcon sx={{ fontSize: 18 }} />
         </IconButton>
-        <Typography sx={{ fontFamily: 'var(--serif)', fontSize: 28, fontWeight: 800 }}>笔记诊断</Typography>
         {report && (
           <Chip
             label={`${report.grade}级 · ${report.overall_score}分`}
-            sx={{ ml: 2, fontWeight: 700, bgcolor: GRADE_COLORS[report.grade] + '20', color: GRADE_COLORS[report.grade] }}
+            sx={{ fontWeight: 700, bgcolor: GRADE_COLORS[report.grade] + '20', color: GRADE_COLORS[report.grade] }}
           />
         )}
         {activeTaskId && (
@@ -382,9 +389,12 @@ export default function DiagnosePage() {
             size="small"
             color="info"
             label={`后台任务 ${activeTaskId}`}
-            sx={{ fontFamily: 'monospace' }}
+            sx={{ fontFamily: 'var(--mono)' }}
           />
         )}
+        <Box sx={{ flex: 1 }} />
+        <Button variant="outlined" size="small" onClick={() => nav(`/articles/${id}`)}>返回笔记</Button>
+        <Button variant="contained" size="small" onClick={startDiagnosis} disabled={loading}>重新诊断</Button>
       </Stack>
 
       {historyLoaded && history.length > 0 && (
@@ -448,6 +458,15 @@ export default function DiagnosePage() {
         </Card>
       )}
 
+      {report && (
+        <div className="editorial-audit-strip" style={{ marginBottom: 16 }}>
+          <div><b>{report.overall_score || 0}</b><span>overall score</span></div>
+          <div><b>{report.grade || '-'}</b><span>diagnosis grade</span></div>
+          <div><b>{report.issues?.length || 0}</b><span>issues found</span></div>
+          <div><b>{report.elapsed_ms ? `${(report.elapsed_ms / 1000).toFixed(1)}s` : '-'}</b><span>agent elapsed</span></div>
+        </div>
+      )}
+
       {/* Progress Stepper */}
       {loading && (
         <Card sx={{ mb: 3 }}>
@@ -474,9 +493,17 @@ export default function DiagnosePage() {
 
       {/* Report */}
       {report && (
-        <Stack spacing={3}>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 0.95fr) minmax(0, 1.05fr)' },
+            gap: 2,
+            alignItems: 'start',
+            '& > .span-all': { gridColumn: '1 / -1' },
+          }}
+        >
           {/* Score + Radar */}
-          <Grid container spacing={3}>
+          <Grid container spacing={2} className="span-all">
             <Grid item xs={12} md={5}>
               <Card sx={{ height: '100%' }}>
                 <CardContent sx={{ textAlign: 'center' }}>
@@ -519,7 +546,9 @@ export default function DiagnosePage() {
           {/* Issues */}
           <Card>
             <CardContent>
-              <Typography fontWeight={700} sx={{ mb: 1.5 }}>问题诊断</Typography>
+              <div className="editorial-section-label">
+                <span className="num">A</span><span className="title">问题诊断</span><span className="desc">按发布风险排序</span>
+              </div>
               <Stack spacing={1}>
                 {report.issues.map((issue, i) => (
                   <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
@@ -539,7 +568,9 @@ export default function DiagnosePage() {
           {/* Suggestions */}
           <Card>
             <CardContent>
-              <Typography fontWeight={700} sx={{ mb: 1.5 }}>优化建议</Typography>
+              <div className="editorial-section-label">
+                <span className="num">B</span><span className="title">优化建议</span><span className="desc">可执行动作</span>
+              </div>
               <Stack spacing={1.5}>
                 {report.suggestions.map((s, i) => (
                   <Paper key={i} variant="outlined" sx={{ p: 1.5 }}>
@@ -565,7 +596,7 @@ export default function DiagnosePage() {
             <CardContent>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ mb: 1.5 }}>
                 <Box flex={1}>
-                  <Typography fontWeight={700}>优化方案</Typography>
+                  <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 18, fontWeight: 700 }}>优化方案</Typography>
                   <Typography fontSize={12} color="text.secondary">
                     可一键写回标题、正文和标签；应用前会自动保存一个文章版本，方便回滚。
                   </Typography>
@@ -643,7 +674,9 @@ export default function DiagnosePage() {
           {report.simulated_comments && report.simulated_comments.length > 0 && (
             <Card>
               <CardContent>
-                <Typography fontWeight={700} sx={{ mb: 1.5 }}>模拟评论区</Typography>
+                <div className="editorial-section-label">
+                  <span className="num">C</span><span className="title">模拟评论区</span><span className="desc">发布后反馈预演</span>
+                </div>
                 {report.simulated_comments.map((c, i) => (
                   <CommentCard key={i} comment={c} />
                 ))}
@@ -655,7 +688,9 @@ export default function DiagnosePage() {
           {report.cover_direction && report.cover_direction.layout && (
             <Card>
               <CardContent>
-                <Typography fontWeight={700} sx={{ mb: 1.5 }}>封面设计方向</Typography>
+                <div className="editorial-section-label">
+                  <span className="num">D</span><span className="title">封面设计方向</span><span className="desc">视觉首图建议</span>
+                </div>
                 <Grid container spacing={2}>
                   <Grid item xs={6} md={3}>
                     <Typography fontSize={11} color="text.secondary">构图</Typography>
@@ -691,28 +726,23 @@ export default function DiagnosePage() {
               <Collapse in={expandAgents}>
                 <Stack spacing={2} sx={{ mt: 2 }}>
                   {report.agent_opinions.map((op, i) => (
-                    <Paper key={i} variant="outlined" sx={{ p: 2 }}>
-                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                        <Typography fontWeight={600} fontSize={14}>{op.agent_name || op.dimension}</Typography>
-                        <Chip label={`${op.score}分`} size="small" color={op.score >= 75 ? 'success' : op.score >= 60 ? 'warning' : 'error'} />
-                      </Stack>
-                      {op.issues && op.issues.length > 0 && (
-                        <Box sx={{ mb: 1 }}>
-                          <Typography fontSize={12} color="text.secondary" fontWeight={600}>问题：</Typography>
-                          {op.issues.map((issue, j) => (
-                            <Typography key={j} fontSize={12} sx={{ pl: 1 }}>· {issue}</Typography>
-                          ))}
-                        </Box>
-                      )}
-                      {op.suggestions && op.suggestions.length > 0 && (
-                        <Box>
-                          <Typography fontSize={12} color="text.secondary" fontWeight={600}>建议：</Typography>
-                          {op.suggestions.map((sug, j) => (
-                            <Typography key={j} fontSize={12} sx={{ pl: 1 }}>· {sug}</Typography>
-                          ))}
-                        </Box>
-                      )}
-                    </Paper>
+                    <div className="editorial-meeting-row" key={i}>
+                      <div className="speaker">{String(op.agent_name || op.dimension || 'A').slice(0, 1).toUpperCase()}</div>
+                      <div>
+                        <div className="role">{op.agent_name || op.dimension}</div>
+                        {op.issues && op.issues.length > 0 && (
+                          <Typography fontSize={12} sx={{ mb: 0.6 }}>
+                            问题：{op.issues.slice(0, 2).join('；')}
+                          </Typography>
+                        )}
+                        {op.suggestions && op.suggestions.length > 0 && (
+                          <Typography fontSize={12} color="text.secondary">
+                            建议：{op.suggestions.slice(0, 2).join('；')}
+                          </Typography>
+                        )}
+                      </div>
+                      <div className="score">{op.score} / 100</div>
+                    </div>
                   ))}
                 </Stack>
               </Collapse>
@@ -733,8 +763,8 @@ export default function DiagnosePage() {
               <Collapse in={expandDebate}>
                 <Stack spacing={2} sx={{ mt: 2 }}>
                   {report.debate_results.map((d, i) => (
-                    <Paper key={i} variant="outlined" sx={{ p: 2 }}>
-                      <Typography fontWeight={600} fontSize={13} sx={{ mb: 1 }}>{d.agent}</Typography>
+                    <Paper key={i} variant="outlined" sx={{ p: 1.4, bgcolor: 'var(--paper-soft)' }}>
+                      <Typography className="editorial-mono" fontWeight={700} fontSize={10.5} sx={{ mb: 1, color: 'primary.main' }}>{d.agent}</Typography>
                       {d.disagreements && d.disagreements.length > 0 && (
                         <Box sx={{ mb: 0.5 }}>
                           <Typography fontSize={11} color="error.main" fontWeight={600}>反驳：</Typography>
@@ -759,13 +789,13 @@ export default function DiagnosePage() {
           </Card>
 
           {/* Actions */}
-          <Stack direction="row" spacing={2} justifyContent="center" sx={{ pb: 4 }}>
+          <Stack className="span-all" direction="row" spacing={2} justifyContent="center" sx={{ pb: 4 }}>
             <Button variant="outlined" onClick={() => nav(`/articles/${id}`)}>返回笔记</Button>
             <Button variant="contained" onClick={startDiagnosis}>
               重新诊断
             </Button>
           </Stack>
-        </Stack>
+        </Box>
       )}
     </Box>
   )
