@@ -238,6 +238,66 @@ function handleStreamAuth(res: Response, url: string) {
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
 }
 
+function parseSsePayloads(buffer: string): { payloads: string[]; rest: string } {
+  const parts = buffer.split(/\r?\n\r?\n/)
+  const rest = parts.pop() || ''
+  const payloads = parts
+    .map(part => {
+      const lines = part.split(/\r?\n/)
+      const dataLines: string[] = []
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).replace(/^ /, ''))
+        }
+      }
+      if (dataLines.length > 0) return dataLines.join('\n').trim()
+      const trimmed = part.trim()
+      return trimmed.startsWith('data:') ? trimmed.slice(5).trim() : ''
+    })
+    .filter(Boolean)
+  return { payloads, rest }
+}
+
+function parseStreamEventPayload(payload: string): StreamEvent | DiagnoseEvent {
+  try {
+    return JSON.parse(payload)
+  } catch (firstError) {
+    // Some OpenAI-compatible gateways accidentally inject literal newlines into
+    // JSON string values inside SSE `data:` blocks. Try a conservative repair so
+    // decisive events such as tool_result are not dropped by the UI.
+    let inString = false
+    let escaped = false
+    let repaired = ''
+    for (const ch of payload) {
+      if (escaped) {
+        repaired += ch
+        escaped = false
+        continue
+      }
+      if (ch === '\\') {
+        repaired += ch
+        escaped = true
+        continue
+      }
+      if (ch === '"') {
+        inString = !inString
+        repaired += ch
+        continue
+      }
+      if (inString && (ch === '\n' || ch === '\r')) {
+        repaired += ch === '\n' ? '\\n' : '\\r'
+      } else {
+        repaired += ch
+      }
+    }
+    try {
+      return JSON.parse(repaired)
+    } catch {
+      throw firstError
+    }
+  }
+}
+
 export async function diagnoseStream(
   payload: { article_id?: number; title?: string; content?: string; tags?: string[]; image_count?: number },
   onEvent: (ev: DiagnoseEvent) => void,
@@ -259,18 +319,18 @@ export async function diagnoseStream(
     const { value, done } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() || ''
-    for (const part of parts) {
-      const line = part.trim()
-      if (!line.startsWith('data:')) continue
-      const payload2 = line.slice(5).trim()
+    const parsed = parseSsePayloads(buffer)
+    buffer = parsed.rest
+    for (const payload2 of parsed.payloads) {
       if (payload2 === '[DONE]') return
+      let ev: DiagnoseEvent
       try {
-        onEvent(JSON.parse(payload2))
+        ev = parseStreamEventPayload(payload2) as DiagnoseEvent
       } catch (e) {
-        console.warn('bad sse payload', payload2)
+        console.warn('bad sse payload', (e as Error)?.message || e, payload2)
+        continue
       }
+      onEvent(ev)
     }
   }
 }
@@ -864,18 +924,18 @@ export async function chatStream(
     const { value, done } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() || ''
-    for (const part of parts) {
-      const line = part.trim()
-      if (!line.startsWith('data:')) continue
-      const payload = line.slice(5).trim()
+    const parsed = parseSsePayloads(buffer)
+    buffer = parsed.rest
+    for (const payload of parsed.payloads) {
       if (payload === '[DONE]') return
+      let ev: StreamEvent
       try {
-        onEvent(JSON.parse(payload))
+        ev = parseStreamEventPayload(payload) as StreamEvent
       } catch (e) {
-        console.warn('bad sse payload', payload)
+        console.warn('bad sse payload', (e as Error)?.message || e, payload)
+        continue
       }
+      onEvent(ev)
     }
   }
 }
@@ -926,18 +986,18 @@ export async function streamTask(
     const { value, done } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() || ''
-    for (const part of parts) {
-      const line = part.trim()
-      if (!line.startsWith('data:')) continue
-      const payload = line.slice(5).trim()
+    const parsed = parseSsePayloads(buffer)
+    buffer = parsed.rest
+    for (const payload of parsed.payloads) {
       if (payload === '[DONE]') return
+      let ev: StreamEvent
       try {
-        onEvent(JSON.parse(payload))
+        ev = parseStreamEventPayload(payload) as StreamEvent
       } catch (e) {
-        console.warn('bad sse payload', payload)
+        console.warn('bad sse payload', (e as Error)?.message || e, payload)
+        continue
       }
+      onEvent(ev)
     }
   }
 }

@@ -314,13 +314,29 @@ function openArticleSoftly(
     /* ignore */
   }
   opts?.onArticleCreated?.(id, conversationId)
-  window.dispatchEvent(new CustomEvent('xhs:open-article', { detail: { id, conversationId, target } }))
+  const emitOpenEvent = () => {
+    window.dispatchEvent(new CustomEvent('xhs:open-article', { detail: { id, conversationId, target } }))
+  }
+  emitOpenEvent()
+  window.setTimeout(emitOpenEvent, 120)
   window.setTimeout(() => {
     const expected = `/articles/${id}`
     if (window.location.pathname === expected) return
     window.history.pushState(null, '', target)
     window.dispatchEvent(new PopStateEvent('popstate'))
-  }, 220)
+  }, 360)
+  window.setTimeout(() => {
+    const expected = `/articles/${id}`
+    if (window.location.pathname === expected) return
+    // Last-resort navigation: only used when React Router/event soft navigation
+    // did not take effect, so the user still lands on the generated note instead
+    // of being stranded in the chat.
+    window.location.assign(target)
+  }, 1400)
+}
+
+function isOnArticleRoute(id: number) {
+  return window.location.pathname === `/articles/${id}`
 }
 
 const MAX_CLIENT_MESSAGES = 80
@@ -504,7 +520,7 @@ async function reconcileTaskResult(
     const cid = ensure(key).conversationId
     if (cid) updateConversation(cid, { article_id: latest.id } as any).catch(() => {})
     opts.onArticleMayChange?.(latest.article || null)
-    if (!alreadyOpened && (!latest.name || articleOpeningTools.has(latest.name))) {
+    if ((!alreadyOpened || !isOnArticleRoute(latest.id)) && (!latest.name || articleOpeningTools.has(latest.name))) {
       openArticleSoftly(latest.id, cid, opts)
       return { articleId: latest.id, opened: true }
     }
@@ -676,6 +692,9 @@ export async function sendMessage(
     const reconciled = await reconcileTaskResult(key, taskIdToReconcile, opts, articleCreatedNotified)
     if (reconciled.articleId > 0) activeArticleId = reconciled.articleId
     articleCreatedNotified = reconciled.opened
+    if (activeArticleId && articleCreatedNotified && !isOnArticleRoute(activeArticleId)) {
+      openArticleSoftly(activeArticleId, ensure(key).conversationId, opts)
+    }
     const cur = ensure(key)
     cur.streaming = false
     cur.status = ''

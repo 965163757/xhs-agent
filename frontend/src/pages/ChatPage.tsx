@@ -172,7 +172,11 @@ export default function ChatPage() {
     if (activeConvId) qs.set('c', String(activeConvId))
     qs.set('chat', '1')
     qs.set('from', 'agent')
-    navigateWithTransition(nav, `/articles/${id}?${qs.toString()}`)
+    const target = `/articles/${id}?${qs.toString()}`
+    navigateWithTransition(nav, target)
+    window.setTimeout(() => {
+      if (window.location.pathname !== `/articles/${id}`) nav(target)
+    }, 420)
   }, [nav, convId, currentSessionKey])
 
   const removeConvo = async (id: number) => {

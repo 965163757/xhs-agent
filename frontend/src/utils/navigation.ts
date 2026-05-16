@@ -7,8 +7,13 @@ export function navigateWithTransition(
 ) {
   const startViewTransition = (document as any).startViewTransition
   if (typeof startViewTransition === 'function') {
-    startViewTransition(() => navigate(to, options))
-    return
+    try {
+      ;(document as any).startViewTransition(() => navigate(to, options))
+      return
+    } catch {
+      // Fall through to the CSS-based soft navigation when the browser exposes
+      // startViewTransition but rejects detached/unsupported invocations.
+    }
   }
   document.documentElement.classList.add('route-soft-opening')
   window.setTimeout(() => {
