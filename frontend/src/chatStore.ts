@@ -240,6 +240,20 @@ const articleOpeningTools = new Set([
   'remove_image',
 ])
 
+function articleIdFromToolResult(result: any): number {
+  const candidates = [
+    result?.article?.id,
+    result?.article_id,
+    result?.workflow?.article_id,
+    result?.workflow?.article?.id,
+  ]
+  for (const value of candidates) {
+    const id = Number(value || 0)
+    if (Number.isFinite(id) && id > 0) return id
+  }
+  return 0
+}
+
 const MAX_CLIENT_MESSAGES = 80
 const MAX_CLIENT_MESSAGE_CHARS = 12000
 const MAX_CLIENT_IMAGES_PER_MESSAGE = 8
@@ -459,12 +473,12 @@ export async function sendMessage(
           cur.status = ev.elapsed_ms ? `${toolLabel[ev.name] || ev.name}完成，用时 ${(ev.elapsed_ms / 1000).toFixed(1)}s，整合结果…` : '整合结果…'
           opts.onArticleMayChange?.(ev.result?.article || null)
           const createdByTool = articleOpeningTools.has(ev.name)
-          const createdArticleId = Number(ev.result?.article?.id || 0)
-          if (createdByTool && ev.result?.ok && createdArticleId > 0) {
+          const createdArticleId = articleIdFromToolResult(ev.result)
+          if (createdByTool && ev.result?.ok !== false && createdArticleId > 0) {
             activeArticleId = createdArticleId
             const cid = ensure(key).conversationId
             if (cid) updateConversation(cid, { article_id: createdArticleId } as any).catch(() => {})
-            if (!articleCreatedNotified && (!opts.article?.id || articleOpeningTools.has(ev.name))) {
+            if (!articleCreatedNotified) {
               articleCreatedNotified = true
               opts.onArticleCreated?.(createdArticleId, cid)
             }

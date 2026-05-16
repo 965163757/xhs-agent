@@ -186,6 +186,14 @@ function ToolCard({
   const images: string[] = collectToolImages(result?.result)
   const editBinding = bindingFromToolArgs(call?.arguments)
   const article = result?.result?.article
+  const articleId = Number(
+    article?.id ||
+    result?.result?.article_id ||
+    result?.result?.workflow?.article_id ||
+    result?.result?.workflow?.article?.id ||
+    call?.arguments?.article_id ||
+    0,
+  )
   const titles: string[] | undefined = result?.result?.titles || result?.result?.workflow?.title_candidates
   const tags: string[] | undefined = result?.result?.tags
   const outline = result?.result?.outline
@@ -490,7 +498,7 @@ function ToolCard({
         </Box>
       )}
 
-      {article && (
+      {(article || articleId > 0) && (
         <Box
           sx={{
             px: 1.4,
@@ -508,25 +516,27 @@ function ToolCard({
             }}
           >
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-              <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>笔记 #{article.id}</Typography>
-              <Chip size="small" label={article.status} sx={{ bgcolor: 'action.hover', fontSize: 11 }} />
+              <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>笔记 #{article?.id || articleId}</Typography>
+              {article?.status && <Chip size="small" label={article.status} sx={{ bgcolor: 'action.hover', fontSize: 11 }} />}
             </Stack>
             <Typography sx={{ fontWeight: 700, fontSize: 16, mb: 0.6 }}>
-              {article.title || '（无标题）'}
+              {article?.title || '笔记已生成/更新'}
             </Typography>
-            <Typography
-              sx={{
-                fontSize: 13.5,
-                color: 'text.primary',
-                whiteSpace: 'pre-wrap',
-                maxHeight: 220,
-                overflow: 'auto',
-                lineHeight: 1.7,
-              }}
-            >
-              {article.body}
-            </Typography>
-            {Array.isArray(article.tags) && article.tags.length > 0 && (
+            {article?.body && (
+              <Typography
+                sx={{
+                  fontSize: 13.5,
+                  color: 'text.primary',
+                  whiteSpace: 'pre-wrap',
+                  maxHeight: 220,
+                  overflow: 'auto',
+                  lineHeight: 1.7,
+                }}
+              >
+                {article.body}
+              </Typography>
+            )}
+            {Array.isArray(article?.tags) && article.tags.length > 0 && (
               <Stack direction="row" spacing={0.5} sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}>
                 {article.tags.map((t: string) => (
                   <Chip key={t} label={`#${String(t).replace(/^[#＃]+/, '')}`} size="small" sx={{ bgcolor: 'action.hover', fontSize: 11 }} />
@@ -539,16 +549,18 @@ function ToolCard({
                 label="打开编辑"
                 component="a"
                 clickable
-                href={`/articles/${article.id}${searchParams.get('c') ? `?c=${searchParams.get('c')}` : ''}`}
+                href={`/articles/${article?.id || articleId}${searchParams.get('c') ? `?c=${searchParams.get('c')}&chat=1&from=agent` : '?chat=1&from=agent'}`}
                 sx={{ bgcolor: 'text.primary', color: 'background.paper', '&:hover': { bgcolor: 'text.primary' } }}
               />
-              <IconButton
-                size="small"
-                onClick={() => navigator.clipboard.writeText(`${article.title}\n\n${article.body}`)}
-                title="复制正文"
-              >
-                <ContentCopyIcon sx={{ fontSize: 16 }} />
-              </IconButton>
+              {article && (
+                <IconButton
+                  size="small"
+                  onClick={() => navigator.clipboard.writeText(`${article.title}\n\n${article.body}`)}
+                  title="复制正文"
+                >
+                  <ContentCopyIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              )}
             </Stack>
           </Box>
         </Box>

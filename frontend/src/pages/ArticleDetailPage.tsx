@@ -56,6 +56,7 @@ import PhonePreview from '../components/PhonePreview'
 import TagInput from '../components/TagInput'
 import { getSession, loadFromConversation, migrateSession, reconnectTask, resetSession, sessionKeyFor } from '../chatStore'
 import { appDateTimestamp, formatBeijingDateTime } from '../utils/time'
+import { navigateWithTransition } from '../utils/navigation'
 import { useAuth } from '../AuthContext'
 
 const EDITOR_LAYOUT_KEY = 'xhs_article_editor_layout_v3'
@@ -776,6 +777,21 @@ export default function ArticleDetailPage() {
     refreshConvos()
   }, [currentSessionKey, setParams, refreshConvos])
 
+  const handleArticleCreated = useCallback((targetArticleId: number, conversationId?: number | null) => {
+    const activeConvId = conversationId || getSession(currentSessionKey).conversationId || (convId ? Number(convId) : null)
+    const qs = new URLSearchParams()
+    if (activeConvId) qs.set('c', String(activeConvId))
+    qs.set('chat', '1')
+    qs.set('from', 'agent')
+    if (Number(targetArticleId) === Number(id)) {
+      setAgentChatPulse(true)
+      window.setTimeout(() => setAgentChatPulse(false), 900)
+      setParams(qs, { replace: true })
+      return
+    }
+    navigateWithTransition(nav, `/articles/${targetArticleId}?${qs.toString()}`)
+  }, [convId, currentSessionKey, id, nav, setParams])
+
   const isDirty = art && savedArt
     ? art.title !== savedArt.title || art.body !== savedArt.body || JSON.stringify(art.tags) !== JSON.stringify(savedArt.tags)
     : false
@@ -1059,6 +1075,7 @@ export default function ArticleDetailPage() {
           sessionKey={currentSessionKey}
           onArticleMayChange={handleArticleMayChange}
           onConversationCreated={handleConversationCreated}
+          onArticleCreated={handleArticleCreated}
           showHeader={false}
           quickActions={[
             { label: '整体改写', prompt: '帮我整体改写这篇笔记，风格更有网感、更口语化' },
@@ -1888,6 +1905,7 @@ export default function ArticleDetailPage() {
             sessionKey={currentSessionKey}
             onArticleMayChange={handleArticleMayChange}
             onConversationCreated={handleConversationCreated}
+            onArticleCreated={handleArticleCreated}
             showHeader={false}
             quickActions={[
               { label: '整体改写', prompt: '帮我整体改写这篇笔记，风格更有网感、更口语化' },
