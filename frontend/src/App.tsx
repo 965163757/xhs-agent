@@ -144,7 +144,7 @@ export default function App() {
   }, [navCollapsed])
 
   useEffect(() => {
-    if (/^\/articles\/\d+(?:\/|$)/.test(location.pathname)) {
+    if (location.pathname === '/articles' || location.pathname.startsWith('/articles/')) {
       setNavCollapsed(true)
     }
   }, [location.pathname])
