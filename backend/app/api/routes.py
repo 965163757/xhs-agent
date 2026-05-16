@@ -195,6 +195,13 @@ def _sanitize_chat_tool_events(events: Any) -> List[Dict[str, Any]]:
             item["elapsed_ms"] = ev.get("elapsed_ms")
         if ev.get("ok") is not None:
             item["ok"] = ev.get("ok")
+        if ev.get("step"):
+            item["step"] = _truncate_chat_text(ev.get("step"), 120)
+        if ev.get("message"):
+            item["message"] = _truncate_chat_text(ev.get("message"), 500)
+        if ev.get("data") is not None:
+            data_text = json.dumps(ev.get("data"), ensure_ascii=False, default=str)
+            item["data"] = ev.get("data") if len(data_text) <= 1500 else {"summary": _truncate_chat_text(data_text, 1500)}
         if ev.get("arguments") is not None:
             args = ev.get("arguments")
             arg_text = json.dumps(args, ensure_ascii=False, default=str)

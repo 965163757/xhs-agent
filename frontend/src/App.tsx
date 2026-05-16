@@ -1,9 +1,11 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { AppBar, Box, CircularProgress, IconButton, Stack, Toolbar, Tooltip, Typography } from '@mui/material'
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined'
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined'
 import LogoutIcon from '@mui/icons-material/Logout'
+import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft'
+import KeyboardDoubleArrowRightIcon from '@mui/icons-material/KeyboardDoubleArrowRight'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined'
 import ViewModuleOutlinedIcon from '@mui/icons-material/ViewModuleOutlined'
@@ -62,7 +64,7 @@ function routeLabel(pathname: string) {
   return navItems.find(item => activeFor(pathname, item.to))?.role.toLowerCase() || 'studio'
 }
 
-function StudioNav({ compact = false }: { compact?: boolean }) {
+function StudioNav({ compact = false, collapsed = false }: { compact?: boolean; collapsed?: boolean }) {
   const location = useLocation()
   return (
     <Stack
@@ -87,9 +89,10 @@ function StudioNav({ compact = false }: { compact?: boolean }) {
                   sx={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 1.1,
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    gap: collapsed ? 0 : 1.1,
                     minWidth: compact ? 'max-content' : 0,
-                    px: compact ? 1.2 : 1.7,
+                    px: compact ? 1.2 : collapsed ? 0.9 : 1.7,
                     py: compact ? 0.8 : 0.9,
                     borderLeft: compact ? 0 : '2px solid',
                     borderBottom: compact ? '2px solid' : 0,
@@ -102,17 +105,21 @@ function StudioNav({ compact = false }: { compact?: boolean }) {
                   }}
                 >
                   <Icon sx={{ fontSize: 15 }} />
-                  <Box sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography noWrap sx={{ fontSize: 13 }}>
-                      {item.label}
-                    </Typography>
-                    {!compact && (
-                      <Typography className="editorial-mono" noWrap sx={{ fontSize: 9, color: active ? 'primary.main' : 'text.disabled', lineHeight: 1.2 }}>
-                        {item.role}
-                      </Typography>
-                    )}
-                  </Box>
-                  {!compact && active && <Box className="editorial-dot" sx={{ width: 5, height: 5 }} />}
+                  {!collapsed && (
+                    <>
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Typography noWrap sx={{ fontSize: 13 }}>
+                          {item.label}
+                        </Typography>
+                        {!compact && (
+                          <Typography className="editorial-mono" noWrap sx={{ fontSize: 9, color: active ? 'primary.main' : 'text.disabled', lineHeight: 1.2 }}>
+                            {item.role}
+                          </Typography>
+                        )}
+                      </Box>
+                      {!compact && active && <Box className="editorial-dot" sx={{ width: 5, height: 5 }} />}
+                    </>
+                  )}
                 </Box>
               )
             }}
@@ -129,6 +136,11 @@ export default function App() {
   const { mode, toggle } = useThemeMode()
   const { user, logout } = useAuth()
   const pageId = routeLabel(location.pathname)
+  const [navCollapsed, setNavCollapsed] = useState(() => localStorage.getItem('xhs_global_nav_collapsed') === 'true')
+
+  useEffect(() => {
+    localStorage.setItem('xhs_global_nav_collapsed', navCollapsed ? 'true' : 'false')
+  }, [navCollapsed])
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default', overflow: 'hidden' }}>
@@ -229,31 +241,45 @@ export default function App() {
                 <Box
                   sx={{
                     display: { xs: 'none', md: 'flex' },
-                    width: 220,
+                    width: navCollapsed ? 58 : 220,
                     flexShrink: 0,
                     borderRight: '1px solid',
                     borderColor: 'divider',
                     bgcolor: 'background.paper',
                     flexDirection: 'column',
+                    transition: 'width .22s cubic-bezier(0.16,1,0.3,1)',
                   }}
                 >
-                  <Box sx={{ px: 2, py: 1.8, borderBottom: '1px solid', borderColor: 'divider' }}>
-                    <Typography className="editorial-mono" sx={{ fontSize: 9.5, color: 'text.disabled', mb: 0.8 }}>
-                      navigation
-                    </Typography>
-                    <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 18 }}>
-                      编辑工作流
-                    </Typography>
+                  <Box sx={{ px: navCollapsed ? 0.75 : 2, py: 1.2, borderBottom: '1px solid', borderColor: 'divider' }}>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      {!navCollapsed && (
+                        <Box sx={{ minWidth: 0, flex: 1 }}>
+                          <Typography className="editorial-mono" sx={{ fontSize: 9.5, color: 'text.disabled', mb: 0.8 }}>
+                            navigation
+                          </Typography>
+                          <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 18 }}>
+                            编辑工作流
+                          </Typography>
+                        </Box>
+                      )}
+                      <Tooltip title={navCollapsed ? '展开左侧栏' : '收起左侧栏'}>
+                        <IconButton size="small" onClick={() => setNavCollapsed(v => !v)} sx={{ mx: navCollapsed ? 'auto' : 0 }}>
+                          {navCollapsed ? <KeyboardDoubleArrowRightIcon sx={{ fontSize: 18 }} /> : <KeyboardDoubleArrowLeftIcon sx={{ fontSize: 18 }} />}
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
                   </Box>
-                  <StudioNav />
-                  <Box sx={{ mt: 'auto', px: 2, py: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
-                    <Typography className="editorial-mono" sx={{ fontSize: 9, color: 'text.disabled' }}>
-                      editor-in-chief
-                    </Typography>
-                    <Typography noWrap sx={{ fontSize: 12.5, fontWeight: 700 }}>
-                      {user?.username || 'editor'}
-                    </Typography>
-                  </Box>
+                  <StudioNav collapsed={navCollapsed} />
+                  {!navCollapsed && (
+                    <Box sx={{ mt: 'auto', px: 2, py: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+                      <Typography className="editorial-mono" sx={{ fontSize: 9, color: 'text.disabled' }}>
+                        editor-in-chief
+                      </Typography>
+                      <Typography noWrap sx={{ fontSize: 12.5, fontWeight: 700 }}>
+                        {user?.username || 'editor'}
+                      </Typography>
+                    </Box>
+                  )}
                 </Box>
 
                 <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>

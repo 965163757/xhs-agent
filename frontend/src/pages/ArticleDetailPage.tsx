@@ -29,6 +29,8 @@ import MenuIcon from '@mui/icons-material/Menu'
 import AddIcon from '@mui/icons-material/Add'
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline'
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline'
+import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrowLeft'
+import KeyboardDoubleArrowRightIcon from '@mui/icons-material/KeyboardDoubleArrowRight'
 import {
   getArticle,
   listArticles,
@@ -57,6 +59,7 @@ import { appDateTimestamp, formatBeijingDateTime } from '../utils/time'
 import { useAuth } from '../AuthContext'
 
 const EDITOR_LAYOUT_KEY = 'xhs_article_editor_layout_v3'
+const EDITOR_AGENT_PANEL_KEY = 'xhs_article_agent_panel_open'
 const DEFAULT_EDITOR_LAYOUT = { left: 300, right: 318 }
 
 function clamp(n: number, min: number, max: number) {
@@ -489,6 +492,7 @@ export default function ArticleDetailPage() {
   const articleRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const articleLoadSeq = useRef(0)
   const [sidebar, setSidebar] = useState(false)
+  const [agentPanelOpen, setAgentPanelOpen] = useState(() => localStorage.getItem(EDITOR_AGENT_PANEL_KEY) !== 'false')
   const [mobileChat, setMobileChat] = useState(false)
   const [agentChatPulse, setAgentChatPulse] = useState(false)
   const [convos, setConvos] = useState<Conversation[]>([])
@@ -541,6 +545,10 @@ export default function ArticleDetailPage() {
   useEffect(() => {
     localStorage.setItem(EDITOR_LAYOUT_KEY, JSON.stringify(layout))
   }, [layout])
+
+  useEffect(() => {
+    localStorage.setItem(EDITOR_AGENT_PANEL_KEY, agentPanelOpen ? 'true' : 'false')
+  }, [agentPanelOpen])
 
   useEffect(() => {
     const handleResize = () => {
@@ -980,14 +988,40 @@ export default function ArticleDetailPage() {
       <Box
         className={agentChatPulse ? 'agent-chat-open-pulse' : undefined}
         sx={{
-          width: { lg: layout.left },
+          width: { lg: agentPanelOpen ? layout.left : 44 },
           flexShrink: 0,
           display: { xs: 'none', lg: 'flex' },
           flexDirection: 'column',
           minHeight: 0,
           bgcolor: 'background.paper',
+          borderRight: agentPanelOpen ? 0 : '1px solid',
+          borderColor: 'divider',
+          transition: 'width .22s cubic-bezier(0.16,1,0.3,1)',
         }}
       >
+        {!agentPanelOpen ? (
+          <Stack alignItems="center" spacing={1} sx={{ py: 1, height: '100%' }}>
+            <Tooltip title="展开 Agent 对话栏">
+              <IconButton size="small" onClick={() => setAgentPanelOpen(true)}>
+                <KeyboardDoubleArrowRightIcon sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="历史对话">
+              <IconButton size="small" onClick={() => { refreshConvos(); setSidebar(true) }}>
+                <MenuIcon sx={{ fontSize: 17 }} />
+              </IconButton>
+            </Tooltip>
+            <Box sx={{ flex: 1 }} />
+            <Typography
+              className="editorial-mono"
+              sx={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: 10, color: 'text.disabled', letterSpacing: 1 }}
+            >
+              AGENT
+            </Typography>
+            <Box sx={{ flex: 1 }} />
+          </Stack>
+        ) : (
+          <>
         <Stack
           direction="row"
           alignItems="center"
@@ -997,6 +1031,11 @@ export default function ArticleDetailPage() {
           <Tooltip title="历史对话">
             <IconButton onClick={() => { refreshConvos(); setSidebar(true) }} size="small">
               <MenuIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="收起 Agent 对话栏">
+            <IconButton onClick={() => setAgentPanelOpen(false)} size="small">
+              <KeyboardDoubleArrowLeftIcon sx={{ fontSize: 18 }} />
             </IconButton>
           </Tooltip>
           <Stack sx={{ flex: 1, minWidth: 0 }} spacing={0.2}>
@@ -1033,12 +1072,16 @@ export default function ArticleDetailPage() {
             { label: '发布前诊断', prompt: '帮我诊断一下能不能发，重点检查违禁词和 CTA' },
           ]}
         />
+          </>
+        )}
       </Box>
-      <ResizeGrip
-        minBreakpoint="lg"
-        title="拖动调整 Agent 栏宽度"
-        onMouseDown={startColumnResize('left')}
-      />
+      {agentPanelOpen && (
+        <ResizeGrip
+          minBreakpoint="lg"
+          title="拖动调整 Agent 栏宽度"
+          onMouseDown={startColumnResize('left')}
+        />
+      )}
 
       {/* middle: editor */}
       <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>

@@ -1,4 +1,4 @@
-import { Box, Chip, Collapse, Dialog, IconButton, Stack, Tooltip, Typography } from '@mui/material'
+import { Box, Chip, CircularProgress, Collapse, Dialog, IconButton, Stack, Tooltip, Typography } from '@mui/material'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import CloseIcon from '@mui/icons-material/Close'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -47,10 +47,13 @@ const toolNameZh: Record<string, string> = {
 }
 
 export type ToolEvent = {
-  type: 'tool_call' | 'tool_result'
+  type: 'tool_call' | 'tool_progress' | 'tool_result'
   name: string
   id?: string
   arguments?: any
+  step?: string
+  message?: string
+  data?: any
   result?: any
   elapsed_ms?: number
   ok?: boolean
@@ -154,11 +157,13 @@ function scoreValue(score: Record<string, any> | undefined, key: string) {
 
 function ToolCard({
   call,
+  progress = [],
   result,
   onImageClick,
   onImageEdit,
 }: {
   call?: ToolEvent
+  progress?: ToolEvent[]
   result?: ToolEvent
   onImageClick?: (url: string) => void
   onImageEdit?: (url: string, binding?: EditBinding) => void
@@ -194,6 +199,7 @@ function ToolCard({
     result?.result?.shots
 
   const argJson = JSON.stringify(call?.arguments ?? {}, null, 2)
+  const latestProgress = progress[progress.length - 1]
 
   return (
     <Box
@@ -237,8 +243,59 @@ function ToolCard({
           }}
         />
       </Stack>
+      {latestProgress?.message && (
+        <Box sx={{ px: 1.4, pb: 0.9, mt: -0.2 }}>
+          <Stack direction="row" spacing={0.8} alignItems="center">
+            {running && <CircularProgress size={10} sx={{ color: 'text.secondary' }} />}
+            <Typography sx={{ fontSize: 12, color: 'text.secondary' }} noWrap>
+              {latestProgress.message}
+            </Typography>
+          </Stack>
+        </Box>
+      )}
       <Collapse in={open}>
         <Box sx={{ px: 1.4, pb: 1.4, borderTop: '1px solid', borderColor: 'divider', pt: 1 }}>
+          {progress.length > 0 && (
+            <Box
+              sx={{
+                mb: 1,
+                p: 1,
+                borderRadius: 1,
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+              }}
+            >
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 0.75 }}>
+                执行过程
+              </Typography>
+              <Stack spacing={0.55}>
+                {progress.slice(-12).map((p, idx) => (
+                  <Stack key={`${p.id || p.name}-${p.step || 'step'}-${idx}`} direction="row" spacing={0.75} alignItems="flex-start">
+                    <Box
+                      sx={{
+                        width: 6,
+                        height: 6,
+                        mt: 0.65,
+                        flexShrink: 0,
+                        bgcolor: idx === progress.slice(-12).length - 1 ? 'primary.main' : 'divider',
+                      }}
+                    />
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography sx={{ fontSize: 12.2, color: 'text.primary', lineHeight: 1.45 }}>
+                        {p.message || p.step || '处理中'}
+                      </Typography>
+                      {p.step && (
+                        <Typography className="editorial-mono" sx={{ fontSize: 10.5, color: 'text.disabled' }}>
+                          {p.step}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
+          )}
           {errorText && (
             <Box
               sx={{
@@ -663,13 +720,23 @@ function ToolCard({
   )
 }
 
-function pairToolEvents(events: ToolEvent[]): Array<{ call?: ToolEvent; result?: ToolEvent }> {
-  const out: Array<{ call?: ToolEvent; result?: ToolEvent }> = []
+function pairToolEvents(events: ToolEvent[]): Array<{ call?: ToolEvent; progress?: ToolEvent[]; result?: ToolEvent }> {
+  const out: Array<{ call?: ToolEvent; progress?: ToolEvent[]; result?: ToolEvent }> = []
   const openCalls: Array<{ call: ToolEvent; idx: number }> = []
   for (const ev of events) {
     if (ev.type === 'tool_call') {
-      out.push({ call: ev })
+      out.push({ call: ev, progress: [] })
       openCalls.push({ call: ev, idx: out.length - 1 })
+    } else if (ev.type === 'tool_progress') {
+      const matchIdx = openCalls.findIndex(oc => (
+        ev.id && oc.call.id ? oc.call.id === ev.id : oc.call.name === ev.name
+      ))
+      if (matchIdx !== -1) {
+        const { idx } = openCalls[matchIdx]
+        out[idx] = { ...out[idx], progress: [...(out[idx].progress || []), ev] }
+      } else {
+        out.push({ progress: [ev] })
+      }
     } else if (ev.type === 'tool_result') {
       const matchIdx = openCalls.findIndex(oc => (
         ev.id && oc.call.id ? oc.call.id === ev.id : oc.call.name === ev.name
@@ -757,9 +824,10 @@ export default function MessageBubble({
           )}
 
           {pairs.map((p, i) => (
-            <ToolCard
+          <ToolCard
               key={i}
               call={p.call}
+              progress={p.progress}
               result={p.result}
               onImageClick={setPreviewImg}
               onImageEdit={openEditor}

@@ -556,7 +556,7 @@ async def _finalize_task(
                         msgs[-1]["content"] = result_text
                         tool_events = []
                         for ev in events:
-                            if ev.get("type") in ("tool_call", "tool_result"):
+                            if ev.get("type") in ("tool_call", "tool_progress", "tool_result"):
                                 tool_events.append(ev)
                         if tool_events:
                             msgs[-1]["tool_events"] = tool_events

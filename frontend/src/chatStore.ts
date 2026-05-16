@@ -222,6 +222,24 @@ const toolLabel: Record<string, string> = {
   edit_image: '编辑图片',
 }
 
+const articleOpeningTools = new Set([
+  'generate_article',
+  'create_complete_note_workflow',
+  'create_article',
+  'imitate_article_style',
+  'rewrite_article',
+  'optimize_article',
+  'update_article',
+  'apply_template',
+  'generate_article_images',
+  'arrange_article_images',
+  'edit_image',
+  'crop_image',
+  'inpaint_image',
+  'remove_object',
+  'remove_image',
+])
+
 const MAX_CLIENT_MESSAGES = 80
 const MAX_CLIENT_MESSAGE_CHARS = 12000
 const MAX_CLIENT_IMAGES_PER_MESSAGE = 8
@@ -306,6 +324,9 @@ function compactToolEventsForHistory(events: ToolEvent[] | undefined): ToolEvent
       type: ev.type,
       name: truncateText(ev.name, 120),
       id: ev.id ? truncateText(ev.id, 120) : ev.id,
+      step: ev.step ? truncateText(ev.step, 120) : ev.step,
+      message: ev.message ? truncateText(ev.message, 500) : ev.message,
+      data: ev.data,
       elapsed_ms: ev.elapsed_ms,
       ok: ev.ok,
     }
@@ -437,13 +458,13 @@ export async function sendMessage(
         } else if (ev.type === 'tool_result') {
           cur.status = ev.elapsed_ms ? `${toolLabel[ev.name] || ev.name}完成，用时 ${(ev.elapsed_ms / 1000).toFixed(1)}s，整合结果…` : '整合结果…'
           opts.onArticleMayChange?.(ev.result?.article || null)
-          const createdByTool = ['generate_article', 'create_complete_note_workflow', 'create_article', 'imitate_article_style'].includes(ev.name)
+          const createdByTool = articleOpeningTools.has(ev.name)
           const createdArticleId = Number(ev.result?.article?.id || 0)
-          if (!opts.article?.id && createdByTool && ev.result?.ok && createdArticleId > 0) {
+          if (createdByTool && ev.result?.ok && createdArticleId > 0) {
             activeArticleId = createdArticleId
             const cid = ensure(key).conversationId
             if (cid) updateConversation(cid, { article_id: createdArticleId } as any).catch(() => {})
-            if (!articleCreatedNotified) {
+            if (!articleCreatedNotified && (!opts.article?.id || articleOpeningTools.has(ev.name))) {
               articleCreatedNotified = true
               opts.onArticleCreated?.(createdArticleId, cid)
             }
@@ -463,8 +484,14 @@ export async function sendMessage(
         } else if (ev.type === 'tool_call') {
           last.tool_events.push({ type: 'tool_call', name: ev.name, arguments: ev.arguments, id: ev.id })
         } else if (ev.type === 'tool_progress') {
-          // Progress is shown in the live status bar and persisted in task trace;
-          // avoid polluting chat history with many transient step events.
+          last.tool_events.push({
+            type: 'tool_progress',
+            name: ev.name,
+            id: ev.id,
+            step: ev.step,
+            message: ev.message,
+            data: ev.data,
+          } as ToolEvent)
         } else if (ev.type === 'tool_result') {
           last.tool_events.push({
             type: 'tool_result',
@@ -545,6 +572,7 @@ export async function reconnectTask(
         const toolEvents: ToolEvent[] = []
         for (const ev of task.events) {
           if (ev.type === 'tool_call') toolEvents.push(ev as ToolEvent)
+          else if (ev.type === 'tool_progress') toolEvents.push(ev as ToolEvent)
           else if (ev.type === 'tool_result') toolEvents.push(ev as ToolEvent)
         }
         if (toolEvents.length) last.tool_events = toolEvents
@@ -578,6 +606,7 @@ export async function reconnectTask(
         const toolEvents: ToolEvent[] = []
         for (const ev of replayEvents) {
           if (ev.type === 'tool_call') toolEvents.push(ev as ToolEvent)
+          else if (ev.type === 'tool_progress') toolEvents.push(ev as ToolEvent)
           else if (ev.type === 'tool_result') toolEvents.push(ev as ToolEvent)
         }
         last.tool_events = toolEvents
@@ -616,8 +645,15 @@ export async function reconnectTask(
             last.content += ev.text
           } else if (ev.type === 'tool_call') {
             last.tool_events.push({ type: 'tool_call', name: ev.name, arguments: ev.arguments, id: ev.id })
-          } else if (ev.type === 'tool_progress') {
-            // Live-only progress; task trace has the durable details.
+        } else if (ev.type === 'tool_progress') {
+            last.tool_events.push({
+              type: 'tool_progress',
+              name: ev.name,
+              id: ev.id,
+              step: ev.step,
+              message: ev.message,
+              data: ev.data,
+            } as ToolEvent)
           } else if (ev.type === 'tool_result') {
             last.tool_events.push({
               type: 'tool_result',
