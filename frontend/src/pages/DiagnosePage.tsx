@@ -572,7 +572,10 @@ export default function DiagnosePage() {
 
               <Card className="diagnose-card diagnose-issues-card">
                 <CardContent>
-                  <div className="diagnose-card-label">问题诊断</div>
+                  <div className="diagnose-card-label">
+                    问题诊断
+                    {(report.issues || []).length > 6 ? <small>首屏展示 6 / 共 {(report.issues || []).length} 条</small> : null}
+                  </div>
                   <div className="diagnose-issue-list">
                     {(report.issues || []).length ? (
                       report.issues.slice(0, 6).map((issue, i) => (
@@ -718,10 +721,29 @@ export default function DiagnosePage() {
             <Card className="diagnose-card">
               <CardContent>
                 <div className="editorial-section-label">
-                  <span className="num">B</span><span className="title">优化建议</span><span className="desc">可执行动作</span>
+                  <span className="num">B</span><span className="title">完整问题清单</span><span className="desc">{(report.issues || []).length} issues</span>
+                </div>
+                <div className="diagnose-issue-list">
+                  {(report.issues || []).map((issue, i) => (
+                    <div className="diagnose-issue-row" key={`full-${issue.description}-${i}`}>
+                      <span className={`diagnose-priority ${issue.severity === 'high' ? 'is-alert' : issue.severity === 'medium' ? 'is-draft' : ''}`}>
+                        {priorityLabel(issue.severity, i)}
+                      </span>
+                      <span>{issue.description}</span>
+                      <em>{issue.from_agent || '综合'}</em>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="diagnose-card">
+              <CardContent>
+                <div className="editorial-section-label">
+                  <span className="num">C</span><span className="title">优化建议</span><span className="desc">{(report.suggestions || []).length} actions</span>
                 </div>
                 <Stack spacing={1}>
-                  {(report.suggestions || []).slice(0, 5).map((s, i) => (
+                  {(report.suggestions || []).map((s, i) => (
                     <Paper key={`${s.description}-${i}`} variant="outlined" className="diagnose-suggestion-row">
                       <span>P{s.priority || i + 1}</span>
                       <div>
@@ -738,13 +760,13 @@ export default function DiagnosePage() {
               <Card className="diagnose-card">
                 <CardContent>
                   <div className="editorial-section-label">
-                    <span className="num">C</span><span className="title">封面设计方向</span><span className="desc">视觉首图建议</span>
+                    <span className="num">D</span><span className="title">封面设计方向</span><span className="desc">视觉首图建议</span>
                   </div>
                   <div className="diagnose-cover-grid">
                     <div><b>构图</b><span>{report.cover_direction.layout}</span></div>
                     <div><b>配色</b><span>{report.cover_direction.color_scheme}</span></div>
                     <div><b>文字</b><span>{report.cover_direction.text_style}</span></div>
-                    <div><b>Tips</b><span>{report.cover_direction.tips?.slice(0, 3).join('；')}</span></div>
+                    <div><b>Tips</b><span>{report.cover_direction.tips?.join('；')}</span></div>
                   </div>
                 </CardContent>
               </Card>
@@ -754,11 +776,35 @@ export default function DiagnosePage() {
               <Card className="diagnose-card">
                 <CardContent>
                   <div className="editorial-section-label">
-                    <span className="num">D</span><span className="title">模拟评论区</span><span className="desc">发布后反馈预演</span>
+                    <span className="num">E</span><span className="title">模拟评论区</span><span className="desc">{report.simulated_comments.length} comments</span>
                   </div>
-                  {report.simulated_comments.slice(0, 3).map((c, i) => (
+                  {report.simulated_comments.map((c, i) => (
                     <CommentCard key={`${c.username}-${i}`} comment={c} />
                   ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {meetingOpinions.length > 0 && (
+              <Card className="diagnose-card">
+                <CardContent>
+                  <div className="editorial-section-label">
+                    <span className="num">F</span><span className="title">专家完整意见</span><span className="desc">{meetingOpinions.length} agents</span>
+                  </div>
+                  <div className="diagnose-agent-full-list">
+                    {meetingOpinions.map((op, i) => (
+                      <div className="editorial-meeting-row" key={`full-agent-${op.agent_name}-${i}`}>
+                        <div className="speaker">{String(op.agent_name || op.dimension || 'A').slice(0, 1).toUpperCase()}</div>
+                        <div>
+                          <div className="role">{op.agent_name || op.dimension}</div>
+                          {op.reasoning && <Typography fontSize={12.5} lineHeight={1.65}>{op.reasoning}</Typography>}
+                          {op.issues?.length > 0 && <Typography fontSize={12} sx={{ mt: 0.7 }}>问题：{op.issues.join('；')}</Typography>}
+                          {op.suggestions?.length > 0 && <Typography fontSize={12} color="text.secondary" sx={{ mt: 0.5 }}>建议：{op.suggestions.join('；')}</Typography>}
+                        </div>
+                        <div className="score">{scoreTen(op.score)} / 10</div>
+                      </div>
+                    ))}
+                  </div>
                 </CardContent>
               </Card>
             )}

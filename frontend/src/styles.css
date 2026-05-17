@@ -591,6 +591,14 @@ body {
   text-transform: uppercase;
 }
 
+.diagnose-card-label small {
+  color: var(--ink-mute);
+  float: right;
+  font: 500 10px var(--mono);
+  letter-spacing: .06em;
+  text-transform: none;
+}
+
 .diagnose-pipeline {
   display: flex;
   align-items: center;
@@ -1020,6 +1028,11 @@ body {
   color: var(--ink-soft);
   font-size: 12.5px;
   line-height: 1.5;
+}
+
+.diagnose-agent-full-list {
+  display: flex;
+  flex-direction: column;
 }
 
 .editorial-kv-row {

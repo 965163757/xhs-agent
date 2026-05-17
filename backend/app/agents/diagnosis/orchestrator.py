@@ -150,6 +150,54 @@ def _build_note_context(
     )
 
 
+def _ensure_simulated_comments(comments: List[Dict[str, Any]], *, title: str, category_cn: str) -> List[Dict[str, Any]]:
+    """Keep the user-simulation section useful even when an upstream model under-outputs."""
+    cleaned: List[Dict[str, Any]] = []
+    for idx, item in enumerate(comments or []):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("comment") or "").strip()
+        if not text:
+            continue
+        try:
+            likes = int(item.get("likes") or max(1, 36 - idx * 3))
+        except Exception:
+            likes = max(1, 36 - idx * 3)
+        cleaned.append(
+            {
+                "username": str(item.get("username") or f"小红薯{idx + 1}"),
+                "avatar_emoji": str(item.get("avatar_emoji") or "🍠"),
+                "comment": text,
+                "sentiment": str(item.get("sentiment") or "neutral"),
+                "likes": likes,
+                "persona": str(item.get("persona") or "路过用户"),
+            }
+        )
+
+    fallback = [
+        ("今天也想出去玩", "🍃", f"这篇{category_cn}信息挺全的，先马住，周末慢慢对着看", "positive", 42, "凑热闹型"),
+        ("认真做攻略的阿宁", "📝", "如果能加一张路线图就更好了，不然收藏后还要自己整理一遍", "neutral", 31, "经验型"),
+        ("别再广告我了", "🙃", "感觉有点像模板文案诶，真实踩坑和花费再多一点会更可信", "negative", 18, "质疑型"),
+        ("不是广告也能看", "🐾", "楼上别太敏感，这种攻略本来就是先看路线，图片和价格补上就够用了", "neutral", 22, "争论型"),
+        ("想问细节", "🙋", "姐妹这个适合第一次去的人吗？如果只安排半天有没有精简版路线", "neutral", 16, "求助型"),
+        ("收藏夹吃灰本人", "⭐", f"标题如果再直接一点我会更想点，比如“第一次看{title[:8]}怎么安排”这种", "positive", 12, "种草型"),
+    ]
+    for username, avatar, comment, sentiment, likes, persona in fallback:
+        if len(cleaned) >= 6:
+            break
+        cleaned.append(
+            {
+                "username": username,
+                "avatar_emoji": avatar,
+                "comment": comment,
+                "sentiment": sentiment,
+                "likes": likes,
+                "persona": persona,
+            }
+        )
+    return cleaned[:8]
+
+
 async def run_diagnosis(
     title: str,
     content: str,
@@ -420,6 +468,7 @@ async def run_diagnosis(
         if "simulated_comments" in op:
             simulated_comments = op["simulated_comments"]
             break
+    simulated_comments = _ensure_simulated_comments(simulated_comments, title=title, category_cn=category_cn)
 
     # 稳定雷达分数：基于 Model A + Agent 评分加权
     model_a_dims = model_a["dimensions"]
