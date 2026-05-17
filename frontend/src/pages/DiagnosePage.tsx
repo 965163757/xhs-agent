@@ -8,23 +8,12 @@ import {
   CardContent,
   Chip,
   CircularProgress,
-  Collapse,
-  Divider,
-  Grid,
   IconButton,
-  LinearProgress,
   Paper,
   Stack,
-  Step,
-  StepLabel,
-  Stepper,
-  Tooltip,
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { toast } from 'sonner'
 import {
   applyDiagnosisReport,
@@ -147,6 +136,27 @@ function fmtTime(value?: string | null) {
   return formatBeijingDateTime(value)
 }
 
+const SCORE_LABELS: Record<string, string> = {
+  content: '内容质量',
+  visual: '视觉吸引',
+  growth: '增长潜力',
+  user_reaction: '互动设计',
+  overall: '综合',
+}
+
+const SCORE_KEYS = ['content', 'visual', 'growth', 'user_reaction', 'overall']
+
+function scoreTen(value?: number) {
+  const n = Math.max(0, Math.min(100, Number(value ?? 0)))
+  return (n / 10).toFixed(1)
+}
+
+function priorityLabel(severity?: string, index = 0) {
+  if (severity === 'high') return 'P1'
+  if (severity === 'medium') return 'P2'
+  return `P${Math.min(3, index + 1)}`
+}
+
 export default function DiagnosePage() {
   const { id } = useParams<{ id: string }>()
   const nav = useNavigate()
@@ -158,8 +168,6 @@ export default function DiagnosePage() {
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [error, setError] = useState('')
   const [applying, setApplying] = useState(false)
-  const [expandDebate, setExpandDebate] = useState(false)
-  const [expandAgents, setExpandAgents] = useState(false)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const runSeqRef = useRef(0)
@@ -360,6 +368,27 @@ export default function DiagnosePage() {
     (report.issues || []).some(issue => /图片|配图|封面|首图|视觉|无图|0\s*图/.test(issue.description || ''))
   )
 
+  const meetingOpinions = report
+    ? (
+      report.agent_opinions?.length
+        ? report.agent_opinions
+        : [{
+          agent_name: '综合裁判',
+          dimension: report.category_cn || report.category || 'overall',
+          score: report.overall_score || 0,
+          issues: (report.issues || []).map(x => x.description),
+          suggestions: (report.suggestions || []).map(x => x.description),
+          reasoning: report.debate_summary || '已完成多维度诊断，建议先处理高优先级问题后再发布。',
+        }]
+    )
+    : []
+
+  const canApplyOptimized = !!report && Number(report.id || report.diagnosis_id) > 0 && (
+    !!report.optimized_title ||
+    !!report.optimized_content ||
+    (report.optimized_tags || []).length > 0
+  )
+
   if (error) {
     return (
       <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -370,446 +399,324 @@ export default function DiagnosePage() {
   }
 
   return (
-    <Box className="editorial-page studio-page studio-page--wide">
-      <div className="studio-page-head">
-        <span className="num">04</span>
-        <div>
-          <div className="title">发布前诊断</div>
-          <div className="desc">把诊断页做成审稿会：评分雷达、问题优先级、专家会议纪要和可一键写回的优化方案同屏可见。</div>
-        </div>
-        <div className="meta">article #{id}</div>
-      </div>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        <IconButton onClick={() => nav(`/articles/${id}`)} size="small">
+    <Box className="editorial-page diagnose-prototype-page">
+      <div className="diagnose-topbar">
+        <IconButton className="diagnose-back-btn" onClick={() => nav(`/articles/${id}`)} size="small">
           <ArrowBackIcon sx={{ fontSize: 18 }} />
         </IconButton>
+        <h2><span className="num">04</span>发布前诊断</h2>
+        <span className="diagnose-topbar-meta">
+          笔记 #{id}{report?.category_cn ? ` · ${report.category_cn}` : ''}
+        </span>
         {report && (
           <Chip
-            label={`${report.grade}级 · ${report.overall_score}分`}
-            sx={{ fontWeight: 700, bgcolor: GRADE_COLORS[report.grade] + '20', color: GRADE_COLORS[report.grade] }}
-          />
-        )}
-        {activeTaskId && (
-          <Chip
+            className="diagnose-grade-chip"
+            label={`${report.grade || '-'}级 · ${report.overall_score || 0}分`}
             size="small"
-            color="info"
-            label={`后台任务 ${activeTaskId}`}
-            sx={{ fontFamily: 'var(--mono)' }}
+            sx={{ bgcolor: `${GRADE_COLORS[report.grade] || 'var(--accent)'}18`, color: GRADE_COLORS[report.grade] || 'var(--accent)' }}
           />
         )}
-        <Box sx={{ flex: 1 }} />
-        <Button variant="outlined" size="small" onClick={() => nav(`/articles/${id}`)}>返回笔记</Button>
-        <Button variant="contained" size="small" onClick={startDiagnosis} disabled={loading}>重新诊断</Button>
-      </Stack>
+        {activeTaskId && <span className="diagnose-task-pill">后台任务 {activeTaskId}</span>}
+        <div className="diagnose-topbar-actions">
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={!history.length}
+            onClick={() => document.getElementById('diagnose-history')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}
+          >
+            历史诊断
+          </Button>
+          <Button variant="contained" size="small" onClick={startDiagnosis} disabled={loading}>
+            重新诊断
+          </Button>
+        </div>
+      </div>
 
       {historyLoaded && history.length > 0 && (
-        <Alert
-          severity="info"
-          sx={{ mb: 2 }}
-          action={
-            <Stack direction="row" spacing={1}>
-              <Button
-                color="inherit"
-                size="small"
-                onClick={() => {
-                  setReport(history[0])
-                  setActiveStep(STEPS.length - 1)
-                  setLoading(false)
-                }}
-              >
-                查看最新结果
-              </Button>
-            </Stack>
-          }
-        >
-          这篇笔记已有 {history.length} 次诊断记录，当前默认展示历史结果；如需更新评分和建议，可使用右上角“重新诊断”。
-        </Alert>
-      )}
-
-      {history.length > 1 && (
-        <Card sx={{ mb: 2 }}>
-          <CardContent>
-            <Stack direction="row" alignItems="center" sx={{ mb: 1.2 }}>
-              <Typography fontWeight={700}>历史诊断结果</Typography>
-              <Box flex={1} />
-              <Chip size="small" label={`${history.length} 条`} />
-            </Stack>
-            <Stack direction="row" flexWrap="wrap" gap={1}>
-              {history.slice(0, 8).map((item, idx) => {
-                const selected = (report?.id || report?.diagnosis_id) === (item.id || item.diagnosis_id)
-                return (
-                  <Button
-                    key={item.id || idx}
-                    variant={selected ? 'contained' : 'outlined'}
-                    size="small"
-                    onClick={() => {
-                      abortRef.current?.abort()
-                      setReport(item)
-                      setLoading(false)
-                      setError('')
-                      setActiveStep(STEPS.length - 1)
-                    }}
-                    sx={selected ? { bgcolor: 'primary.main', '&:hover': { bgcolor: 'primary.dark' } } : undefined}
-                  >
-                    {item.grade || '-'}级 · {item.overall_score || 0}分 · {fmtTime(item.created_at)}
-                  </Button>
-                )
-              })}
-            </Stack>
-          </CardContent>
-        </Card>
-      )}
-
-      {report && (
-        <div className="editorial-audit-strip" style={{ marginBottom: 16 }}>
-          <div><b>{report.overall_score || 0}</b><span>overall score</span></div>
-          <div><b>{report.grade || '-'}</b><span>diagnosis grade</span></div>
-          <div><b>{report.issues?.length || 0}</b><span>issues found</span></div>
-          <div><b>{report.elapsed_ms ? `${(report.elapsed_ms / 1000).toFixed(1)}s` : '-'}</b><span>agent elapsed</span></div>
+        <div className="diagnose-history-strip" id="diagnose-history">
+          <span>已有 {history.length} 次诊断记录</span>
+          <div>
+            {history.slice(0, 6).map((item, idx) => {
+              const selected = (report?.id || report?.diagnosis_id) === (item.id || item.diagnosis_id)
+              return (
+                <button
+                  key={item.id || idx}
+                  className={selected ? 'is-selected' : ''}
+                  onClick={() => {
+                    abortRef.current?.abort()
+                    setReport(item)
+                    setLoading(false)
+                    setError('')
+                    setActiveStep(STEPS.length - 1)
+                  }}
+                >
+                  {item.grade || '-'}级 · {item.overall_score || 0} · {fmtTime(item.created_at)}
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
 
-      {visualNeedsImages && (
-        <Alert
-          severity="warning"
-          sx={{ mb: 2, borderRadius: 0 }}
-          action={
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <Button color="inherit" size="small" onClick={() => nav(`/articles/${id}`)}>
-                去编辑页上传
-              </Button>
-              <Button color="inherit" size="small" onClick={() => nav(`/articles/${id}?chat=1`)}>
-                让 Agent 生成
-              </Button>
-            </Stack>
-          }
-        >
-          视觉/图片是当前主要短板。建议先补充首图或内容图，再重新诊断，评分会更贴近实际发布效果。
-        </Alert>
-      )}
-
-      {/* Progress Stepper */}
-      {loading && (
-        <Card sx={{ mb: 3 }}>
+      {loading && !report && (
+        <Card className="diagnose-card diagnose-loading-card">
           <CardContent>
-            <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
-              <CircularProgress size={20} />
+            <Stack direction="row" alignItems="center" spacing={1.4}>
+              <CircularProgress size={18} />
               <Box>
-                <Typography fontWeight={600}>{progressMsg}</Typography>
-                <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.4 }}>
-                  诊断已由后端后台任务接管；刷新、关闭页面或切换到其他页面都不会中断，回来后会自动恢复进度/结果。
+                <Typography fontSize={13.5} fontWeight={700}>{progressMsg}</Typography>
+                <Typography fontSize={12} color="text.secondary">
+                  诊断已由后台任务接管，刷新或关闭页面不会中断。
                 </Typography>
               </Box>
             </Stack>
-            <Stepper activeStep={activeStep} alternativeLabel>
-              {STEPS.map(s => (
-                <Step key={s.key}>
-                  <StepLabel>{s.label}</StepLabel>
-                </Step>
-              ))}
-            </Stepper>
           </CardContent>
         </Card>
       )}
 
-      {/* Report */}
       {report && (
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 0.95fr) minmax(0, 1.05fr)' },
-            gap: 2,
-            alignItems: 'start',
-            '& > .span-all': { gridColumn: '1 / -1' },
-          }}
-        >
-          {/* Score + Radar */}
-          <Grid container spacing={2} className="span-all">
-            <Grid item xs={12} md={5}>
-              <Card sx={{ height: '100%' }}>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <Typography fontSize={64} fontWeight={800} color={GRADE_COLORS[report.grade]}>
-                    {report.overall_score}
-                  </Typography>
-                  <Typography fontSize={20} fontWeight={700} color={GRADE_COLORS[report.grade]}>
-                    {report.grade}级
-                  </Typography>
-                  <Typography fontSize={13} color="text.secondary" sx={{ mt: 1 }}>
-                    品类：{report.category_cn} · 耗时 {(report.elapsed_ms / 1000).toFixed(1)}s
-                  </Typography>
+        <>
+          <div className="diagnose-content-grid">
+            <div className="diagnose-column">
+              <Card className="diagnose-card diagnose-pipeline-card">
+                <CardContent>
+                  <div className="diagnose-card-label">诊断流水线</div>
+                  <div className="diagnose-pipeline">
+                    {STEPS.filter(s => s.key !== 'done').map((step, idx, arr) => {
+                      const done = !loading || activeStep > idx
+                      const active = loading && activeStep === idx
+                      return (
+                        <div className="diagnose-pipeline-piece" key={step.key}>
+                          <div className={`diagnose-pipeline-step ${done ? 'is-done' : ''} ${active ? 'is-active' : ''}`}>
+                            <span>{done ? '✓' : idx + 1}</span>
+                            <b>{step.label.replace('Model A ', '').replace('专家辩论', '辩论').replace('综合裁判', '裁判')}</b>
+                          </div>
+                          {idx < arr.length - 1 && <i />}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {loading && (
+                    <div className="diagnose-progress-copy">
+                      <span className="editorial-dot" />{progressMsg}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
-            </Grid>
-            <Grid item xs={12} md={7}>
-              <Card sx={{ height: '100%' }}>
-                <CardContent sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                  <RadarChart data={report.radar_data} />
-                  <Stack spacing={0.5} sx={{ ml: 2 }}>
-                    {Object.entries(report.radar_data).map(([k, v]) => (
-                      <Stack key={k} direction="row" alignItems="center" spacing={1}>
-                        <Typography fontSize={12} color="text.secondary" sx={{ width: 40 }}>
-                          {k === 'content' ? '内容' : k === 'visual' ? '视觉' : k === 'growth' ? '增长' : k === 'user_reaction' ? '用户' : '综合'}
-                        </Typography>
-                        <LinearProgress
-                          variant="determinate"
-                          value={v}
-                          sx={{ flex: 1, height: 4, borderRadius: 0, minWidth: 80, '& .MuiLinearProgress-bar': { bgcolor: 'primary.main' } }}
-                        />
-                        <Typography fontSize={12} fontWeight={600}>{v}</Typography>
-                      </Stack>
-                    ))}
-                  </Stack>
+
+              <Card className="diagnose-card diagnose-radar-card">
+                <CardContent>
+                  <div className="diagnose-card-label">五维评分</div>
+                  <div className="diagnose-score-layout">
+                    <div className="diagnose-radar-frame">
+                      <RadarChart data={report.radar_data || {}} />
+                    </div>
+                    <div className="diagnose-score-list">
+                      {SCORE_KEYS.map(key => (
+                        <div className={`diagnose-score-row ${key === 'overall' ? 'is-total' : ''}`} key={key}>
+                          <span>{SCORE_LABELS[key]}</span>
+                          <b>{scoreTen(report.radar_data?.[key])}</b>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
-            </Grid>
-          </Grid>
 
-          {/* Issues */}
-          <Card>
-            <CardContent>
-              <div className="editorial-section-label">
-                <span className="num">A</span><span className="title">问题诊断</span><span className="desc">按发布风险排序</span>
-              </div>
-              <Stack spacing={1}>
-                {report.issues.map((issue, i) => (
-                  <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
-                    <Chip
-                      label={issue.severity === 'high' ? '严重' : issue.severity === 'medium' ? '中等' : '轻微'}
-                      size="small"
-                      color={issue.severity === 'high' ? 'error' : issue.severity === 'medium' ? 'warning' : 'default'}
-                      sx={{ fontSize: 11, height: 20 }}
-                    />
-                    <Typography fontSize={13}>{issue.description}</Typography>
-                  </Stack>
-                ))}
-              </Stack>
-            </CardContent>
-          </Card>
+              <Card className="diagnose-card diagnose-issues-card">
+                <CardContent>
+                  <div className="diagnose-card-label">问题诊断</div>
+                  <div className="diagnose-issue-list">
+                    {(report.issues || []).length ? (
+                      report.issues.slice(0, 6).map((issue, i) => (
+                        <div className="diagnose-issue-row" key={`${issue.description}-${i}`}>
+                          <span className={`diagnose-priority ${issue.severity === 'high' ? 'is-alert' : issue.severity === 'medium' ? 'is-draft' : ''}`}>
+                            {priorityLabel(issue.severity, i)}
+                          </span>
+                          <span>{issue.description}</span>
+                          <em>{issue.from_agent || '综合'}</em>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="diagnose-empty-row">未发现明显发布风险。</div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
-          {/* Suggestions */}
-          <Card>
-            <CardContent>
-              <div className="editorial-section-label">
-                <span className="num">B</span><span className="title">优化建议</span><span className="desc">可执行动作</span>
-              </div>
-              <Stack spacing={1.5}>
-                {report.suggestions.map((s, i) => (
-                  <Paper key={i} variant="outlined" sx={{ p: 1.5 }}>
-                    <Stack direction="row" alignItems="flex-start" spacing={1}>
-                      <Chip label={`P${s.priority}`} size="small" color="primary" sx={{ fontSize: 11, height: 20 }} />
-                      <Box flex={1}>
-                        <Typography fontSize={13}>{s.description}</Typography>
-                        {s.expected_impact && (
-                          <Typography fontSize={11} color="text.secondary" sx={{ mt: 0.5 }}>
-                            预期效果：{s.expected_impact}
-                          </Typography>
-                        )}
-                      </Box>
+              {visualNeedsImages && (
+                <Alert
+                  className="diagnose-visual-alert"
+                  severity="warning"
+                  action={
+                    <Stack direction="row" spacing={0.8}>
+                      <Button color="inherit" size="small" onClick={() => nav(`/articles/${id}`)}>上传图</Button>
+                      <Button color="inherit" size="small" onClick={() => nav(`/articles/${id}?chat=1`)}>让 Agent 生成</Button>
                     </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            </CardContent>
-          </Card>
-
-          {/* Optimized Content */}
-          <Card>
-            <CardContent>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ mb: 1.5 }}>
-                <Box flex={1}>
-                  <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 18, fontWeight: 700 }}>优化方案</Typography>
-                  <Typography fontSize={12} color="text.secondary">
-                    可一键写回标题、正文和标签；应用前会自动保存一个文章版本，方便回滚。
-                  </Typography>
-                </Box>
-                <Button
-                  variant="contained"
-                  onClick={applyOptimized}
-                  disabled={
-                    applying ||
-                    !Number(report.id || report.diagnosis_id) ||
-                    (!report.optimized_title && !report.optimized_content && !(report.optimized_tags || []).length)
                   }
                 >
-                  {report.applied_at ? '已应用，可再次应用' : applying ? '应用中...' : '应用优化方案'}
-                </Button>
-              </Stack>
-              <Stack spacing={2}>
-                {report.optimized_title && (
-                  <Box>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Typography fontSize={13} fontWeight={600} color="text.secondary">优化标题</Typography>
-                      <IconButton size="small" onClick={() => copyText(report.optimized_title)}>
-                        <ContentCopyIcon sx={{ fontSize: 14 }} />
-                      </IconButton>
-                    </Stack>
-                    <Typography fontSize={15} fontWeight={600} sx={{ mt: 0.5 }}>{report.optimized_title}</Typography>
-                  </Box>
-                )}
-                <Divider />
-                {report.optimized_content && (
-                  <Box>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Typography fontSize={13} fontWeight={600} color="text.secondary">优化正文</Typography>
-                      <IconButton size="small" onClick={() => copyText(report.optimized_content)}>
-                        <ContentCopyIcon sx={{ fontSize: 14 }} />
-                      </IconButton>
-                    </Stack>
-                    <Paper variant="outlined" sx={{ p: 2, mt: 1, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.8 }}>
-                      {report.optimized_content}
-                    </Paper>
-                  </Box>
-                )}
-                {report.optimized_tags && report.optimized_tags.length > 0 && (
-                  <Box>
-                    <Typography fontSize={13} fontWeight={600} color="text.secondary" sx={{ mb: 0.5 }}>推荐标签</Typography>
-                    <Stack direction="row" flexWrap="wrap" gap={0.5}>
-                      {report.optimized_tags.map((t, i) => (
-                        <Chip
-                          key={i}
-                          label={`#${String(t).replace(/^[#＃]+/, '')}`}
-                          size="small"
-                          onClick={() => copyText(`#${String(t).replace(/^[#＃]+/, '')}`)}
-                          sx={{
-                            cursor: 'pointer',
-                            minHeight: 22,
-                            height: 'auto',
-                            color: 'text.primary',
-                            '& .MuiChip-label': {
-                              py: 0.25,
-                              lineHeight: 1.25,
-                              whiteSpace: 'normal',
-                              overflowWrap: 'anywhere',
-                            },
-                          }}
-                        />
-                      ))}
-                    </Stack>
-                  </Box>
-                )}
-              </Stack>
-            </CardContent>
-          </Card>
-
-          {/* Simulated Comments */}
-          {report.simulated_comments && report.simulated_comments.length > 0 && (
-            <Card>
-              <CardContent>
-                <div className="editorial-section-label">
-                  <span className="num">C</span><span className="title">模拟评论区</span><span className="desc">发布后反馈预演</span>
-                </div>
-                {report.simulated_comments.map((c, i) => (
-                  <CommentCard key={i} comment={c} />
-                ))}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Cover Direction */}
-          {report.cover_direction && report.cover_direction.layout && (
-            <Card>
-              <CardContent>
-                <div className="editorial-section-label">
-                  <span className="num">D</span><span className="title">封面设计方向</span><span className="desc">视觉首图建议</span>
-                </div>
-                <Grid container spacing={2}>
-                  <Grid item xs={6} md={3}>
-                    <Typography fontSize={11} color="text.secondary">构图</Typography>
-                    <Typography fontSize={13}>{report.cover_direction.layout}</Typography>
-                  </Grid>
-                  <Grid item xs={6} md={3}>
-                    <Typography fontSize={11} color="text.secondary">配色</Typography>
-                    <Typography fontSize={13}>{report.cover_direction.color_scheme}</Typography>
-                  </Grid>
-                  <Grid item xs={6} md={3}>
-                    <Typography fontSize={11} color="text.secondary">文字</Typography>
-                    <Typography fontSize={13}>{report.cover_direction.text_style}</Typography>
-                  </Grid>
-                  <Grid item xs={12} md={3}>
-                    <Typography fontSize={11} color="text.secondary">Tips</Typography>
-                    {report.cover_direction.tips?.map((t, i) => (
-                      <Typography key={i} fontSize={12}>· {t}</Typography>
-                    ))}
-                  </Grid>
-                </Grid>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Agent Opinions (collapsible) */}
-          <Card>
-            <CardContent>
-              <Stack direction="row" alignItems="center" sx={{ cursor: 'pointer' }} onClick={() => setExpandAgents(!expandAgents)}>
-                <Typography fontWeight={700}>专家评估详情</Typography>
-                <Box flex={1} />
-                {expandAgents ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-              </Stack>
-              <Collapse in={expandAgents}>
-                <Stack spacing={2} sx={{ mt: 2 }}>
-                  {report.agent_opinions.map((op, i) => (
-                    <div className="editorial-meeting-row" key={i}>
-                      <div className="speaker">{String(op.agent_name || op.dimension || 'A').slice(0, 1).toUpperCase()}</div>
-                      <div>
-                        <div className="role">{op.agent_name || op.dimension}</div>
-                        {op.issues && op.issues.length > 0 && (
-                          <Typography fontSize={12} sx={{ mb: 0.6 }}>
-                            问题：{op.issues.slice(0, 2).join('；')}
-                          </Typography>
-                        )}
-                        {op.suggestions && op.suggestions.length > 0 && (
-                          <Typography fontSize={12} color="text.secondary">
-                            建议：{op.suggestions.slice(0, 2).join('；')}
-                          </Typography>
-                        )}
-                      </div>
-                      <div className="score">{op.score} / 100</div>
-                    </div>
-                  ))}
-                </Stack>
-              </Collapse>
-            </CardContent>
-          </Card>
-
-          {/* Debate (collapsible) */}
-          <Card>
-            <CardContent>
-              <Stack direction="row" alignItems="center" sx={{ cursor: 'pointer' }} onClick={() => setExpandDebate(!expandDebate)}>
-                <Typography fontWeight={700}>辩论记录</Typography>
-                <Box flex={1} />
-                {expandDebate ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-              </Stack>
-              {report.debate_summary && (
-                <Typography fontSize={13} color="text.secondary" sx={{ mt: 1 }}>{report.debate_summary}</Typography>
+                  视觉/图片是当前短板，建议补首图或内容图后再诊断。
+                </Alert>
               )}
-              <Collapse in={expandDebate}>
-                <Stack spacing={2} sx={{ mt: 2 }}>
-                  {report.debate_results.map((d, i) => (
-                    <Paper key={i} variant="outlined" sx={{ p: 1.4, bgcolor: 'var(--paper-soft)' }}>
-                      <Typography className="editorial-mono" fontWeight={700} fontSize={10.5} sx={{ mb: 1, color: 'primary.main' }}>{d.agent}</Typography>
-                      {d.disagreements && d.disagreements.length > 0 && (
-                        <Box sx={{ mb: 0.5 }}>
-                          <Typography fontSize={11} color="error.main" fontWeight={600}>反驳：</Typography>
-                          {d.disagreements.map((item, j) => (
-                            <Typography key={j} fontSize={12} sx={{ pl: 1 }}>· {item}</Typography>
-                          ))}
-                        </Box>
-                      )}
-                      {d.additions && d.additions.length > 0 && (
-                        <Box>
-                          <Typography fontSize={11} color="info.main" fontWeight={600}>补充：</Typography>
-                          {d.additions.map((item, j) => (
-                            <Typography key={j} fontSize={12} sx={{ pl: 1 }}>· {item}</Typography>
-                          ))}
-                        </Box>
-                      )}
+            </div>
+
+            <div className="diagnose-column">
+              <Card className="diagnose-card diagnose-meeting-card">
+                <CardContent>
+                  <div className="diagnose-card-label">专家辩论 · 会议纪要</div>
+                  <div className="diagnose-meeting-list">
+                    {meetingOpinions.slice(0, 4).map((op, i) => (
+                      <div className="editorial-meeting-row" key={`${op.agent_name}-${i}`}>
+                        <div className="speaker">{String(op.agent_name || op.dimension || 'A').slice(0, 1).toUpperCase()}</div>
+                        <div>
+                          <div className="role">{op.agent_name || op.dimension}</div>
+                          <Typography fontSize={12.5} lineHeight={1.55}>
+                            {(op.issues?.[0] || op.reasoning || op.suggestions?.[0] || '已完成该维度评估。').slice(0, 96)}
+                          </Typography>
+                          {op.suggestions?.length > 0 && (
+                            <Typography fontSize={12} color="text.secondary" sx={{ mt: 0.5 }}>
+                              建议：{op.suggestions[0].slice(0, 88)}
+                            </Typography>
+                          )}
+                        </div>
+                        <div className="score">{scoreTen(op.score)} / 10</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="diagnose-event-feed event-feed">
+                    <div><span className="red">{fmtTime(report.created_at).slice(11, 16) || '--:--'}</span><span>诊断报告已保存</span><span>ok</span></div>
+                    <div><span className="red">AI</span><span>专家辩论输出 {report.debate_results?.length || 0} 组补充意见</span><span>live</span></div>
+                    <div><span className="red">UX</span><span>等待用户确认是否应用 title/body/tags</span><span>hold</span></div>
+                  </div>
+
+                  <div className="diagnose-verdict">
+                    <div>综合裁判结论</div>
+                    <p>{report.debate_summary || '可发布，但建议先应用高优先级优化项，以提升点击率、收藏率和发布稳定性。'}</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="diagnose-action-card">
+                <CardContent>
+                  <span>应用优化方案？</span>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => document.getElementById('diagnose-optimized')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  >
+                    查看 diff
+                  </Button>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    className="diagnose-arrow-btn"
+                    onClick={applyOptimized}
+                    disabled={applying || !canApplyOptimized}
+                  >
+                    {report.applied_at ? '已应用，可再次应用' : applying ? '应用中...' : '一键应用'}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+
+          <div className="diagnose-secondary-grid">
+            <Card className="diagnose-card" id="diagnose-optimized">
+              <CardContent>
+                <div className="editorial-section-label">
+                  <span className="num">A</span><span className="title">优化方案详情</span><span className="desc">title / body / tags</span>
+                </div>
+                <Stack spacing={1.5}>
+                  {report.optimized_title && (
+                    <Box>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <Typography fontSize={12} fontWeight={700} color="text.secondary">优化标题</Typography>
+                        <Button size="small" variant="text" onClick={() => copyText(report.optimized_title)}>复制</Button>
+                      </Stack>
+                      <Typography fontSize={15} fontWeight={700}>{report.optimized_title}</Typography>
+                    </Box>
+                  )}
+                  {report.optimized_content && (
+                    <Box>
+                      <Stack direction="row" alignItems="center" spacing={1}>
+                        <Typography fontSize={12} fontWeight={700} color="text.secondary">优化正文</Typography>
+                        <Button size="small" variant="text" onClick={() => copyText(report.optimized_content)}>复制</Button>
+                      </Stack>
+                      <Paper variant="outlined" className="diagnose-copy-box">
+                        {report.optimized_content}
+                      </Paper>
+                    </Box>
+                  )}
+                  {(report.optimized_tags || []).length > 0 && (
+                    <Box>
+                      <Typography fontSize={12} fontWeight={700} color="text.secondary" sx={{ mb: 0.7 }}>推荐标签</Typography>
+                      <Stack direction="row" flexWrap="wrap" gap={0.5}>
+                        {report.optimized_tags.map((t, i) => (
+                          <Chip
+                            key={`${t}-${i}`}
+                            label={`#${String(t).replace(/^[#＃]+/, '')}`}
+                            size="small"
+                            onClick={() => copyText(`#${String(t).replace(/^[#＃]+/, '')}`)}
+                            sx={{ cursor: 'pointer' }}
+                          />
+                        ))}
+                      </Stack>
+                    </Box>
+                  )}
+                </Stack>
+              </CardContent>
+            </Card>
+
+            <Card className="diagnose-card">
+              <CardContent>
+                <div className="editorial-section-label">
+                  <span className="num">B</span><span className="title">优化建议</span><span className="desc">可执行动作</span>
+                </div>
+                <Stack spacing={1}>
+                  {(report.suggestions || []).slice(0, 5).map((s, i) => (
+                    <Paper key={`${s.description}-${i}`} variant="outlined" className="diagnose-suggestion-row">
+                      <span>P{s.priority || i + 1}</span>
+                      <div>
+                        <Typography fontSize={13}>{s.description}</Typography>
+                        {s.expected_impact && <Typography fontSize={11.5} color="text.secondary">预期效果：{s.expected_impact}</Typography>}
+                      </div>
                     </Paper>
                   ))}
                 </Stack>
-              </Collapse>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-        </Box>
+            {report.cover_direction && report.cover_direction.layout && (
+              <Card className="diagnose-card">
+                <CardContent>
+                  <div className="editorial-section-label">
+                    <span className="num">C</span><span className="title">封面设计方向</span><span className="desc">视觉首图建议</span>
+                  </div>
+                  <div className="diagnose-cover-grid">
+                    <div><b>构图</b><span>{report.cover_direction.layout}</span></div>
+                    <div><b>配色</b><span>{report.cover_direction.color_scheme}</span></div>
+                    <div><b>文字</b><span>{report.cover_direction.text_style}</span></div>
+                    <div><b>Tips</b><span>{report.cover_direction.tips?.slice(0, 3).join('；')}</span></div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {report.simulated_comments && report.simulated_comments.length > 0 && (
+              <Card className="diagnose-card">
+                <CardContent>
+                  <div className="editorial-section-label">
+                    <span className="num">D</span><span className="title">模拟评论区</span><span className="desc">发布后反馈预演</span>
+                  </div>
+                  {report.simulated_comments.slice(0, 3).map((c, i) => (
+                    <CommentCard key={`${c.username}-${i}`} comment={c} />
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </>
       )}
     </Box>
   )
