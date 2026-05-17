@@ -177,16 +177,50 @@ async def run_diagnosis(
             await progress(step, message, data)
 
     # ─── Step 1: 品类检测 + Model A 预评分 ───
-    await emit("detect", "正在检测笔记品类...")
+    await emit(
+        "detect",
+        "正在进行本地品类检测...",
+        {"progress": 8, "current": 1, "total": 7, "stage": "local", "kind": "category_detect"},
+    )
     category = detect_category(title, content, tags)
     category_cn = CATEGORY_CN.get(category, category)
+    await emit(
+        "detect",
+        f"品类检测完成：{category_cn}",
+        {"progress": 12, "current": 1, "total": 7, "stage": "local", "category": category, "category_cn": category_cn},
+    )
 
-    await emit("model_a", "Model A 预评分中...")
+    await emit(
+        "model_a",
+        "正在执行本地 Model A 预评分...",
+        {"progress": 16, "current": 2, "total": 7, "stage": "local", "kind": "model_a"},
+    )
     model_a = pre_score(title, content, category, len(tags), image_count)
+    await emit(
+        "model_a",
+        f"Model A 预评分完成：{model_a.get('total_score', 0)}分",
+        {"progress": 22, "current": 2, "total": 7, "stage": "local", "score": model_a.get("total_score", 0)},
+    )
 
     # ─── Step 2: 文本分析 ───
-    await emit("text_analysis", "文本特征分析中...")
+    await emit(
+        "text_analysis",
+        "正在做标题、正文、标签结构分析...",
+        {"progress": 28, "current": 3, "total": 7, "stage": "local", "kind": "text_analysis"},
+    )
     text_analysis = full_analysis(title, content, category, tags, image_count)
+    await emit(
+        "text_analysis",
+        "文本分析完成，正在组织专家诊断上下文",
+        {
+            "progress": 34,
+            "current": 3,
+            "total": 7,
+            "stage": "local",
+            "title_score": text_analysis.get("title_analysis", {}).get("score"),
+            "content_score": text_analysis.get("content_analysis", {}).get("score"),
+        },
+    )
 
     # ─── Step 3: 构建笔记上下文 ───
     note_context = _build_note_context(
@@ -207,7 +241,11 @@ async def run_diagnosis(
     )
 
     # ─── Step 4: 4 Agent 并行评估 ───
-    await emit("agents_start", "4位专家开始并行诊断...")
+    await emit(
+        "agents_start",
+        "4位专家开始并行诊断（0/4）...",
+        {"progress": 38, "current": 0, "total": 4, "stage": "agents"},
+    )
 
     agent_configs = [
         ("content", CONTENT_AGENT_PROMPT, "内容质量专家"),
@@ -216,13 +254,51 @@ async def run_diagnosis(
         ("user_sim", USER_SIM_AGENT_PROMPT, "用户模拟器"),
     ]
 
+    completed_agents = 0
+    agent_progress_lock = asyncio.Lock()
+
     async def run_single_agent(agent_type: str, prompt: str, name: str) -> Dict[str, Any]:
+        nonlocal completed_agents
         data_supplement = build_data_prompt(agent_type, category)
         full_prompt = prompt + data_supplement
         user_msg = note_context + analysis_context
         attached_images = visual_images if agent_type in {"visual", "user_sim"} else []
-        result = await _call_agent(full_prompt, user_msg, settings=settings, images=attached_images)
-        await emit(f"agent_done_{agent_type}", f"{name}完成评估", {"score": result.get("score", 0)})
+        try:
+            result = await _call_agent(full_prompt, user_msg, settings=settings, images=attached_images)
+        except Exception as exc:
+            async with agent_progress_lock:
+                completed_agents += 1
+                done = completed_agents
+            await emit(
+                "agents_start",
+                f"{name}评估失败，已记录兜底结果（{done}/4）",
+                {
+                    "progress": 38 + done * 8,
+                    "current": done,
+                    "total": 4,
+                    "stage": "agents",
+                    "agent_type": agent_type,
+                    "agent_name": name,
+                    "error": str(exc),
+                },
+            )
+            raise
+        async with agent_progress_lock:
+            completed_agents += 1
+            done = completed_agents
+        await emit(
+            "agents_start",
+            f"{name}完成评估（{done}/4）",
+            {
+                "progress": 38 + done * 8,
+                "current": done,
+                "total": 4,
+                "stage": "agents",
+                "agent_type": agent_type,
+                "agent_name": name,
+                "score": result.get("score", 0),
+            },
+        )
         return result
 
     agent_results = await asyncio.gather(
@@ -239,9 +315,17 @@ async def run_diagnosis(
             opinions.append(r if isinstance(r, dict) else {"agent_name": name, "score": 50})
 
     # ─── Step 5: 辩论轮 ───
-    await emit("debate_start", "专家辩论中...")
+    await emit(
+        "debate_start",
+        "专家辩论中（0/4）...",
+        {"progress": 74, "current": 0, "total": 4, "stage": "debate"},
+    )
+
+    completed_debates = 0
+    debate_progress_lock = asyncio.Lock()
 
     async def run_debate(agent_idx: int) -> Dict[str, Any]:
+        nonlocal completed_debates
         agent_type, _, name = agent_configs[agent_idx]
         other = [
             f"【{opinions[j].get('agent_name', agent_configs[j][2])}】评分{opinions[j].get('score', '?')}分\n"
@@ -253,7 +337,41 @@ async def run_diagnosis(
             agent_name=name,
             other_opinions="\n\n".join(other),
         )
-        result = await _call_agent(debate_prompt, note_context, temperature=0.6, settings=settings)
+        try:
+            result = await _call_agent(debate_prompt, note_context, temperature=0.6, settings=settings)
+        except Exception as exc:
+            async with debate_progress_lock:
+                completed_debates += 1
+                done = completed_debates
+            await emit(
+                "debate_start",
+                f"{name}辩论补充失败，已跳过（{done}/4）",
+                {
+                    "progress": 74 + done * 4,
+                    "current": done,
+                    "total": 4,
+                    "stage": "debate",
+                    "agent_type": agent_type,
+                    "agent_name": name,
+                    "error": str(exc),
+                },
+            )
+            raise
+        async with debate_progress_lock:
+            completed_debates += 1
+            done = completed_debates
+        await emit(
+            "debate_start",
+            f"{name}完成辩论补充（{done}/4）",
+            {
+                "progress": 74 + done * 4,
+                "current": done,
+                "total": 4,
+                "stage": "debate",
+                "agent_type": agent_type,
+                "agent_name": name,
+            },
+        )
         return result
 
     debate_results = await asyncio.gather(
@@ -268,10 +386,10 @@ async def run_diagnosis(
         else:
             debates.append({"agent": agent_configs[i][2], **(r if isinstance(r, dict) else {})})
 
-    await emit("debate_done", "辩论完成")
+    await emit("debate_start", "辩论完成，正在移交综合裁判", {"progress": 90, "current": 4, "total": 4, "stage": "debate"})
 
     # ─── Step 6: 裁判汇总 ───
-    await emit("judge_start", "综合裁判汇总中...")
+    await emit("judge_start", "综合裁判汇总中...", {"progress": 92, "current": 6, "total": 7, "stage": "judge"})
 
     judge_data_supplement = build_data_prompt("judge", category)
     judge_system = JUDGE_AGENT_PROMPT + judge_data_supplement
@@ -294,7 +412,7 @@ async def run_diagnosis(
     )
 
     judge_result = await _call_agent(judge_system, judge_user, temperature=0.5, settings=settings)
-    await emit("judge_done", "裁判完成")
+    await emit("judge_start", "裁判完成，正在组装诊断结果", {"progress": 97, "current": 7, "total": 7, "stage": "judge"})
 
     # ─── Step 7: 组装结果 ───
     simulated_comments = []
@@ -328,7 +446,7 @@ async def run_diagnosis(
             break
 
     elapsed_ms = int((time.time() - start_time) * 1000)
-    await emit("done", f"诊断完成，总分 {overall_score}", {"score": overall_score, "grade": grade})
+    await emit("done", f"诊断完成，总分 {overall_score}", {"progress": 100, "current": 7, "total": 7, "score": overall_score, "grade": grade})
 
     return DiagnosisResult(
         overall_score=overall_score,

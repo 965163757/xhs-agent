@@ -29,9 +29,9 @@ import {
 import { formatBeijingDateTime } from '../utils/time'
 
 const STEPS = [
-  { key: 'detect', label: '品类检测' },
-  { key: 'model_a', label: 'Model A 预评分' },
-  { key: 'text_analysis', label: '文本分析' },
+  { key: 'detect', label: '品类检测', hint: '本地' },
+  { key: 'model_a', label: '预评分', hint: '本地' },
+  { key: 'text_analysis', label: '文本分析', hint: '本地' },
   { key: 'agents_start', label: '专家诊断' },
   { key: 'debate_start', label: '专家辩论' },
   { key: 'judge_start', label: '综合裁判' },
@@ -157,11 +157,28 @@ function priorityLabel(severity?: string, index = 0) {
   return `P${Math.min(3, index + 1)}`
 }
 
+function normalizeDiagnosisStep(step?: string) {
+  if (!step) return ''
+  if (step.startsWith('agent_done_')) return 'agents_start'
+  if (step === 'debate_done') return 'debate_start'
+  if (step === 'judge_done') return 'judge_start'
+  return step
+}
+
+function fallbackProgressForStep(step?: string) {
+  const normalized = normalizeDiagnosisStep(step)
+  const idx = STEPS.findIndex(s => s.key === normalized)
+  if (idx < 0) return 0
+  return Math.round((idx / Math.max(1, STEPS.length - 1)) * 100)
+}
+
 export default function DiagnosePage() {
   const { id } = useParams<{ id: string }>()
   const nav = useNavigate()
   const [loading, setLoading] = useState(true)
   const [activeStep, setActiveStep] = useState(0)
+  const [progressPercent, setProgressPercent] = useState(0)
+  const [progressData, setProgressData] = useState<Record<string, any>>({})
   const [progressMsg, setProgressMsg] = useState('准备中...')
   const [report, setReport] = useState<DiagnosisReport | null>(null)
   const [history, setHistory] = useState<DiagnosisReport[]>([])
@@ -188,14 +205,20 @@ export default function DiagnosePage() {
     }
     if (ev.type === 'progress') {
       setProgressMsg(ev.message)
-      const idx = STEPS.findIndex(s => s.key === ev.step)
+      setProgressData(ev.data || {})
+      const normalizedStep = normalizeDiagnosisStep(ev.step)
+      const idx = STEPS.findIndex(s => s.key === normalizedStep)
       if (idx >= 0) setActiveStep(idx)
+      const nextProgress = Number(ev.data?.progress)
+      setProgressPercent(Number.isFinite(nextProgress) ? Math.max(0, Math.min(100, nextProgress)) : fallbackProgressForStep(normalizedStep))
       return false
     }
     if (ev.type === 'result') {
       setReport(ev.data)
       setHistory(prev => [ev.data, ...prev.filter(x => (x.id || x.diagnosis_id) !== (ev.data.id || ev.data.diagnosis_id))])
       setActiveStep(STEPS.length - 1)
+      setProgressPercent(100)
+      setProgressData({ progress: 100, score: ev.data?.overall_score, grade: ev.data?.grade })
       setProgressMsg('诊断完成，结果已保存')
       setLoading(false)
       setActiveTaskId(null)
@@ -278,6 +301,8 @@ export default function DiagnosePage() {
     setReport(null)
     setActiveTaskId(null)
     setActiveStep(0)
+    setProgressPercent(0)
+    setProgressData({})
     setProgressMsg('正在创建后台诊断任务...')
 
     const ctrl = new AbortController()
@@ -324,6 +349,8 @@ export default function DiagnosePage() {
         if (items.length > 0) {
           setReport(items[0])
           setActiveStep(STEPS.length - 1)
+          setProgressPercent(100)
+          setProgressData({ progress: 100, grade: items[0].grade, score: items[0].overall_score })
           setProgressMsg('已加载最近一次诊断结果')
           setLoading(false)
         } else {
@@ -389,6 +416,42 @@ export default function DiagnosePage() {
     (report.optimized_tags || []).length > 0
   )
 
+  const renderPipeline = (compact = false) => (
+    <>
+      <div className="diagnose-pipeline">
+        {STEPS.filter(s => s.key !== 'done').map((step, idx, arr) => {
+          const done = !loading || activeStep > idx
+          const active = loading && activeStep === idx
+          return (
+            <div className="diagnose-pipeline-piece" key={step.key}>
+              <div className={`diagnose-pipeline-step ${done ? 'is-done' : ''} ${active ? 'is-active' : ''}`}>
+                <span>{done ? '✓' : idx + 1}</span>
+                <b>{compact ? step.label.replace('品类检测', '品类').replace('文本分析', '文本').replace('专家诊断', '专家').replace('专家辩论', '辩论').replace('综合裁判', '裁判') : step.label}</b>
+                {'hint' in step && step.hint && <em>{step.hint}</em>}
+              </div>
+              {idx < arr.length - 1 && <i />}
+            </div>
+          )
+        })}
+      </div>
+      {loading && (
+        <div className="diagnose-progress-panel">
+          <div className="diagnose-progress-head">
+            <span><span className="editorial-dot" />{progressMsg}</span>
+            <b>{Math.round(progressPercent)}%</b>
+          </div>
+          <div className="diagnose-progress-bar" aria-label="诊断进度">
+            <i style={{ width: `${Math.max(0, Math.min(100, progressPercent))}%` }} />
+          </div>
+          <div className="diagnose-progress-meta">
+            <span>前三步是本地真实计算，通常很快完成；专家诊断/辩论是远端模型调用。</span>
+            {progressData?.total ? <span>{progressData.current ?? 0}/{progressData.total}</span> : null}
+          </div>
+        </div>
+      )}
+    </>
+  )
+
   if (error) {
     return (
       <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -448,6 +511,8 @@ export default function DiagnosePage() {
                     setLoading(false)
                     setError('')
                     setActiveStep(STEPS.length - 1)
+                    setProgressPercent(100)
+                    setProgressData({ progress: 100, grade: item.grade, score: item.overall_score })
                   }}
                 >
                   {item.grade || '-'}级 · {item.overall_score || 0} · {fmtTime(item.created_at)}
@@ -461,15 +526,16 @@ export default function DiagnosePage() {
       {loading && !report && (
         <Card className="diagnose-card diagnose-loading-card">
           <CardContent>
-            <Stack direction="row" alignItems="center" spacing={1.4}>
+            <Stack direction="row" alignItems="center" spacing={1.4} sx={{ mb: 1.4 }}>
               <CircularProgress size={18} />
               <Box>
                 <Typography fontSize={13.5} fontWeight={700}>{progressMsg}</Typography>
                 <Typography fontSize={12} color="text.secondary">
-                  诊断已由后台任务接管，刷新或关闭页面不会中断。
+                  诊断已由后台任务接管，刷新或关闭页面不会中断；下方展示真实阶段和百分比。
                 </Typography>
               </Box>
             </Stack>
+            {renderPipeline(true)}
           </CardContent>
         </Card>
       )}
@@ -481,26 +547,7 @@ export default function DiagnosePage() {
               <Card className="diagnose-card diagnose-pipeline-card">
                 <CardContent>
                   <div className="diagnose-card-label">诊断流水线</div>
-                  <div className="diagnose-pipeline">
-                    {STEPS.filter(s => s.key !== 'done').map((step, idx, arr) => {
-                      const done = !loading || activeStep > idx
-                      const active = loading && activeStep === idx
-                      return (
-                        <div className="diagnose-pipeline-piece" key={step.key}>
-                          <div className={`diagnose-pipeline-step ${done ? 'is-done' : ''} ${active ? 'is-active' : ''}`}>
-                            <span>{done ? '✓' : idx + 1}</span>
-                            <b>{step.label.replace('Model A ', '').replace('专家辩论', '辩论').replace('综合裁判', '裁判')}</b>
-                          </div>
-                          {idx < arr.length - 1 && <i />}
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {loading && (
-                    <div className="diagnose-progress-copy">
-                      <span className="editorial-dot" />{progressMsg}
-                    </div>
-                  )}
+                  {renderPipeline(true)}
                 </CardContent>
               </Card>
 
