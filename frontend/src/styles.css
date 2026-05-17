@@ -457,12 +457,27 @@ body {
   width: 56px;
   height: 72px;
   flex: 0 0 56px;
+  padding: 0;
   border: 1px dashed var(--rule);
   display: grid;
   place-items: center;
   background: var(--paper);
   color: var(--ink-mute);
   font: 10px var(--mono);
+  appearance: none;
+  cursor: pointer;
+  transition: border-color .16s ease, color .16s ease, background-color .16s ease;
+}
+
+.article-image-add-slot:hover {
+  border-color: var(--ink);
+  color: var(--accent);
+  background: var(--paper-soft);
+}
+
+.article-image-add-slot:disabled {
+  cursor: wait;
+  opacity: .7;
 }
 
 .cover-thumb {

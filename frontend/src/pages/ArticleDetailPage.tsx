@@ -43,6 +43,7 @@ import {
   checkBannedWords,
   extractTemplate,
   arrangeArticleImages,
+  uploadImage,
   type Article,
   type ArticleVersion,
   type BannedWordHit,
@@ -516,7 +517,9 @@ export default function ArticleDetailPage() {
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
   const [dragImagePos, setDragImagePos] = useState<number | null>(null)
   const [showImageContext, setShowImageContext] = useState(false)
+  const [uploadingArticleImage, setUploadingArticleImage] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const imageUploadInputRef = useRef<HTMLInputElement | null>(null)
   const [layout, setLayout] = useState(getInitialEditorLayout)
   const [viewport, setViewport] = useState(() => ({
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
@@ -899,6 +902,28 @@ export default function ArticleDetailPage() {
     toast.success('已删除图片')
   }
 
+  const handleUploadArticleImage = async (file?: File | null) => {
+    if (!file || !art || uploadingArticleImage) return
+    setUploadingArticleImage(true)
+    try {
+      const url = await uploadImage(file)
+      const r = await arrangeArticleImages({
+        article_id: art.id,
+        action: 'insert',
+        image_url: url,
+        position: visualImages.length,
+      })
+      if (!r.ok || !r.article) throw new Error(r.error || '图片插入失败')
+      setArt(r.article)
+      setSavedArt(r.article)
+      toast.success(visualImages.length === 0 ? '图片已上传，并作为首图' : '图片已上传，并追加到队列')
+    } catch (e: any) {
+      toast.error(e?.message || '上传失败')
+    } finally {
+      setUploadingArticleImage(false)
+    }
+  }
+
   const handleImageDrop = async (targetPos: number) => {
     const from = dragImagePos
     setDragImagePos(null)
@@ -1025,7 +1050,16 @@ export default function ArticleDetailPage() {
               />
             )
           })}
-          <Box className="article-image-add-slot">+</Box>
+          <Box
+            component="button"
+            type="button"
+            className="article-image-add-slot"
+            disabled={uploadingArticleImage}
+            onClick={() => imageUploadInputRef.current?.click()}
+            title="上传图片到当前笔记"
+          >
+            {uploadingArticleImage ? <CircularProgress size={14} /> : '+'}
+          </Box>
         </Box>
       ) : (
         <Box
@@ -1039,7 +1073,16 @@ export default function ArticleDetailPage() {
             fontSize: 12,
           }}
         >
-          <Box className="article-image-add-slot">+</Box>
+          <Box
+            component="button"
+            type="button"
+            className="article-image-add-slot"
+            disabled={uploadingArticleImage}
+            onClick={() => imageUploadInputRef.current?.click()}
+            title="上传图片到当前笔记"
+          >
+            {uploadingArticleImage ? <CircularProgress size={14} /> : '+'}
+          </Box>
         </Box>
       )}
       {art.image_context && showImageContext && (
@@ -1122,6 +1165,17 @@ export default function ArticleDetailPage() {
         overflow: 'hidden',
       }}
     >
+      <input
+        ref={imageUploadInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        style={{ display: 'none' }}
+        onChange={e => {
+          const file = e.currentTarget.files?.[0]
+          e.currentTarget.value = ''
+          handleUploadArticleImage(file)
+        }}
+      />
       {/* left: chat panel */}
       <Box
         className={agentChatPulse ? 'agent-chat-open-pulse' : undefined}
