@@ -333,6 +333,42 @@ body {
   text-decoration: line-through;
 }
 
+.editorial-banned-card {
+  position: relative;
+  border: 1px solid var(--hazard);
+  background: rgba(139,37,32,0.06);
+  color: var(--hazard);
+  padding: 12px 13px 10px;
+  font-size: 11px;
+  line-height: 1.6;
+  min-height: 72px;
+}
+
+.editorial-banned-card::before {
+  content: attr(data-mark);
+  position: absolute;
+  top: -8px;
+  left: 10px;
+  padding: 0 6px;
+  background: var(--paper);
+  color: var(--hazard);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.editorial-banned-card.is-clear {
+  border-color: var(--rule);
+  background: var(--paper-soft);
+  color: var(--ink-soft);
+}
+
+.editorial-banned-card.is-clear::before {
+  color: var(--ok);
+}
+
 .editorial-meeting-row {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 76px;

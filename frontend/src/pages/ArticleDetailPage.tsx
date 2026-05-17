@@ -1408,7 +1408,7 @@ export default function ArticleDetailPage() {
             sx={{
               flex: 1,
               minHeight: 0,
-              overflow: 'auto',
+              overflow: 'hidden',
               pr: 0.25,
               pb: 'max(2px, env(safe-area-inset-bottom))',
             }}
@@ -1417,6 +1417,7 @@ export default function ArticleDetailPage() {
               sx={{
                 order: 1,
                 ...sectionCardSx,
+                flex: 1,
                 display: 'flex',
                 flexDirection: 'column',
                 minHeight: 0,
@@ -1461,6 +1462,7 @@ export default function ArticleDetailPage() {
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 1.65,
+                  flex: 1,
                   minHeight: 0,
                   overflow: 'hidden',
                 }}
@@ -1533,7 +1535,7 @@ export default function ArticleDetailPage() {
                   <div><b>{visualImages.length}</b><span>visual queue</span></div>
                 </div>
 
-                <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                <Box sx={{ flex: 1, minHeight: 140, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.6 }}>
                     <Typography className="editorial-field-label">正文</Typography>
                     <Box sx={{ flex: 1 }} />
@@ -1545,8 +1547,7 @@ export default function ArticleDetailPage() {
                     placeholder="输入正文，建议用短句、分段和情绪钩子增强小红书感"
                     fullWidth
                     multiline
-                    minRows={bodyRows}
-                    maxRows={bodyRows}
+                    minRows={Math.min(bodyRows, 8)}
                     value={art.body}
                     onChange={e => setArt({ ...art, body: e.target.value })}
                     inputProps={{ style: { overflowY: 'auto' } }}
@@ -1560,7 +1561,10 @@ export default function ArticleDetailPage() {
                       },
                     }}
                     sx={{
+                      flex: 1,
+                      minHeight: 0,
                       '& .MuiOutlinedInput-root': {
+                        height: '100%',
                         borderRadius: 0,
                         bgcolor: 'background.paper',
                         alignItems: 'flex-start',
@@ -1568,22 +1572,12 @@ export default function ArticleDetailPage() {
                         '&:hover fieldset': { borderColor: 'transparent' },
                         '&.Mui-focused fieldset': { borderColor: 'transparent' },
                       },
+                      '& textarea': {
+                        height: '100% !important',
+                        overflowY: 'auto !important',
+                      },
                     }}
                   />
-                </Box>
-
-                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
-                  <div className="editorial-proof-note" data-mark="EDITOR NOTE">
-                    {art.body.length < 300
-                      ? '正文偏短，建议补充真实体验、价格/时间/路线等具体细节。'
-                      : art.body.length > 1000
-                        ? '正文信息较满，发布前可让 Agent 精简长段，把重点放到首屏。'
-                        : '正文长度处于较优区间，下一步重点检查开头钩子、CTA 和封面吸引力。'}
-                  </div>
-                  <div className="editorial-diff-box">
-                    <del>{art.title || '当前标题'}</del><br />
-                    <ins>{art.title ? `${art.title.slice(0, 18)}｜收藏版` : '建议补一个更强钩子的标题'}</ins>
-                  </div>
                 </Box>
 
                 <Box
@@ -1609,29 +1603,34 @@ export default function ArticleDetailPage() {
                     {compactImageQueue}
                   </Box>
                 </Box>
+
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 1.5, alignItems: 'stretch' }}>
+                  <div className="editorial-proof-note" data-mark="EDITOR NOTE">
+                    {art.body.length < 300
+                      ? '正文偏短，建议补充真实体验、价格/时间/路线等具体细节。'
+                      : art.body.length > 1000
+                        ? '正文信息较满，发布前可让 Agent 精简长段，把重点放到首屏。'
+                        : '正文长度处于较优区间，下一步重点检查开头钩子、CTA 和封面吸引力。'}
+                  </div>
+                  <div className="editorial-diff-box">
+                    <del>{art.title || '当前标题'}</del><br />
+                    <ins>{art.title ? `${art.title.slice(0, 18)}｜收藏版` : '建议补一个更强钩子的标题'}</ins>
+                  </div>
+                  <div className={`editorial-banned-card ${bannedHits.length === 0 ? 'is-clear' : ''}`} data-mark={`BANNED WORDS · ${bannedHits.length}`}>
+                    {bannedHits.length > 0 ? (
+                      <>
+                        {bannedHits.slice(0, 4).map((h, i) => (
+                          <div key={i}>· 「{h.word}」— {h.category}{h.replacement ? ` → ${h.replacement}` : ''}</div>
+                        ))}
+                        {bannedHits.length > 4 && <div>…还有 {bannedHits.length - 4} 个</div>}
+                      </>
+                    ) : (
+                      <div>未发现高风险违禁词，发布前仍建议人工复核敏感表达。</div>
+                    )}
+                  </div>
+                </Box>
               </Box>
             </Box>
-
-            {/* banned words warning */}
-            {bannedHits.length > 0 && (
-              <Box sx={{ order: 5, p: 1.5, borderRadius: 0, bgcolor: 'rgba(139,37,32,0.06)', border: '1px solid', borderColor: 'error.main' }}>
-                <Typography className="editorial-mono" sx={{ fontSize: 10.5, fontWeight: 700, color: 'error.main', mb: 0.5 }}>
-                  BANNED WORDS · {bannedHits.length}
-                </Typography>
-                <Stack spacing={0.3}>
-                  {bannedHits.slice(0, 8).map((h, i) => (
-                    <Typography key={i} sx={{ fontSize: 11, color: 'error.main' }}>
-                      · 「{h.word}」— {h.category}{h.replacement ? `，建议替换为：${h.replacement}` : ''}
-                    </Typography>
-                  ))}
-                  {bannedHits.length > 8 && (
-                    <Typography sx={{ fontSize: 11, color: 'error.main' }}>
-                      …还有 {bannedHits.length - 8} 个
-                    </Typography>
-                  )}
-                </Stack>
-              </Box>
-            )}
           </Stack>
         </Box>
       </Box>
