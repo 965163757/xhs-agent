@@ -118,7 +118,18 @@ def _build_note_context(
     cover_image: str = "",
     images: Optional[List[str]] = None,
 ) -> str:
-    tags_str = " ".join(tags) if tags else "（无标签）"
+    display_tags: List[str] = []
+    seen_tags = set()
+    for raw in tags or []:
+        tag = str(raw or "").strip().lstrip("#＃").strip()
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen_tags:
+            continue
+        seen_tags.add(key)
+        display_tags.append(f"#{tag}")
+    tags_str = " ".join(display_tags) if display_tags else "（无标签）"
     images = images or []
     image_lines: List[str] = []
     if cover_image:
@@ -132,6 +143,7 @@ def _build_note_context(
         f"**标题：** {title}\n\n"
         f"**正文：**\n{content}\n\n"
         f"**标签：** {tags_str}\n\n"
+        f"**标签存储说明：** 系统内部 tags 可不带 #，上面已按小红书话题格式补齐 #；不要因为原始存储不带 # 判定为标签不规范。\n"
         f"**图片数量：** {image_count}张\n"
         f"**图片清单：**\n" + "\n".join(image_lines) + "\n"
         f"**品类：** {CATEGORY_CN.get(category, category)}\n"

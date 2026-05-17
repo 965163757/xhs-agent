@@ -715,6 +715,8 @@ export default function ArticleDetailPage() {
   }, [id, scheduleArticleRefresh])
 
   useEffect(() => {
+    setArt(null)
+    setSavedArt(null)
     load().catch(() => {})
   }, [load])
 
@@ -830,7 +832,28 @@ export default function ArticleDetailPage() {
     return () => window.removeEventListener('beforeunload', handler)
   }, [isDirty])
 
-  if (!art) return null
+  if (!art) {
+    return (
+      <Box
+        className="editorial-page"
+        sx={{
+          height: 'calc(100dvh - 56px)',
+          display: 'grid',
+          placeItems: 'center',
+          bgcolor: 'background.default',
+          color: 'text.secondary',
+        }}
+      >
+        <Stack spacing={1.2} alignItems="center">
+          <CircularProgress size={24} />
+          <Typography className="editorial-mono" sx={{ fontSize: 10, fontWeight: 800, color: 'primary.main' }}>
+            LOADING ARTICLE
+          </Typography>
+          <Typography sx={{ fontSize: 13 }}>正在加载笔记 #{id}…</Typography>
+        </Stack>
+      </Box>
+    )
+  }
 
   const visualImages = [art.cover_image, ...(art.images || [])].filter(Boolean) as string[]
   const bodyRows = adaptiveBodyRows(

@@ -355,6 +355,11 @@ export default function DiagnosePage() {
     }
   }
 
+  const visualNeedsImages = !!report && (
+    Number(report.radar_data?.visual ?? 0) < 60 ||
+    (report.issues || []).some(issue => /图片|配图|封面|首图|视觉|无图|0\s*图/.test(issue.description || ''))
+  )
+
   if (error) {
     return (
       <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -414,13 +419,10 @@ export default function DiagnosePage() {
               >
                 查看最新结果
               </Button>
-              <Button color="inherit" size="small" onClick={startDiagnosis} disabled={loading}>
-                重新诊断
-              </Button>
             </Stack>
           }
         >
-          这篇笔记已有 {history.length} 次诊断记录，当前默认展示历史结果；如需更新评分和建议，请重新诊断。
+          这篇笔记已有 {history.length} 次诊断记录，当前默认展示历史结果；如需更新评分和建议，可使用右上角“重新诊断”。
         </Alert>
       )}
 
@@ -465,6 +467,25 @@ export default function DiagnosePage() {
           <div><b>{report.issues?.length || 0}</b><span>issues found</span></div>
           <div><b>{report.elapsed_ms ? `${(report.elapsed_ms / 1000).toFixed(1)}s` : '-'}</b><span>agent elapsed</span></div>
         </div>
+      )}
+
+      {visualNeedsImages && (
+        <Alert
+          severity="warning"
+          sx={{ mb: 2, borderRadius: 0 }}
+          action={
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <Button color="inherit" size="small" onClick={() => nav(`/articles/${id}`)}>
+                去编辑页上传
+              </Button>
+              <Button color="inherit" size="small" onClick={() => nav(`/articles/${id}?chat=1`)}>
+                让 Agent 生成
+              </Button>
+            </Stack>
+          }
+        >
+          视觉/图片是当前主要短板。建议先补充首图或内容图，再重新诊断，评分会更贴近实际发布效果。
+        </Alert>
       )}
 
       {/* Progress Stepper */}
@@ -788,13 +809,6 @@ export default function DiagnosePage() {
             </CardContent>
           </Card>
 
-          {/* Actions */}
-          <Stack className="span-all" direction="row" spacing={2} justifyContent="center" sx={{ pb: 4 }}>
-            <Button variant="outlined" onClick={() => nav(`/articles/${id}`)}>返回笔记</Button>
-            <Button variant="contained" onClick={startDiagnosis}>
-              重新诊断
-            </Button>
-          </Stack>
         </Box>
       )}
     </Box>

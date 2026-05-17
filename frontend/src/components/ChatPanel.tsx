@@ -292,34 +292,39 @@ export default function ChatPanel({
             )}
 
             {quickActions && quickActions.length > 0 && (
-              <Stack
-                direction="row"
-                sx={{
-                  flexWrap: 'wrap',
-                  gap: 0.8,
-                  mt: heroActions && heroActions.length > 0 ? 2 : 3,
-                  justifyContent: 'center',
-                }}
-              >
-                {quickActions.map(q => (
-                  <Chip
-                    key={q.label}
-                    label={q.label}
-                    size="small"
-                    clickable
-                    disabled={streaming}
-                    onClick={() => fillQuickAction(q.prompt)}
-                    sx={{
-                      bgcolor: 'background.paper',
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      fontSize: 12,
-                      height: 28,
-                      '&:hover': { bgcolor: 'background.default', borderColor: 'text.secondary' },
-                    }}
-                  />
-                ))}
-              </Stack>
+              <Box sx={{ mt: heroActions && heroActions.length > 0 ? 2 : 3, textAlign: 'center' }}>
+                <Typography className="editorial-mono" sx={{ fontSize: 10, color: 'text.secondary', mb: 0.8 }}>
+                  快捷填入 · 不会自动发送
+                </Typography>
+                <Stack
+                  direction="row"
+                  sx={{
+                    flexWrap: 'wrap',
+                    gap: 0.8,
+                    justifyContent: 'center',
+                  }}
+                >
+                  {quickActions.map(q => (
+                    <Chip
+                      key={q.label}
+                      label={q.label}
+                      title="点击后填入输入框，不会立即发送"
+                      size="small"
+                      clickable
+                      disabled={streaming}
+                      onClick={() => fillQuickAction(q.prompt)}
+                      sx={{
+                        bgcolor: 'background.paper',
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        fontSize: 12,
+                        height: 28,
+                        '&:hover': { bgcolor: 'background.default', borderColor: 'text.secondary' },
+                      }}
+                    />
+                  ))}
+                </Stack>
+              </Box>
             )}
           </Box>
         )}
@@ -379,6 +384,7 @@ export default function ChatPanel({
                 <Chip
                   key={q.label}
                   label={q.label}
+                  title="点击后填入输入框，不会立即发送"
                   size="small"
                   clickable={!streaming}
                   disabled={streaming}

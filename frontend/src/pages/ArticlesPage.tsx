@@ -52,6 +52,20 @@ function articleOwnerName(a: Article) {
   return a.owner_user?.username || (a.user_id ? `用户 ${a.user_id}` : '未归属用户')
 }
 
+function articleExcerpt(body: string, max = 140) {
+  const text = (body || '').replace(/\s+/g, ' ').trim()
+  if (!text) return '暂无正文'
+  return text.length > max ? `${text.slice(0, max)}…` : text
+}
+
+function articleImageCount(a: Article) {
+  const fromStats = Number(a.content_stats?.image_count)
+  if (Number.isFinite(fromStats)) return fromStats
+  const queue = Array.isArray(a.visual_queue) ? a.visual_queue : []
+  if (queue.length > 0) return queue.filter(Boolean).length
+  return [a.cover_image, ...(a.images || [])].filter(Boolean).length
+}
+
 export default function ArticlesPage() {
   const [items, setItems] = useState<Article[]>([])
   const [loading, setLoading] = useState(true)
@@ -344,9 +358,19 @@ export default function ArticlesPage() {
                   lineHeight: 1.6,
                 }}
               >
-                {a.body}
+                {articleExcerpt(a.body)}
               </Typography>
               <Stack direction="row" spacing={0.5} sx={{ mt: 0.8, flexWrap: 'wrap', gap: 0.4 }}>
+                <Chip
+                  label={`图 ${articleImageCount(a)}`}
+                  size="small"
+                  sx={{ height: 20, fontSize: 10.5, bgcolor: 'background.paper', color: 'text.secondary', border: '1px solid', borderColor: 'divider' }}
+                />
+                <Chip
+                  label={`标签 ${(a.tags || []).length}`}
+                  size="small"
+                  sx={{ height: 20, fontSize: 10.5, bgcolor: 'background.paper', color: 'text.secondary', border: '1px solid', borderColor: 'divider' }}
+                />
                 {(a.tags || []).slice(0, 5).map(t => (
                   <Chip
                     key={t}

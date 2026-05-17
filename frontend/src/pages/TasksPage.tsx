@@ -165,9 +165,19 @@ export default function TasksPage() {
         <Stack spacing={1.5}>
           {items.map(t => <TaskCard key={t.id} task={t} onRefresh={load} />)}
           {!items.length && (
-            <Paper sx={{ p: 5, textAlign: 'center', color: 'text.secondary' }}>
-              <Typography className="editorial-mono" sx={{ color: 'primary.main', mb: 1 }}>EMPTY TRACE</Typography>
-              暂无任务
+            <Paper sx={{ p: { xs: 3, md: 5 }, textAlign: 'center', color: 'text.secondary', border: '1px dashed', borderColor: 'divider' }}>
+              <Typography className="editorial-mono" sx={{ color: 'primary.main', mb: 1, fontSize: 10, fontWeight: 800 }}>EMPTY TRACE</Typography>
+              <Typography sx={{ fontFamily: 'var(--serif)', fontStyle: 'italic', fontSize: 24, fontWeight: 800, color: 'text.primary', mb: 0.8 }}>
+                暂无后台任务
+              </Typography>
+              <Typography sx={{ fontSize: 13, maxWidth: 520, mx: 'auto', lineHeight: 1.7 }}>
+                生成图片、发布前诊断、批量优化和长耗时 Agent 操作会出现在这里。刷新或关闭页面后，也可以回来查看进度、耗时和失败原因。
+              </Typography>
+              <Stack direction="row" spacing={0.6} justifyContent="center" flexWrap="wrap" sx={{ gap: 0.6, mt: 2 }}>
+                {['图片生成', '诊断', '批量优化', '工具 Trace'].map(label => (
+                  <Chip key={label} size="small" label={label} sx={{ height: 22, fontSize: 11, bgcolor: 'background.paper' }} />
+                ))}
+              </Stack>
             </Paper>
           )}
         </Stack>

@@ -716,7 +716,11 @@ export default function SettingsPage() {
         <span className="num">09</span>
         <div>
           <div className="title">设置</div>
-          <div className="desc">工作室配置中心：模型队列、图片公网能力、账号安全、MCP 接入和管理员控制。</div>
+          <div className="desc">
+            {isAdmin
+              ? '工作室配置中心：模型队列、图片公网能力、账号安全、MCP 接入和管理员控制。'
+              : '个人配置中心：账号安全、个人模型 Key 和图片访问检测。'}
+          </div>
         </div>
         <div className="meta">{isAdmin ? 'admin config' : 'personal config'}</div>
       </div>
@@ -807,12 +811,16 @@ export default function SettingsPage() {
             <Button variant="outlined" onClick={test} disabled={busy}>
               测试连接
             </Button>
-            <Button variant="outlined" color="warning" onClick={() => clearMyKey('chat')} disabled={busy || !useOwnKey}>
-              清空个人文本 Key
-            </Button>
-            <Button variant="outlined" color="warning" onClick={() => clearMyKey('image')} disabled={busy || !useOwnKey}>
-              清空个人生图 Key
-            </Button>
+            {useOwnKey && (
+              <>
+                <Button variant="outlined" color="warning" onClick={() => clearMyKey('chat')} disabled={busy}>
+                  清空个人文本 Key
+                </Button>
+                <Button variant="outlined" color="warning" onClick={() => clearMyKey('image')} disabled={busy}>
+                  清空个人生图 Key
+                </Button>
+              </>
+            )}
           </Stack>
         </Section>
       )}
@@ -890,13 +898,78 @@ export default function SettingsPage() {
                   <span>凭证模式</span>
                   <b>{useOwnKey ? 'PERSONAL' : 'GLOBAL'}</b>
                 </div>
-                <div className="settings-status-row">
-                  <span>MCP 接入</span>
-                  <b>{mcpTools.length ? `${mcpTools.length} TOOLS` : 'READY'}</b>
-                </div>
+                {isAdmin ? (
+                  <div className="settings-status-row">
+                    <span>MCP 接入</span>
+                    <b>{mcpTools.length ? `${mcpTools.length} TOOLS` : 'READY'}</b>
+                  </div>
+                ) : (
+                  <div className="settings-status-row">
+                    <span>图片访问</span>
+                    <b>{s.public_base_url ? 'PUBLIC' : 'LOCAL'}</b>
+                  </div>
+                )}
               </Stack>
             </Box>
           </Box>
+      )}
+
+      {s && !isAdmin && (
+        <Section num="B" title="静态图片访问测试" desc="部署或本地开发时检查 /static/images/... 是否可访问。" meta={s.public_base_url ? 'public' : 'local'}>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 1.5,
+              borderRadius: 0,
+              bgcolor: staticTest
+                ? (staticTest.ok
+                  ? (staticTest.provider_readable ? 'rgba(22,163,74,0.04)' : 'rgba(37,99,235,0.04)')
+                  : 'rgba(220,38,38,0.04)')
+                : 'rgba(0,0,0,0.015)',
+            }}
+          >
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+              <Box flex={1}>
+                <Typography sx={{ fontSize: 13, fontWeight: 700 }}>静态图片公网可访问测试</Typography>
+                <Typography sx={{ fontSize: 11.5, color: 'text.secondary', mt: 0.3 }}>
+                  自动生成一张测试图并检测图片 URL。若本地不可公网访问，系统会在需要时上传原图给模型。
+                </Typography>
+              </Box>
+              <Button variant="outlined" onClick={testStaticImages} disabled={busy} sx={{ minWidth: 152 }}>
+                测试静态图片
+              </Button>
+            </Stack>
+            {staticTest && (
+              <Box sx={{ mt: 1.2 }}>
+                <Stack direction="row" spacing={0.6} flexWrap="wrap" sx={{ gap: 0.6, mb: 0.8 }}>
+                  <Chip
+                    size="small"
+                    label={staticTest.ok ? (staticTest.provider_readable ? '公网可访问' : '本地可访问') : '不可访问'}
+                    color={staticTest.ok ? (staticTest.provider_readable ? 'success' : 'info') : 'error'}
+                    sx={{ height: 22, fontSize: 11 }}
+                  />
+                  <Chip
+                    size="small"
+                    label={staticTest.mode === 'server' ? '服务器模式' : staticTest.mode === 'invalid' ? '地址无效' : '本地模式'}
+                    sx={{ height: 22, fontSize: 11 }}
+                  />
+                  {typeof staticTest.status_code === 'number' && (
+                    <Chip size="small" label={`HTTP ${staticTest.status_code}`} sx={{ height: 22, fontSize: 11 }} />
+                  )}
+                  <Chip size="small" label={`${staticTest.elapsed_sec}s`} sx={{ height: 22, fontSize: 11 }} />
+                </Stack>
+                <Typography sx={{ fontSize: 11.5, color: 'text.secondary', wordBreak: 'break-all' }}>
+                  URL：<a href={staticTest.public_url} target="_blank" rel="noreferrer">{staticTest.public_url}</a>
+                </Typography>
+                {staticTest.message && (
+                  <Typography sx={{ fontSize: 11.5, color: staticTest.ok ? 'text.secondary' : 'error.main', mt: 0.5 }}>
+                    {staticTest.error || staticTest.message}
+                  </Typography>
+                )}
+              </Box>
+            )}
+          </Paper>
+        </Section>
       )}
 
       {/* Admin panel */}
@@ -1235,6 +1308,7 @@ export default function SettingsPage() {
         </>
       )}
 
+      {isAdmin && (
       <Section
         num="E"
         title="MCP 接入"
@@ -1285,6 +1359,7 @@ export default function SettingsPage() {
           ))}
         </Stack>
       </Section>
+      )}
 
       <Box sx={{ py: 3, textAlign: 'center' }}>
         <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
