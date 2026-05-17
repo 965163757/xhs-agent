@@ -119,7 +119,7 @@ function adaptiveBodyRows(
   const fitRows = Math.floor(availableForTextarea / lineHeight)
   const contentAwareRows = Math.min(Math.max(visualLines + 1, fitRows), fitRows + 3)
   const minRows = viewport.height < 740 ? 4 : 6
-  const maxRows = viewport.height > 1080 ? 34 : viewport.height > 900 ? 28 : 22
+  const maxRows = viewport.height > 1080 ? 14 : viewport.height > 900 ? 12 : 10
   return clamp(Math.max(fitRows, contentAwareRows), minRows, maxRows)
 }
 
@@ -845,17 +845,6 @@ export default function ArticleDetailPage() {
     (viewport.height - 118) / 660,
     (layout.right - 28) / 340,
   ), 0.58, 1)
-  const textFieldSx = {
-    '& .MuiOutlinedInput-root': {
-      borderRadius: 0,
-      bgcolor: 'background.paper',
-      alignItems: 'flex-start',
-      '& fieldset': { borderColor: 'transparent' },
-      '&:hover fieldset': { borderColor: 'transparent' },
-      '&.Mui-focused fieldset': { borderColor: 'transparent', borderWidth: 1 },
-    },
-    '& .MuiInputLabel-root.Mui-focused': { color: 'primary.main' },
-  }
   const toolbarButtonSx = {
     height: 30,
     borderRadius: 0,
@@ -873,15 +862,6 @@ export default function ArticleDetailPage() {
     borderColor: 'divider',
     boxShadow: 'none',
     overflow: 'visible',
-  }
-  const sectionHeaderSx = {
-    px: 1.25,
-    py: 0.6,
-    minHeight: 34,
-    borderBottom: '1px solid',
-    borderColor: 'divider',
-    bgcolor: 'var(--paper-soft)',
-    '& .MuiChip-root': { borderRadius: 0 },
   }
   const sectionBodySx = {
     px: 1.25,
@@ -965,6 +945,145 @@ export default function ArticleDetailPage() {
       setPublishing(false)
     }
   }
+
+  const compactImageQueue = (
+    <Box>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.75, minWidth: 0 }}>
+        <Typography className="editorial-field-label" sx={{ display: 'block', mb: '0 !important' }}>
+          图片队列 · 共 {visualImages.length} 张
+        </Typography>
+        <Box sx={{ flex: 1 }} />
+        {art.image_context && (
+          <Button
+            size="small"
+            variant="text"
+            onClick={() => setShowImageContext(v => !v)}
+            sx={{
+              minHeight: 18,
+              height: 18,
+              px: 0,
+              borderRadius: 0,
+              fontSize: 10,
+              lineHeight: 1,
+              color: 'text.secondary',
+              textTransform: 'uppercase',
+              letterSpacing: '.08em',
+              '&:hover': { bgcolor: 'transparent', color: 'primary.main' },
+            }}
+          >
+            {showImageContext ? '收起上下文' : '图片上下文'}
+          </Button>
+        )}
+      </Stack>
+      {visualImages.length > 0 ? (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: { xs: 'flex-start', md: 'flex-end' },
+            gap: 1,
+            minHeight: 74,
+            overflowX: 'auto',
+            pb: 0.15,
+          }}
+        >
+          {visualImages.map((u, pos) => {
+            const binding = imageBindingForPosition(pos)
+            return (
+              <ImageFrame
+                key={`${pos}-${u}`}
+                src={u}
+                aspect="3 / 4"
+                placeholder=""
+                label={pos === 0 ? 'COVER' : String(pos + 1).padStart(2, '0')}
+                compact
+                draggable
+                dragging={dragImagePos === pos}
+                onDragStart={e => {
+                  setDragImagePos(pos)
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', String(pos))
+                }}
+                onDragOver={e => {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                }}
+                onDrop={e => {
+                  e.preventDefault()
+                  handleImageDrop(pos)
+                }}
+                onOpen={() => setImageLightbox(u)}
+                onEdit={() => {
+                  setEditorSrc(u)
+                  setEditorBinding(binding)
+                  setEditorDefaultMode('inpaint')
+                }}
+                onSetCover={pos > 0 ? () => moveImagePosition(pos, 0).catch(e => toast.error(e?.message || '设置失败')) : undefined}
+                onMovePrev={pos > 0 ? () => moveImagePosition(pos, pos - 1).catch(e => toast.error(e?.message || '移动失败')) : undefined}
+                onMoveNext={pos < visualImages.length - 1 ? () => moveImagePosition(pos, pos + 1).catch(e => toast.error(e?.message || '移动失败')) : undefined}
+                onRemove={() => removeImagePosition(pos).catch(e => toast.error(e?.message || '删除失败'))}
+              />
+            )
+          })}
+          <Box className="article-image-add-slot">+</Box>
+        </Box>
+      ) : (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: { xs: 'flex-start', md: 'flex-end' },
+            gap: 1,
+            minHeight: 74,
+            color: 'text.secondary',
+            fontSize: 12,
+          }}
+        >
+          <Box className="article-image-add-slot">+</Box>
+        </Box>
+      )}
+      {art.image_context && showImageContext && (
+        <Box
+          sx={{
+            mt: 1,
+            p: 1,
+            bgcolor: 'var(--paper-soft)',
+            border: '1px solid',
+            borderColor: 'divider',
+            maxHeight: 120,
+            overflow: 'auto',
+          }}
+        >
+          <Stack direction="row" spacing={0.6} alignItems="center" flexWrap="wrap" sx={{ gap: 0.6, mb: 0.7 }}>
+            <Chip size="small" label={`总图 ${art.image_context.image_count}`} sx={{ height: 18, fontSize: 10, borderRadius: 0 }} />
+            <Chip size="small" label={`首图 ${art.image_context.has_cover ? '已设置' : '无'}`} sx={{ height: 18, fontSize: 10, borderRadius: 0 }} />
+            <Chip size="small" label={`后续图 ${art.image_context.content_image_count}`} sx={{ height: 18, fontSize: 10, borderRadius: 0 }} />
+          </Stack>
+          {art.image_context.all_images.length > 0 ? (
+            <Stack spacing={0.35}>
+              {art.image_context.all_images.slice(0, 6).map((img, i) => {
+                const meta = [
+                  img.width && img.height ? `${img.width}×${img.height}` : '',
+                  img.format || '',
+                  formatBytes(img.bytes),
+                  img.exists === false ? '文件未找到' : '',
+                ].filter(Boolean).join(' · ')
+                return (
+                  <Typography key={`${img.role}-${img.index ?? i}-${img.url}`} sx={{ fontSize: 10.5, color: img.exists === false ? 'error.main' : 'text.secondary' }} noWrap>
+                    {img.role === 'cover' ? '首图/封面' : `第 ${(img.index ?? 0) + 2} 张`}：{meta ? `${meta} · ` : ''}{img.full_url && img.full_url !== img.url ? `${img.url} → ${img.full_url}` : img.url}
+                  </Typography>
+                )
+              })}
+            </Stack>
+          ) : (
+            <Typography sx={{ fontSize: 10.5, color: 'text.secondary' }}>
+              当前笔记还没有图片；Agent 可继续生成首图或内容配图。
+            </Typography>
+          )}
+        </Box>
+      )}
+    </Box>
+  )
 
   const scorePanel = getScoreValue(art.score, 'overall') > 0 ? (
     <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 2, bgcolor: 'background.paper', width: 'min(340px, 100%)' }}>
@@ -1260,15 +1379,6 @@ export default function ArticleDetailPage() {
             </Button>
           </Stack>
 
-          <Box sx={{ mb: 1.25 }}>
-            <div className="editorial-audit-strip">
-              <div><b>{art.status === 'published' ? 'live' : 'draft'}</b><span>manuscript state</span></div>
-              <div><b>{getScoreValue(art.score, 'overall') || '—'}</b><span>pre publish score</span></div>
-              <div><b>{bannedHits.length}</b><span>banned word risk</span></div>
-              <div><b>{visualImages.length}</b><span>visual queue</span></div>
-            </div>
-          </Box>
-
           <Menu anchorEl={articleMenuAnchor} open={!!articleMenuAnchor} onClose={() => setArticleMenuAnchor(null)}>
             {articleOptions.length === 0 && (
               <MenuItem disabled>正在加载笔记…</MenuItem>
@@ -1307,69 +1417,12 @@ export default function ArticleDetailPage() {
               sx={{
                 order: 1,
                 ...sectionCardSx,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+                overflow: 'hidden',
               }}
             >
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ ...sectionHeaderSx, flexWrap: 'wrap', gap: 0.6 }}>
-                <Button
-                  size="small"
-                  variant={showVersions ? 'contained' : 'text'}
-                  onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}
-                  sx={{
-                    minHeight: 24,
-                    height: 24,
-                    px: 0.8,
-                    borderRadius: 0,
-                    fontSize: 11,
-                    fontWeight: 800,
-                    boxShadow: 'none',
-                    color: showVersions ? 'background.paper' : 'text.secondary',
-                    bgcolor: showVersions ? 'text.primary' : 'background.default',
-                    '&:hover': {
-                      bgcolor: showVersions ? 'text.primary' : 'background.default',
-                      boxShadow: 'none',
-                    },
-                  }}
-                >
-                  版本{versions.length > 0 ? ` ${versions.length}` : ''}
-                </Button>
-                <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'text.primary' }}>
-                  内容
-                </Typography>
-                <Box sx={{ flex: 1 }} />
-                <Chip
-                  size="small"
-                  label={`${art.title.length}/20`}
-                  sx={{
-                    height: 20,
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    bgcolor: art.title.length > 20 ? 'rgba(139,37,32,0.08)' : 'background.paper',
-                    color: art.title.length > 20 ? 'error.main' : 'text.secondary',
-                  }}
-                />
-                <Chip
-                  size="small"
-                  label={`${art.body.length} 字`}
-                  sx={{
-                    height: 20,
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    bgcolor: 'background.paper',
-                    color: 'text.secondary',
-                  }}
-                />
-                <Chip
-                  size="small"
-                  label={art.body.length < 300 ? '建议 300 字以上' : art.body.length > 1000 ? '建议精简' : '字数合适'}
-                  sx={{
-                    height: 20,
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    bgcolor: art.body.length < 300 || art.body.length > 1000 ? 'rgba(168,112,41,0.08)' : 'rgba(62,107,78,0.08)',
-                    color: art.body.length < 300 || art.body.length > 1000 ? 'warning.main' : 'success.main',
-                  }}
-                />
-              </Stack>
               {showVersions && (
                 <Stack
                   spacing={0.7}
@@ -1400,61 +1453,126 @@ export default function ArticleDetailPage() {
                   ))}
                 </Stack>
               )}
-              <Box sx={{ ...sectionBodySx, py: 0.7 }}>
-                <TextField
-                  placeholder="输入一个抓人的小红书标题"
-                  fullWidth
-                  size="small"
-                  value={art.title}
-                  onChange={e => setArt({ ...art, title: e.target.value })}
-                  InputProps={{ sx: { fontSize: 17, fontWeight: 700, bgcolor: 'background.paper', px: 0, py: 0 } }}
-                  sx={textFieldSx}
-                  error={art.title.length > 20}
-                />
-                <Divider sx={{ my: 0.8 }} />
-                <TextField
-                  placeholder="输入正文，建议用短句、分段和情绪钩子增强小红书感"
-                  fullWidth
-                  multiline
-                  minRows={bodyRows}
-                  maxRows={bodyRows}
-                  value={art.body}
-                  onChange={e => setArt({ ...art, body: e.target.value })}
-                  inputProps={{
-                    style: {
-                      overflowY: 'auto',
-                    },
-                  }}
-                  InputProps={{
-                    sx: {
-                      fontSize: 14.2,
-                      lineHeight: 1.72,
-                      px: 0,
-                      py: 0,
-                      '& textarea': {
-                        resize: 'none',
-                      },
-                    },
-                  }}
-                  sx={textFieldSx}
-                />
-                <Divider sx={{ my: 0.8 }} />
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.65 }}>
-                  <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'text.primary' }}>
-                    标签
-                  </Typography>
-                  <Chip
+
+              <Box
+                className="article-editor-canvas"
+                sx={{
+                  p: { xs: 1.5, md: 2, xl: 2.5 },
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1.65,
+                  minHeight: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                <Box>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.6 }}>
+                    <Typography className="editorial-field-label">标题</Typography>
+                    <Box sx={{ flex: 1 }} />
+                    <Button
+                      size="small"
+                      variant={showVersions ? 'contained' : 'text'}
+                      onClick={() => { setShowVersions(!showVersions); if (!showVersions) refreshVersions() }}
+                      sx={{
+                        minHeight: 20,
+                        height: 20,
+                        px: 0.8,
+                        borderRadius: 0,
+                        fontSize: 10,
+                        fontWeight: 800,
+                        boxShadow: 'none',
+                        color: showVersions ? 'background.paper' : 'text.secondary',
+                        bgcolor: showVersions ? 'text.primary' : 'transparent',
+                        '&:hover': { bgcolor: showVersions ? 'text.primary' : 'transparent', color: 'primary.main', boxShadow: 'none' },
+                      }}
+                    >
+                      版本{versions.length > 0 ? ` ${versions.length}` : ''}
+                    </Button>
+                    <Typography className="editorial-field-label" sx={{ color: art.title.length > 20 ? 'error.main' : 'text.secondary' }}>
+                      {art.title.length}/20
+                    </Typography>
+                  </Stack>
+                  <TextField
+                    placeholder="输入一个抓人的小红书标题"
+                    fullWidth
                     size="small"
-                    label={`${(art.tags || []).length} 个`}
-                    sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: 'var(--paper-soft)', color: 'text.primary' }}
+                    value={art.title}
+                    onChange={e => setArt({ ...art, title: e.target.value })}
+                    InputProps={{
+                      sx: {
+                        fontFamily: 'var(--serif)',
+                        fontSize: { xs: 20, md: 22 },
+                        lineHeight: 1.3,
+                        fontWeight: 800,
+                        letterSpacing: '-0.01em',
+                        bgcolor: 'background.paper',
+                        px: 0,
+                        py: 0,
+                      },
+                    }}
+                    sx={{
+                      borderBottom: '1px solid',
+                      borderColor: 'divider',
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: 0,
+                        bgcolor: 'background.paper',
+                        '& fieldset': { borderColor: 'transparent' },
+                        '&:hover fieldset': { borderColor: 'transparent' },
+                        '&.Mui-focused fieldset': { borderColor: 'transparent' },
+                      },
+                      '& input': { py: 0.75 },
+                    }}
+                    error={art.title.length > 20}
                   />
-                </Stack>
-                <TagInput
-                  tags={art.tags || []}
-                  onChange={tags => setArt({ ...art, tags })}
-                  showLabel={false}
-                />
-                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1fr 1fr' }, gap: 1, mt: 1.1 }}>
+                </Box>
+
+                <div className="editorial-audit-strip">
+                  <div><b>{art.status === 'published' ? 'live' : 'draft'}</b><span>current draft</span></div>
+                  <div><b>{getScoreValue(art.score, 'overall') || '—'}</b><span>pre score</span></div>
+                  <div><b>{bannedHits.length}</b><span>banned risk</span></div>
+                  <div><b>{visualImages.length}</b><span>visual queue</span></div>
+                </div>
+
+                <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.6 }}>
+                    <Typography className="editorial-field-label">正文</Typography>
+                    <Box sx={{ flex: 1 }} />
+                    <Typography className="editorial-field-label">
+                      {art.body.length} 字 · {art.body.length < 300 ? '建议 300 字以上' : art.body.length > 1000 ? '建议精简' : '字数合适'}
+                    </Typography>
+                  </Stack>
+                  <TextField
+                    placeholder="输入正文，建议用短句、分段和情绪钩子增强小红书感"
+                    fullWidth
+                    multiline
+                    minRows={bodyRows}
+                    maxRows={bodyRows}
+                    value={art.body}
+                    onChange={e => setArt({ ...art, body: e.target.value })}
+                    inputProps={{ style: { overflowY: 'auto' } }}
+                    InputProps={{
+                      sx: {
+                        fontSize: 14.2,
+                        lineHeight: 1.8,
+                        px: 0,
+                        py: 0,
+                        '& textarea': { resize: 'none' },
+                      },
+                    }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: 0,
+                        bgcolor: 'background.paper',
+                        alignItems: 'flex-start',
+                        '& fieldset': { borderColor: 'transparent' },
+                        '&:hover fieldset': { borderColor: 'transparent' },
+                        '&.Mui-focused fieldset': { borderColor: 'transparent' },
+                      },
+                    }}
+                  />
+                </Box>
+
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1.5 }}>
                   <div className="editorial-proof-note" data-mark="EDITOR NOTE">
                     {art.body.length < 300
                       ? '正文偏短，建议补充真实体验、价格/时间/路线等具体细节。'
@@ -1466,6 +1584,30 @@ export default function ArticleDetailPage() {
                     <del>{art.title || '当前标题'}</del><br />
                     <ins>{art.title ? `${art.title.slice(0, 18)}｜收藏版` : '建议补一个更强钩子的标题'}</ins>
                   </div>
+                </Box>
+
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) minmax(260px, 1fr)' },
+                    gap: 2,
+                    alignItems: 'start',
+                  }}
+                >
+                  <Box className="article-editor-tags">
+                    <Typography className="editorial-field-label" sx={{ display: 'block', mb: 0.75 }}>
+                      标签
+                    </Typography>
+                    <TagInput
+                      tags={art.tags || []}
+                      onChange={tags => setArt({ ...art, tags })}
+                      showLabel={false}
+                      variant="inline"
+                    />
+                  </Box>
+                  <Box className="article-editor-images">
+                    {compactImageQueue}
+                  </Box>
                 </Box>
               </Box>
             </Box>
@@ -1490,187 +1632,6 @@ export default function ArticleDetailPage() {
                 </Stack>
               </Box>
             )}
-
-            {/* images queue */}
-            <Box sx={{ order: 2, mt: 0.2, ...sectionCardSx }}>
-              <Box sx={sectionHeaderSx}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
-                  <Typography className="editorial-mono" sx={{ fontSize: 10, color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                    图片队列 · 共 {visualImages.length} 张
-                  </Typography>
-                  <Typography sx={{ fontSize: 11.5, color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    可拖拽调换顺序，也可在菜单中设为首图、前移、后移或删除。
-                  </Typography>
-                  <Box sx={{ flex: 1 }} />
-                  {art.image_context && (
-                    <Button
-                      size="small"
-                      variant="text"
-                      onClick={() => setShowImageContext(v => !v)}
-                      sx={{
-                        minHeight: 24,
-                        px: 0.9,
-                        borderRadius: 0,
-                        fontSize: 11.5,
-                        color: 'text.secondary',
-                        textTransform: 'none',
-                        whiteSpace: 'nowrap',
-                        '&:hover': { bgcolor: 'background.default' },
-                      }}
-                    >
-                      {showImageContext ? '收起上下文' : '图片上下文'}
-                    </Button>
-                  )}
-                </Stack>
-              </Box>
-
-              <Box sx={sectionBodySx}>
-                {visualImages.length > 0 ? (
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1,
-                      minHeight: 74,
-                      overflowX: 'auto',
-                      pb: 0.15,
-                    }}
-                  >
-                    {visualImages.map((u, pos) => {
-                      const binding = imageBindingForPosition(pos)
-                      return (
-                        <ImageFrame
-                          key={`${pos}-${u}`}
-                          src={u}
-                          aspect="3 / 4"
-                          placeholder=""
-                          label={pos === 0 ? 'COVER' : String(pos + 1).padStart(2, '0')}
-                          compact
-                          draggable
-                          dragging={dragImagePos === pos}
-                          onDragStart={e => {
-                            setDragImagePos(pos)
-                            e.dataTransfer.effectAllowed = 'move'
-                            e.dataTransfer.setData('text/plain', String(pos))
-                          }}
-                          onDragOver={e => {
-                            e.preventDefault()
-                            e.dataTransfer.dropEffect = 'move'
-                          }}
-                          onDrop={e => {
-                            e.preventDefault()
-                            handleImageDrop(pos)
-                          }}
-                          onOpen={() => setImageLightbox(u)}
-                          onEdit={() => {
-                            setEditorSrc(u)
-                            setEditorBinding(binding)
-                            setEditorDefaultMode('inpaint')
-                          }}
-                          onSetCover={pos > 0 ? () => moveImagePosition(pos, 0).catch(e => toast.error(e?.message || '设置失败')) : undefined}
-                          onMovePrev={pos > 0 ? () => moveImagePosition(pos, pos - 1).catch(e => toast.error(e?.message || '移动失败')) : undefined}
-                          onMoveNext={pos < visualImages.length - 1 ? () => moveImagePosition(pos, pos + 1).catch(e => toast.error(e?.message || '移动失败')) : undefined}
-                          onRemove={() => removeImagePosition(pos).catch(e => toast.error(e?.message || '删除失败'))}
-                        />
-                      )
-                    })}
-                    <Box
-                      sx={{
-                        width: 56,
-                        height: 72,
-                        flex: '0 0 56px',
-                        border: '1px dashed',
-                        borderColor: 'divider',
-                        display: 'grid',
-                        placeItems: 'center',
-                        color: 'text.secondary',
-                        font: '10px var(--mono)',
-                        bgcolor: 'background.paper',
-                      }}
-                    >
-                      +
-                    </Box>
-                  </Box>
-                ) : (
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1.2,
-                      minHeight: 74,
-                      color: 'text.secondary',
-                      fontSize: 12,
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        width: 56,
-                        height: 72,
-                        flex: '0 0 56px',
-                        border: '1px dashed',
-                        borderColor: 'divider',
-                        display: 'grid',
-                        placeItems: 'center',
-                        font: '10px var(--mono)',
-                        bgcolor: 'background.paper',
-                      }}
-                    >
-                      +
-                    </Box>
-                    <span>暂无图片。可以让 Agent 生成封面或内容配图。</span>
-                  </Box>
-                )}
-              </Box>
-
-              {art.image_context && showImageContext && (
-                <Box
-                  sx={{
-                    mx: 1.25,
-                    mb: 1.05,
-                    p: 1.1,
-                    borderRadius: 1,
-                    bgcolor: 'var(--paper-soft)',
-                    border: '1px solid',
-                    borderColor: 'divider',
-                  }}
-                >
-                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ gap: 0.8, mb: 0.8 }}>
-                    <Typography sx={{ fontSize: 12, fontWeight: 700, color: 'text.secondary' }}>
-                      图片上下文
-                    </Typography>
-                    <Chip size="small" label={`总图 ${art.image_context.image_count}`} sx={{ height: 20, fontSize: 11 }} />
-                    <Chip size="small" label={`首图 ${art.image_context.has_cover ? '已设置' : '无'}`} sx={{ height: 20, fontSize: 11 }} />
-                    <Chip size="small" label={`后续图 ${art.image_context.content_image_count}`} sx={{ height: 20, fontSize: 11 }} />
-                  </Stack>
-                  {art.image_context.all_images.length > 0 ? (
-                    <Stack spacing={0.45}>
-                      {art.image_context.all_images.slice(0, 8).map((img, i) => {
-                        const meta = [
-                          img.width && img.height ? `${img.width}×${img.height}` : '',
-                          img.format || '',
-                          formatBytes(img.bytes),
-                          img.exists === false ? '文件未找到' : '',
-                        ].filter(Boolean).join(' · ')
-                        return (
-                          <Typography key={`${img.role}-${img.index ?? i}-${img.url}`} sx={{ fontSize: 11.5, color: img.exists === false ? 'error.main' : 'text.secondary' }} noWrap>
-                            {img.role === 'cover' ? '首图/封面' : `第 ${(img.index ?? 0) + 2} 张`}：{meta ? `${meta} · ` : ''}{img.full_url && img.full_url !== img.url ? `${img.url} → ${img.full_url}` : img.url}
-                          </Typography>
-                        )
-                      })}
-                      {art.image_context.all_images.length > 8 && (
-                        <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
-                          还有 {art.image_context.all_images.length - 8} 张未展开
-                        </Typography>
-                      )}
-                    </Stack>
-                  ) : (
-                    <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>
-                      当前笔记还没有图片；Agent 打分会在视觉维度扣分，并可继续生成首图/内容配图。
-                    </Typography>
-                  )}
-                </Box>
-              )}
-            </Box>
           </Stack>
         </Box>
       </Box>

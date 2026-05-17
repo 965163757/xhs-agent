@@ -14,11 +14,13 @@ export default function TagInput({
   onChange,
   category,
   showLabel = true,
+  variant = 'boxed',
 }: {
   tags: string[]
   onChange: (tags: string[]) => void
   category?: string
   showLabel?: boolean
+  variant?: 'boxed' | 'inline'
 }) {
   const [input, setInput] = useState('')
   const [suggestions, setSuggestions] = useState<HotTag[]>([])
@@ -107,16 +109,16 @@ export default function TagInput({
           columnGap: 0.65,
           rowGap: 0.65,
           alignItems: 'flex-start',
-          border: '1px solid',
-          borderColor: 'divider',
+          border: variant === 'inline' ? 0 : '1px solid',
+          borderColor: variant === 'inline' ? 'transparent' : 'divider',
           borderRadius: 0,
-          px: 1.2,
-          py: 1,
-          minHeight: 48,
-          bgcolor: 'background.paper',
+          px: variant === 'inline' ? 0 : 1.2,
+          py: variant === 'inline' ? 0 : 1,
+          minHeight: variant === 'inline' ? 0 : 48,
+          bgcolor: variant === 'inline' ? 'transparent' : 'background.paper',
           '&:focus-within': {
-            borderColor: 'primary.main',
-            bgcolor: 'var(--accent-soft)',
+            borderColor: variant === 'inline' ? 'transparent' : 'primary.main',
+            bgcolor: variant === 'inline' ? 'transparent' : 'var(--accent-soft)',
           },
           transition: 'border-color .15s, background-color .15s',
         }}
@@ -162,7 +164,7 @@ export default function TagInput({
           onFocus={() => { if (suggestions.length || !input) { suggestHotTags(input.replace(/^[#＃]+/, ''), category || '', 12).then(items => { setSuggestions(items.filter(t => !normalizedTags.includes(normalizeTag(t.tag)))); setShowSuggestions(true) }).catch(() => {}) } }}
           onBlur={() => { setTimeout(() => { if (input.trim() && !showSuggestions) addTag(input) }, 150) }}
           InputProps={{ disableUnderline: true, sx: { fontSize: 13, py: 0.2, lineHeight: 1.6 } }}
-          sx={{ flex: '1 1 140px', minWidth: 120 }}
+          sx={{ flex: variant === 'inline' ? '0 1 150px' : '1 1 140px', minWidth: 120 }}
         />
       </Box>
 

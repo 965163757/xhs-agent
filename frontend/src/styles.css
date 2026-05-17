@@ -396,6 +396,39 @@ body {
   text-transform: uppercase;
 }
 
+.editorial-field-label {
+  color: var(--ink-mute);
+  font: 700 10px var(--mono);
+  letter-spacing: .18em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.article-editor-canvas {
+  background: var(--paper);
+}
+
+.article-editor-tags,
+.article-editor-images {
+  min-width: 0;
+}
+
+.article-editor-images {
+  justify-self: stretch;
+}
+
+.article-image-add-slot {
+  width: 56px;
+  height: 72px;
+  flex: 0 0 56px;
+  border: 1px dashed var(--rule);
+  display: grid;
+  place-items: center;
+  background: var(--paper);
+  color: var(--ink-mute);
+  font: 10px var(--mono);
+}
+
 .cover-thumb {
   position: relative;
   overflow: hidden;
