@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 from pathlib import Path
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Tuple
@@ -15,6 +16,7 @@ from sqlalchemy import or_, select
 from ..agents.background import cancel_task, get_stream, is_running, spawn_agent_task
 from ..agents.tools import (
     TOOLS,
+    _article_image_context,
     _article_payload,
     _image_retry_options,
     _score_for_article,
@@ -83,6 +85,12 @@ IMAGE_FORMAT_TO_EXT = {
     "WEBP": ".webp",
     "GIF": ".gif",
 }
+
+ARTICLE_CONTEXT_PREFIX = "【当前笔记上下文"
+ARTICLE_IMAGE_INTENT_RE = re.compile(
+    r"(图片|图像|照片|图|封面|配图|首图|视觉|画面|构图|海报|设计|图文|上传|改图|编辑图|裁剪|重绘|消除|去掉|删除|移除|增加|添加|替换|这张|第一张|第二张)",
+    re.IGNORECASE,
+)
 
 
 def _truncate_chat_text(value: Any, limit: int = MAX_CHAT_MESSAGE_CHARS) -> str:
@@ -347,6 +355,88 @@ def _with_owner_meta(payload: Dict[str, Any], owner_id: int | None, owner_map: D
     return payload
 
 
+def _has_article_context_message(messages: List[Dict[str, Any]]) -> bool:
+    return any(str(m.get("content") or "").startswith(ARTICLE_CONTEXT_PREFIX) for m in messages)
+
+
+def _latest_user_text(messages: List[Dict[str, Any]]) -> str:
+    for msg in reversed(messages):
+        if msg.get("role") == "user" and not str(msg.get("content") or "").startswith(ARTICLE_CONTEXT_PREFIX):
+            return str(msg.get("content") or "")
+    return ""
+
+
+def _build_agent_article_context_message(article: Article, latest_text: str = "") -> Dict[str, Any]:
+    """Server-side safety net for API/MCP-like chat clients.
+
+    The web client already sends current-note context before calling
+    `/chat/stream`, but external clients can also pass `article_id` directly.
+    Without this backend guard the Agent sees the user's wording but not the
+    note/images it is supposed to operate on.
+    """
+    payload = _article_payload(article)
+    ctx = payload.get("image_context") or _article_image_context(article)
+    visual_items = list(ctx.get("visual_images") or [])
+    attach_visuals = bool(ARTICLE_IMAGE_INTENT_RE.search(latest_text or ""))
+    attached_images: List[str] = []
+    if attach_visuals:
+        for item in visual_items[:5]:
+            url = item.get("model_url") or item.get("full_url") or item.get("url")
+            if url:
+                attached_images.append(str(url))
+    body = str(payload.get("body") or "")
+    preview = body if len(body) <= 1200 else body[:1200] + "…"
+    image_line_items: List[str] = []
+    for item in visual_items[:12]:
+        position = int(item.get("position") or 0)
+        role = "首图/封面" if position == 0 else f"第 {position + 1} 张"
+        url = str(item.get("url") or "")
+        full_url = item.get("model_url") or item.get("full_url")
+        suffix = f"（完整URL：{full_url}）" if full_url and full_url != url else ""
+        image_line_items.append(f"{role}：{url}{suffix}")
+    image_lines = "\n".join(image_line_items) if image_line_items else "无"
+    content = (
+        f"{ARTICLE_CONTEXT_PREFIX} · id={article.id}】\n"
+        f"标题：{payload.get('title') or ''}\n"
+        f"状态：{payload.get('status') or ''}\n"
+        f"标签：{' '.join(payload.get('tags') or [])}\n\n"
+        f"图片：共 {int(ctx.get('image_count') or 0)} 张（小红书展示队列：第 1 张就是首图/封面）\n{image_lines}\n"
+        + (
+            f"本轮涉及视觉/图片，已随上下文附带前 {len(attached_images)} 张图片供视觉理解。\n\n"
+            if attached_images
+            else "本轮先提供图片 URL；如需视觉像素级分析，请按 URL 或 read_article/image_context 判断。\n\n"
+        )
+        + f"正文：\n{preview}\n\n"
+        "---\n"
+        f"当前默认操作笔记 {article.id}；如用户指定其它笔记 ID 或多个笔记，请按用户指定 ID 调用工具。"
+        "写入/改图/编排必须通过工具完成。read_article 会返回 cover_image、images、完整 URL 和 image_context。"
+    )
+    return {"role": "user", "content": content, "images": attached_images}
+
+
+def _mcp_http_response(result: Any) -> Dict[str, Any]:
+    """HTTP bridge response that preserves legacy envelope and real tool status."""
+    if not isinstance(result, dict):
+        return {"ok": True, "result": result}
+    response: Dict[str, Any] = {"ok": result.get("ok") is not False, "result": result}
+    for key in (
+        "error",
+        "raw_error",
+        "timeout",
+        "elapsed_ms",
+        "elapsed_sec",
+        "article_id",
+        "article",
+        "image",
+        "images",
+        "image_attempts",
+        "retry_options",
+    ):
+        if key in result:
+            response[key] = result[key]
+    return response
+
+
 async def _snapshot_article_version(
     session,
     article: Article,
@@ -381,11 +471,14 @@ async def _snapshot_article_version(
 
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest, request: Request, user: User = Depends(get_current_user)):
+    context_article_id = req.article_id
     if req.conversation_id:
         async with SessionLocal() as s:
             conv = await s.get(Conversation, req.conversation_id)
             if not conv or not _can_access_owned_record(user, conv.user_id):
                 raise HTTPException(404, "conversation not found")
+            if not context_article_id and conv.article_id:
+                context_article_id = conv.article_id
 
     messages: List[Dict[str, Any]] = []
     for m in req.messages:
@@ -393,6 +486,17 @@ async def chat_stream(req: ChatRequest, request: Request, user: User = Depends(g
             {"role": m.role, "content": m.content, "images": m.images}
         )
     messages = _sanitize_runtime_messages(messages)
+
+    if context_article_id and not _has_article_context_message(messages):
+        try:
+            context_article_id_int = int(context_article_id)
+        except Exception:
+            raise HTTPException(400, "article_id must be an integer")
+        async with SessionLocal() as s:
+            article = await s.get(Article, context_article_id_int)
+            if not article or not _can_access_owned_record(user, article.user_id):
+                raise HTTPException(404, "article not found")
+            messages.insert(0, _build_agent_article_context_message(article, _latest_user_text(messages)))
 
     try:
         task_id = await spawn_agent_task(
@@ -1888,7 +1992,7 @@ async def mcp_call(payload: MCPCallRequest, user: User = Depends(get_current_use
     if payload.name not in TOOLS:
         raise HTTPException(404, f"unknown tool: {payload.name}")
     result = await _call_user_tool(payload.name, payload.arguments or {}, user)
-    return {"ok": True, "result": result}
+    return _mcp_http_response(result)
 
 
 @router.get("/tools")
